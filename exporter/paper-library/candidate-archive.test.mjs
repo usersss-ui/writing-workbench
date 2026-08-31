@@ -160,6 +160,10 @@ test("returns a non-enumerable process-private proof bound to the committed dire
   assert.equal(descriptor?.value.paper_id, "Wang23-DIO")
   assert.equal(descriptor?.value.openalex_id, "W4387886124")
   assert.deepEqual(descriptor?.value.entries, [".metadata.commit", "metadata.yaml"])
+  assert.match(descriptor?.value.metadata.mtime, /^ns:\d+$/u)
+  assert.match(descriptor?.value.metadata.ctime, /^ns:\d+$/u)
+  assert.match(descriptor?.value.commit.mtime, /^ns:\d+$/u)
+  assert.match(descriptor?.value.commit.ctime, /^ns:\d+$/u)
   assert.equal(await verifyArchiveRecoveryProof({
     proof: descriptor.value,
     request: {
@@ -208,6 +212,48 @@ test("recovery proof catches a same-inode same-length metadata rewrite between g
   }), { code: "ARCHIVE_CONFLICT" })
   const after = await lstat(proof.metadata.path)
   assert.equal(changedDuringVerification, true)
+  assert.equal(after.dev, before.dev)
+  assert.equal(after.ino, before.ino)
+  assert.equal(after.size, before.size)
+})
+
+test("recovery proof catches a same-inode same-length metadata rewrite before the final commit read", async (t) => {
+  const sourceRoot = await realpath(await mkdtemp(join(tmpdir(), "paper-archive-proof-final-read-race-")))
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }))
+  const outcome = await archiveCandidateMetadata({
+    sourceRoot,
+    sourceId: "main_papers",
+    existingPapers: [],
+    request: request(),
+    now: () => new Date("2026-08-30T04:05:06.000Z"),
+  })
+  const proof = Object.getOwnPropertyDescriptor(outcome, "recoveryProof").value
+  const original = await readFile(proof.metadata.path)
+  const changed = Buffer.from(original)
+  changed[0] = changed[0] === 0x23 ? 0x24 : 0x23
+  const before = await lstat(proof.metadata.path)
+  let commitOpens = 0
+
+  await assert.rejects(verifyArchiveRecoveryProof({
+    proof,
+    request: {
+      confirmation: "retry_archive_rebuild",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+    fileSystem: {
+      open: async (path, flags, mode) => {
+        if (path === proof.commit.path) {
+          commitOpens += 1
+          if (commitOpens === 2) await writeFile(proof.metadata.path, changed)
+        }
+        return openFile(path, flags, mode)
+      },
+    },
+  }), { code: "ARCHIVE_CONFLICT" })
+  const after = await lstat(proof.metadata.path)
+  assert.equal(commitOpens, 2)
   assert.equal(after.dev, before.dev)
   assert.equal(after.ino, before.ino)
   assert.equal(after.size, before.size)

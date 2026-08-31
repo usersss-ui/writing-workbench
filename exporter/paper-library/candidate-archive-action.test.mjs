@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { lstat, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile, mkdir } from "node:fs/promises"
+import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -611,4 +611,59 @@ test("recovery rechecks proof after rebuild mutations before clearing coordinato
     assert.equal(clearCalls, 0, mutation.name)
     assert.equal(recoveryStore.size(), 1, mutation.name)
   }
+})
+
+test("recovery rejects a metadata rewrite inside the final proof pass before clearing either recovery state", async (t) => {
+  const sourceRoot = await realpath(await mkdtemp(join(tmpdir(), "candidate-proof-final-pass-race-")))
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }))
+  const recoveryStore = createArchiveRecoveryStore()
+  await archiveCandidateAndRebuild({
+    repoRoot: "/fixture/repo",
+    request: archiveRequest(),
+    loadContext: async () => scanContext(sourceRoot),
+    rebuild: async () => { throw new Error("induced initial rebuild failure") },
+    markRecovery: async () => {},
+    recoveryStore,
+  })
+
+  const metadataPath = join(sourceRoot, "Wang23-DIO/metadata.yaml")
+  const commitPath = join(sourceRoot, "Wang23-DIO/.metadata.commit")
+  const original = await readFile(metadataPath)
+  const changed = Buffer.from(original)
+  changed[0] = changed[0] === 0x23 ? 0x24 : 0x23
+  const before = await lstat(metadataPath)
+  let commitOpens = 0
+  let clearCalls = 0
+
+  await assert.rejects(rebuildArchivedCandidate({
+    repoRoot: "/fixture/repo",
+    request: recoveryRequest(),
+    recovery: {
+      kind: "candidate_archive",
+      reason_code: "ARCHIVE_REBUILD_FAILED",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+    loadContext: async () => scanContext(sourceRoot),
+    rebuild: async () => ({ paperCount: 1 }),
+    clearRecovery: async () => { clearCalls += 1 },
+    recoveryStore,
+    recoveryFileSystem: {
+      open: async (path, flags, mode) => {
+        if (path === commitPath) {
+          commitOpens += 1
+          if (commitOpens === 4) await writeFile(metadataPath, changed)
+        }
+        return openFile(path, flags, mode)
+      },
+    },
+  }), { code: "ARCHIVE_CONFLICT" })
+  const after = await lstat(metadataPath)
+  assert.equal(commitOpens, 4)
+  assert.equal(clearCalls, 0)
+  assert.equal(recoveryStore.size(), 1)
+  assert.equal(after.dev, before.dev)
+  assert.equal(after.ino, before.ino)
+  assert.equal(after.size, before.size)
 })

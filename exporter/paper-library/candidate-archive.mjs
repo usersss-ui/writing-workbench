@@ -215,6 +215,27 @@ function identityFingerprint(info) {
   return `${info.dev}:${info.ino}`
 }
 
+function timestampFingerprint(info, field) {
+  const nanoseconds = info[`${field}Ns`]
+  if (typeof nanoseconds === "bigint") return `ns:${nanoseconds}`
+  if (typeof nanoseconds === "number" && Number.isFinite(nanoseconds)) return `ns:${nanoseconds}`
+  const milliseconds = info[`${field}Ms`]
+  if (typeof milliseconds === "bigint") return `ms:${milliseconds}`
+  if (typeof milliseconds === "number" && Number.isFinite(milliseconds)) return `ms:${milliseconds}`
+  throw new Error("归档文件时间戳不可用")
+}
+
+function statMutationFingerprint(info) {
+  return [
+    identityFingerprint(info),
+    info.size,
+    info.nlink,
+    info.mode,
+    timestampFingerprint(info, "mtime"),
+    timestampFingerprint(info, "ctime"),
+  ].join(":")
+}
+
 function contentFingerprint(bytes) {
   return createHash("sha256").update(bytes).digest("hex")
 }
@@ -298,37 +319,64 @@ async function assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io
   await assertRootAnchor(rootAnchor, io)
 }
 
-async function verifyExpectedFile({ path, expectedIdentity, expectedSize, expectedHash, io }) {
+function expectedFileState(info, {
+  expectedIdentity,
+  expectedSize,
+  expectedMtime = null,
+  expectedCtime = null,
+}) {
+  const state = Object.freeze({
+    identity: identityFingerprint(info),
+    size: Number(info.size),
+    mtime: timestampFingerprint(info, "mtime"),
+    ctime: timestampFingerprint(info, "ctime"),
+  })
+  if (
+    info.isSymbolicLink()
+    || !info.isFile()
+    || state.identity !== expectedIdentity
+    || state.size !== expectedSize
+    || Number(info.nlink) !== 1
+    || (expectedMtime !== null && state.mtime !== expectedMtime)
+    || (expectedCtime !== null && state.ctime !== expectedCtime)
+  ) throw new Error("归档文件身份、大小或时间校验失败")
+  return state
+}
+
+function sameFileState(left, right) {
+  return left.identity === right.identity
+    && left.size === right.size
+    && left.mtime === right.mtime
+    && left.ctime === right.ctime
+}
+
+async function verifyExpectedFile({
+  path,
+  expectedIdentity,
+  expectedSize,
+  expectedHash,
+  expectedMtime = null,
+  expectedCtime = null,
+  io,
+}) {
   let handle = null
   try {
     const lexical = await io.lstat(path, { bigint: true })
-    if (
-      lexical.isSymbolicLink()
-      || !lexical.isFile()
-      || identityFingerprint(lexical) !== expectedIdentity
-      || Number(lexical.size) !== expectedSize
-      || Number(lexical.nlink) !== 1
-    ) throw new Error("归档文件身份或大小校验失败")
+    const expected = { expectedIdentity, expectedSize, expectedMtime, expectedCtime }
+    const lexicalState = expectedFileState(lexical, expected)
     handle = await io.open(path, constants.O_RDONLY | io.noFollowFlag)
     const before = await handle.stat({ bigint: true })
-    if (
-      before.isSymbolicLink()
-      || !before.isFile()
-      || identityFingerprint(before) !== expectedIdentity
-      || Number(before.size) !== expectedSize
-      || Number(before.nlink) !== 1
-    ) throw new Error("归档文件身份或大小校验失败")
+    const beforeState = expectedFileState(before, expected)
+    if (!sameFileState(lexicalState, beforeState)) throw new Error("归档文件身份或时间校验失败")
     const bytes = await handle.readFile()
     const after = await handle.stat({ bigint: true })
+    const afterState = expectedFileState(after, expected)
     if (
-      !after.isFile()
-      || identityFingerprint(after) !== expectedIdentity
-      || Number(after.size) !== expectedSize
-      || Number(after.nlink) !== 1
+      !sameFileState(beforeState, afterState)
       || bytes.length !== expectedSize
       || contentFingerprint(bytes) !== expectedHash
     ) throw new Error("归档文件内容校验失败")
-    return Object.freeze({ identity: expectedIdentity, size: expectedSize, hash: expectedHash })
+    return Object.freeze({ ...afterState, hash: expectedHash })
   } finally {
     if (handle) {
       try { await handle.close() } catch { /* verification failure remains authoritative */ }
@@ -464,6 +512,88 @@ async function writeArchiveCommitMarker({
 
 const ARCHIVE_PACKAGE_ENTRIES = Object.freeze([ARCHIVE_COMMIT_FILE, "metadata.yaml"].sort())
 
+async function inspectArchiveGroupBoundary({
+  sourceRoot,
+  sourceRootIdentity,
+  packagePath,
+  packageIdentity,
+  paperId,
+  io,
+}) {
+  const rootInfo = await io.lstat(sourceRoot, { bigint: true })
+  const canonicalRoot = await io.realpath(sourceRoot)
+  if (
+    rootInfo.isSymbolicLink()
+    || !rootInfo.isDirectory()
+    || identityFingerprint(rootInfo) !== sourceRootIdentity
+    || canonicalRoot !== sourceRoot
+    || join(sourceRoot, paperId) !== packagePath
+  ) throw new Error("changed root")
+  const packageInfo = await io.lstat(packagePath, { bigint: true })
+  const canonicalPackage = await io.realpath(packagePath)
+  if (
+    packageInfo.isSymbolicLink()
+    || !packageInfo.isDirectory()
+    || identityFingerprint(packageInfo) !== packageIdentity
+    || canonicalPackage !== packagePath
+    || !isInside(sourceRoot, canonicalPackage)
+  ) throw new Error("changed package")
+  const entries = (await io.readdir(packagePath)).sort((left, right) => left.localeCompare(right))
+  if (
+    entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
+    || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
+  ) throw new Error("changed entries")
+  return Object.freeze({
+    root: statMutationFingerprint(rootInfo),
+    package: statMutationFingerprint(packageInfo),
+    entries: Object.freeze(entries),
+  })
+}
+
+function sameArchiveGroupBoundary(left, right) {
+  return left.root === right.root
+    && left.package === right.package
+    && left.entries.length === right.entries.length
+    && left.entries.every((entry, index) => entry === right.entries[index])
+}
+
+async function verifyExpectedFileState({ path, proof, io }) {
+  const info = await io.lstat(path, { bigint: true })
+  expectedFileState(info, {
+    expectedIdentity: proof.identity,
+    expectedSize: proof.size,
+    expectedMtime: proof.mtime,
+    expectedCtime: proof.ctime,
+  })
+}
+
+async function verifyArchiveRecoveryGroup({ proof, io }) {
+  const boundary = {
+    sourceRoot: proof.source_root,
+    sourceRootIdentity: proof.source_root_identity,
+    packagePath: proof.package_path,
+    packageIdentity: proof.package_identity,
+    paperId: proof.paper_id,
+    io,
+  }
+  const before = await inspectArchiveGroupBoundary(boundary)
+  for (const file of [proof.metadata, proof.commit]) {
+    await verifyExpectedFile({
+      path: file.path,
+      expectedIdentity: file.identity,
+      expectedSize: file.size,
+      expectedHash: file.hash,
+      expectedMtime: file.mtime,
+      expectedCtime: file.ctime,
+      io,
+    })
+  }
+  const after = await inspectArchiveGroupBoundary(boundary)
+  if (!sameArchiveGroupBoundary(before, after)) throw new Error("changed archive group")
+  await verifyExpectedFileState({ path: proof.commit.path, proof: proof.commit, io })
+  await verifyExpectedFileState({ path: proof.metadata.path, proof: proof.metadata, io })
+}
+
 async function captureArchiveRecoveryProof({
   request,
   rootAnchor,
@@ -478,26 +608,35 @@ async function captureArchiveRecoveryProof({
   io,
 }) {
   await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
-  const entries = (await io.readdir(packagePath)).sort((left, right) => left.localeCompare(right))
-  if (
-    entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
-    || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
-  ) throw archiveError("ARCHIVE_TRANSACTION_AMBIGUOUS", "归档资料包内容无法确认")
-  await verifyExpectedFile({
+  const boundary = {
+    sourceRoot: rootAnchor.path,
+    sourceRootIdentity: rootAnchor.identity,
+    packagePath,
+    packageIdentity,
+    paperId: request.paper_id,
+    io,
+  }
+  const before = await inspectArchiveGroupBoundary(boundary)
+  const metadataProof = await verifyExpectedFile({
     path: metadataPath,
     expectedIdentity: metadataIdentity,
     expectedSize: metadataSize,
     expectedHash: metadataHash,
     io,
   })
-  await verifyExpectedFile({
+  const commitProof = await verifyExpectedFile({
     path: markerPath,
     expectedIdentity: markerProof.identity,
     expectedSize: markerProof.size,
     expectedHash: markerProof.hash,
     io,
   })
-  await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+  const after = await inspectArchiveGroupBoundary(boundary)
+  if (!sameArchiveGroupBoundary(before, after)) {
+    throw archiveError("ARCHIVE_TRANSACTION_AMBIGUOUS", "归档资料包内容无法确认")
+  }
+  await verifyExpectedFileState({ path: markerPath, proof: commitProof, io })
+  await verifyExpectedFileState({ path: metadataPath, proof: metadataProof, io })
   return Object.freeze({
     version: 1,
     archive_source_id: request.archive_source_id,
@@ -510,15 +649,11 @@ async function captureArchiveRecoveryProof({
     entries: ARCHIVE_PACKAGE_ENTRIES,
     metadata: Object.freeze({
       path: metadataPath,
-      identity: metadataIdentity,
-      size: metadataSize,
-      hash: metadataHash,
+      ...metadataProof,
     }),
     commit: Object.freeze({
       path: markerPath,
-      identity: markerProof.identity,
-      size: markerProof.size,
-      hash: markerProof.hash,
+      ...commitProof,
     }),
   })
 }
@@ -546,6 +681,8 @@ function proofMatchesRequest(proof, request) {
     && Array.isArray(proof.entries)
     && proof.entries.length === ARCHIVE_PACKAGE_ENTRIES.length
     && proof.entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
+    && proof.metadata?.path === join(proof.package_path, "metadata.yaml")
+    && proof.commit?.path === join(proof.package_path, ARCHIVE_COMMIT_FILE)
 }
 
 export async function verifyArchiveRecoveryProof({ proof, request, fileSystem = {} } = {}) {
@@ -556,46 +693,19 @@ export async function verifyArchiveRecoveryProof({ proof, request, fileSystem = 
       if (typeof io[method] !== "function") throw new Error("invalid filesystem")
     }
     if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw new Error("invalid filesystem")
+    for (const file of [proof.metadata, proof.commit]) {
+      if (
+        !file
+        || typeof file.path !== "string"
+        || typeof file.identity !== "string"
+        || !Number.isInteger(file.size)
+        || !/^[a-f0-9]{64}$/u.test(file.hash)
+        || !/^(?:ns|ms):-?\d+(?:\.\d+)?$/u.test(file.mtime)
+        || !/^(?:ns|ms):-?\d+(?:\.\d+)?$/u.test(file.ctime)
+      ) throw new Error("invalid file proof")
+    }
     for (let verificationPass = 0; verificationPass < 2; verificationPass += 1) {
-      const rootInfo = await io.lstat(proof.source_root, { bigint: true })
-      const canonicalRoot = await io.realpath(proof.source_root)
-      if (
-        rootInfo.isSymbolicLink()
-        || !rootInfo.isDirectory()
-        || identityFingerprint(rootInfo) !== proof.source_root_identity
-        || canonicalRoot !== proof.source_root
-        || join(proof.source_root, proof.paper_id) !== proof.package_path
-      ) throw new Error("changed root")
-      const packageInfo = await io.lstat(proof.package_path, { bigint: true })
-      const canonicalPackage = await io.realpath(proof.package_path)
-      if (
-        packageInfo.isSymbolicLink()
-        || !packageInfo.isDirectory()
-        || identityFingerprint(packageInfo) !== proof.package_identity
-        || canonicalPackage !== proof.package_path
-        || !isInside(proof.source_root, canonicalPackage)
-      ) throw new Error("changed package")
-      const entries = (await io.readdir(proof.package_path)).sort((left, right) => left.localeCompare(right))
-      if (
-        entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
-        || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
-      ) throw new Error("changed entries")
-      for (const file of [proof.metadata, proof.commit]) {
-        if (
-          !file
-          || typeof file.path !== "string"
-          || typeof file.identity !== "string"
-          || !Number.isInteger(file.size)
-          || !/^[a-f0-9]{64}$/u.test(file.hash)
-        ) throw new Error("invalid file proof")
-        await verifyExpectedFile({
-          path: file.path,
-          expectedIdentity: file.identity,
-          expectedSize: file.size,
-          expectedHash: file.hash,
-          io,
-        })
-      }
+      await verifyArchiveRecoveryGroup({ proof, io })
     }
     return true
   } catch {

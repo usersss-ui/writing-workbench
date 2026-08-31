@@ -369,6 +369,7 @@ export async function rebuildArchivedCandidate({
   rebuild = rebuildConfiguredLibrary,
   clearRecovery,
   recoveryStore,
+  recoveryFileSystem = {},
 } = {}) {
   const request = validateRecoveryRequest(rawRequest)
   if (
@@ -385,7 +386,7 @@ export async function rebuildArchivedCandidate({
   try {
     context = validateCompleteContext(await loadContext({ repoRoot }))
     if (!exactRecoveryPackage(context, request)) throw new Error("identity mismatch")
-    await verifyArchiveRecoveryProof({ proof, request })
+    await verifyArchiveRecoveryProof({ proof, request, fileSystem: recoveryFileSystem })
   } catch {
     throw actionError("ARCHIVE_CONFLICT", "归档资料包已变化，拒绝恢复")
   }
@@ -399,7 +400,7 @@ export async function rebuildArchivedCandidate({
   const count = paperCount(result)
   if (count === null) throw actionError("ARCHIVE_RECOVERY_FAILED", "论文库恢复构建结果无效")
   try {
-    await verifyArchiveRecoveryProof({ proof, request })
+    await verifyArchiveRecoveryProof({ proof, request, fileSystem: recoveryFileSystem })
   } catch {
     throw actionError("ARCHIVE_CONFLICT", "归档资料包在恢复构建期间发生变化")
   }

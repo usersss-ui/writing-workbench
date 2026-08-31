@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
+import { constants } from "node:fs"
 import { Agent as HttpAgent, createServer as createHttpServer, request as httpRequest } from "node:http"
 import {
   cp,
@@ -959,6 +960,30 @@ test("static serving rejects a terminal file swapped after its no-follow open", 
   assert.equal(swappedResponse.status, 404)
   assert.equal(await swappedResponse.text(), "")
   assert.equal(swapped, true)
+})
+
+test("static serving opens an approved terminal file with O_NOFOLLOW", async (t) => {
+  const repoRoot = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-nofollow-")))
+  t.after(() => rm(repoRoot, { recursive: true, force: true }))
+  const target = join(repoRoot, "prototype/desktop/index.html")
+  await mkdir(join(target, ".."), { recursive: true })
+  await writeFile(target, "owned bytes")
+  let observedFlags = null
+  const fixture = await listenHandler(t, {
+    repoRoot,
+    staticFileSystem: {
+      open: async (path, flags, mode) => {
+        if (path === target) observedFlags = flags
+        return openFile(path, flags, mode)
+      },
+    },
+  })
+
+  const response = await fetch(`${fixture.origin}/prototype/desktop/index.html`)
+  assert.equal(response.status, 200)
+  assert.equal(await response.text(), "owned bytes")
+  assert.notEqual(observedFlags, null)
+  assert.equal(observedFlags & constants.O_NOFOLLOW, constants.O_NOFOLLOW)
 })
 
 test("inspect, source-path, and import return exact shapes while a locked import consumes its inspection first", async (t) => {
