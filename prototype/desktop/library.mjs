@@ -539,6 +539,13 @@ export function controlledPreviewDocumentsForReaderTab(paper, tab) {
   })
 }
 
+export function findImportedPreviewSelection({ paper, targetTab, previewUrl, fileName } = {}) {
+  const matches = controlledPreviewDocumentsForReaderTab(paper, targetTab).filter((previewDocument) => (
+    previewDocument.url === previewUrl && previewDocument.label === fileName
+  ))
+  return matches.length === 1 ? matches[0].selectionKey : null
+}
+
 export function controlledPreviewSelectionModel(paper, tab, selectedKey = null) {
   const documents = controlledPreviewDocumentsForReaderTab(paper, tab)
   let selectedDocument = typeof selectedKey === "string"
@@ -1468,6 +1475,19 @@ export function downloadUserTagJson({ document, json, fileName = "paper-user-tag
   }
 }
 
+function renderNoteImportChecks(document, mount, checks) {
+  if (!mount) return
+  const fragment = document.createDocumentFragment()
+  for (const check of checks?.items ?? []) {
+    const item = document.createElement("li")
+    item.dataset.checkSeverity = check.severity
+    const prefix = check.severity === "blocking" ? "阻止" : check.severity === "warning" ? "提醒" : "通过"
+    item.textContent = `${prefix}：${check.message}`
+    fragment.append(item)
+  }
+  mount.replaceChildren(fragment)
+}
+
 export function createLibraryController({ document, storage, fetchImpl = globalThis.fetch }) {
   const store = createWorkspaceStore(storage)
   const userTagStore = createUserTagStore(storage)
@@ -1493,6 +1513,11 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   let detailTriggerPaperId = null
   let activePaperId = null
   let imageLightboxTrigger = null
+  let noteImportBusy = false
+  let noteInspection = null
+  let noteInspectGeneration = 0
+  let pendingImportedResult = null
+  let indexRefreshFailed = false
   const indexLoader = createRetryableLoader(() => loadPaperIndex(fetchImpl))
   const privatePathCopyGuard = createPrivatePathCopyGuard(() => {
     const status = elements().inspectorStatus
@@ -1534,6 +1559,17 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       noteImportHelp: document.getElementById("library-note-import-help"),
       indexReloadStatus: document.querySelector("[data-index-reload-status]"),
       indexReload: document.getElementById("library-index-reload"),
+      noteImportDialog: document.getElementById("library-note-import-dialog"),
+      noteImportForm: document.getElementById("library-note-import-form"),
+      noteImportPaperId: document.querySelector("[data-note-import-paper-id]"),
+      noteImportCategory: document.getElementById("library-note-import-category"),
+      noteImportFile: document.getElementById("library-note-import-file"),
+      noteImportChecks: document.getElementById("library-note-import-checks"),
+      noteImportFileName: document.getElementById("library-note-import-file-name"),
+      noteImportStatus: document.querySelector("[data-note-import-status]"),
+      noteImportClose: document.getElementById("library-note-import-close"),
+      noteImportCancel: document.getElementById("library-note-import-cancel"),
+      noteImportSubmit: document.getElementById("library-note-import-submit"),
       readerTocLinks: document.querySelector("#library-reader-toc [data-reader-toc-links]"),
       inspectorTitle: document.getElementById("library-inspector-title"),
       notePreview: document.getElementById("library-note-preview"),
@@ -1956,6 +1992,8 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     if (ui.contextTitle) ui.contextTitle.textContent = readerContextLabel({ detailOpen, paper: activePaper })
     if (ui.addNote) ui.addNote.disabled = localCapabilities?.note_import !== true
     if (ui.noteImportHelp) ui.noteImportHelp.hidden = localCapabilities?.note_import === true
+    if (ui.indexReloadStatus) ui.indexReloadStatus.hidden = !indexRefreshFailed
+    if (ui.indexReload) ui.indexReload.disabled = !indexRefreshFailed
     const visibility = computeLoadVisibility({ loadState, viewEmpty: view.empty })
     if (ui.empty) ui.empty.hidden = visibility.emptyHidden
     if (ui.error) ui.error.hidden = visibility.errorHidden
@@ -2000,6 +2038,211 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       if (privatePathCopyGuard.isCurrent(request) && ui.inspectorStatus) ui.inspectorStatus.textContent = "原始路径暂不可用"
     } finally {
       sourcePath = null
+    }
+  }
+
+  function syncNoteImportControls() {
+    const ui = elements()
+    for (const control of [
+      ui.noteImportCategory,
+      ui.noteImportFile,
+      ui.noteImportFileName,
+      ui.noteImportClose,
+      ui.noteImportCancel,
+    ]) {
+      if (control) control.disabled = noteImportBusy
+    }
+    if (ui.noteImportSubmit) {
+      ui.noteImportSubmit.disabled = noteImportBusy
+        || noteInspection?.checks?.can_import !== true
+        || !validLocalFileName(ui.noteImportFileName?.value)
+    }
+  }
+
+  function setNoteImportBusy(busy) {
+    noteImportBusy = busy === true
+    syncNoteImportControls()
+  }
+
+  function openNoteImportDialog() {
+    const ui = elements()
+    if (
+      !detailOpen
+      || !paperById(papers, detailPaperId)
+      || localCapabilities?.note_import !== true
+      || !ui.noteImportDialog
+      || typeof ui.noteImportDialog.showModal !== "function"
+    ) return false
+    noteImportBusy = false
+    noteInspection = null
+    noteInspectGeneration += 1
+    if (ui.noteImportPaperId) ui.noteImportPaperId.textContent = detailPaperId
+    if (ui.noteImportCategory) ui.noteImportCategory.value = "note"
+    if (ui.noteImportFile) ui.noteImportFile.value = ""
+    if (ui.noteImportChecks) ui.noteImportChecks.replaceChildren()
+    if (ui.noteImportFileName) ui.noteImportFileName.value = ""
+    if (ui.noteImportStatus) ui.noteImportStatus.textContent = ""
+    syncNoteImportControls()
+    ui.noteImportDialog.showModal()
+    ui.noteImportCategory?.focus()
+    return true
+  }
+
+  function closeNoteImportDialog() {
+    const dialog = elements().noteImportDialog
+    if (noteImportBusy || !dialog?.open || typeof dialog.close !== "function") return false
+    dialog.close()
+    return true
+  }
+
+  async function inspectSelectedNoteFile() {
+    const ui = elements()
+    const paperId = detailPaperId
+    const category = ui.noteImportCategory?.value
+    const file = ui.noteImportFile?.files?.[0]
+    const originalFileName = file?.name ?? ""
+    const generation = ++noteInspectGeneration
+    noteInspection = null
+    if (ui.noteImportChecks) ui.noteImportChecks.replaceChildren()
+    if (ui.noteImportFileName) ui.noteImportFileName.value = ""
+    if (ui.noteImportStatus) ui.noteImportStatus.textContent = file ? "正在检查 Markdown…" : "请选择 Markdown 文件"
+    syncNoteImportControls()
+    if (
+      noteImportBusy
+      || !ui.noteImportDialog?.open
+      || !paperById(papers, paperId)
+      || !LOCAL_CAPABILITY_CATEGORIES.some((item) => item.value === category)
+      || !file
+    ) return false
+
+    let markdown = null
+    try {
+      markdown = await decodeUtf8MarkdownFile(file)
+      const inspection = await inspectLocalMarkdownNote({
+        fetchImpl,
+        paperId,
+        category,
+        originalFileName,
+        markdown,
+      })
+      const currentUi = elements()
+      const currentFileName = currentUi.noteImportFile?.files?.[0]?.name ?? ""
+      if (
+        generation !== noteInspectGeneration
+        || !currentUi.noteImportDialog?.open
+        || detailPaperId !== paperId
+        || currentUi.noteImportCategory?.value !== category
+        || currentFileName !== originalFileName
+      ) return false
+      noteInspection = inspection
+      renderNoteImportChecks(document, currentUi.noteImportChecks, inspection.checks)
+      if (currentUi.noteImportFileName) currentUi.noteImportFileName.value = inspection.suggested_file_name
+      if (currentUi.noteImportStatus) {
+        currentUi.noteImportStatus.textContent = inspection.checks.can_import
+          ? inspection.checks.warning_codes.length > 0 ? "检查完成，可以在确认提醒后导入" : "检查通过，可以导入"
+          : "检查发现阻止项，请修正文件后重新选择"
+      }
+      syncNoteImportControls()
+      return true
+    } catch (error) {
+      if (generation !== noteInspectGeneration) return false
+      noteInspection = null
+      const currentUi = elements()
+      if (currentUi.noteImportChecks) currentUi.noteImportChecks.replaceChildren()
+      if (currentUi.noteImportFileName) currentUi.noteImportFileName.value = ""
+      if (currentUi.noteImportStatus) {
+        currentUi.noteImportStatus.textContent = error instanceof Error ? error.message : "Markdown 检查失败"
+      }
+      syncNoteImportControls()
+      return false
+    } finally {
+      markdown = null
+    }
+  }
+
+  async function refreshIndexAfterImport(result) {
+    const ui = elements()
+    closeAllPreviews()
+    if (ui.indexReload) ui.indexReload.disabled = true
+    indexLoader.invalidate()
+    const outcome = await indexLoader.run()
+    if (outcome.ok) {
+      const nextIndex = outcome.value
+      const nextPaper = paperById(nextIndex.papers, result.paper_id)
+      const selectionKey = nextPaper ? findImportedPreviewSelection({
+        paper: nextPaper,
+        targetTab: result.target_tab,
+        previewUrl: result.new_preview_url,
+        fileName: result.actual_file_name,
+      }) : null
+      if (nextPaper && selectionKey) {
+        papers = nextIndex.papers
+        facetSchema = nextIndex.facet_schema
+        warningCount = nextIndex.warning_count
+        loadState = "ready"
+        detailOpen = true
+        detailPaperId = result.paper_id
+        activeReaderTab = result.target_tab
+        readerMaterialSelection = { ...readerMaterialSelection, [result.target_tab]: selectionKey }
+        pendingImportedResult = null
+        indexRefreshFailed = false
+        render()
+        return true
+      }
+    }
+    pendingImportedResult = structuredClone(result)
+    indexRefreshFailed = true
+    render()
+    return false
+  }
+
+  async function submitNoteImport(event) {
+    event?.preventDefault?.()
+    const ui = elements()
+    if (
+      noteImportBusy
+      || !ui.noteImportDialog?.open
+      || noteInspection?.checks?.can_import !== true
+      || !validLocalFileName(ui.noteImportFileName?.value)
+      || !paperById(papers, detailPaperId)
+    ) return false
+    const inspection = noteInspection
+    const requestedFileName = ui.noteImportFileName.value
+    setNoteImportBusy(true)
+    if (ui.noteImportStatus) ui.noteImportStatus.textContent = "正在导入并重建论文库…"
+    try {
+      const importResult = await importLocalMarkdownNote({
+        fetchImpl,
+        inspectionId: inspection.inspection_id,
+        requestedFileName,
+      })
+      if (importResult.paper_id !== detailPaperId || importResult.target_tab !== inspection.target_tab) {
+        throw new Error("本地服务响应格式无效")
+      }
+      noteInspection = null
+      noteInspectGeneration += 1
+      setNoteImportBusy(false)
+      activeReaderTab = importResult.target_tab
+      closeNoteImportDialog()
+      await refreshIndexAfterImport(importResult)
+      return true
+    } catch (error) {
+      if (error instanceof LocalLibraryApiError && error.code === "LIBRARY_WRITE_BUSY") {
+        setNoteImportBusy(false)
+        if (ui.noteImportStatus) ui.noteImportStatus.textContent = "正在重建，请稍后重试"
+        return false
+      }
+      noteInspection = null
+      noteInspectGeneration += 1
+      setNoteImportBusy(false)
+      if (ui.noteImportChecks) ui.noteImportChecks.replaceChildren()
+      if (ui.noteImportStatus) {
+        const message = error instanceof Error ? error.message : "笔记导入失败，请重新检查"
+        const fileName = error instanceof LocalLibraryApiError ? error.fileName : null
+        ui.noteImportStatus.textContent = fileName ? `${message}（${fileName}）` : message
+      }
+      syncNoteImportControls()
+      return false
     }
   }
 
@@ -2059,6 +2302,32 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     const ui = elements()
     bindUserTagEditor(ui.inspectorRoot)
     bindUserTagEditor(ui.detail)
+    ui.addNote?.addEventListener("click", openNoteImportDialog)
+    ui.noteImportFile?.addEventListener("change", () => { void inspectSelectedNoteFile() })
+    ui.noteImportCategory?.addEventListener("change", () => { void inspectSelectedNoteFile() })
+    ui.noteImportFileName?.addEventListener("input", syncNoteImportControls)
+    ui.noteImportForm?.addEventListener("submit", (event) => { void submitNoteImport(event) })
+    ui.noteImportClose?.addEventListener("click", closeNoteImportDialog)
+    ui.noteImportCancel?.addEventListener("click", closeNoteImportDialog)
+    ui.noteImportDialog?.addEventListener("cancel", (event) => {
+      if (noteImportBusy) event.preventDefault()
+    })
+    ui.noteImportDialog?.addEventListener("close", () => {
+      noteImportBusy = false
+      noteInspection = null
+      noteInspectGeneration += 1
+      if (ui.noteImportChecks) ui.noteImportChecks.replaceChildren()
+      if (ui.noteImportFile) ui.noteImportFile.value = ""
+      if (ui.noteImportFileName) ui.noteImportFileName.value = ""
+      if (ui.noteImportStatus) ui.noteImportStatus.textContent = ""
+      syncNoteImportControls()
+      if (ui.addNote?.isConnected) ui.addNote.focus()
+    })
+    ui.indexReload?.addEventListener("click", () => {
+      if (!indexRefreshFailed || !pendingImportedResult || indexLoader.getState() === "loading") return
+      const result = structuredClone(pendingImportedResult)
+      void refreshIndexAfterImport(result)
+    })
     ui.userTagImport?.addEventListener("change", async () => {
       const file = ui.userTagImport.files?.[0]
       if (!file) return
@@ -2270,6 +2539,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       }
     })
     ui.detailBack?.addEventListener("click", () => {
+      if (noteImportBusy) return
       closeAllPreviews()
       detailOpen = false
       detailPaperId = null
@@ -2287,7 +2557,10 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       else ui.count?.focus()
     })
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && ui.imageLightbox?.open) {
+      if (ui.noteImportDialog?.open) {
+        if (noteImportBusy && event.key === "Escape") event.preventDefault()
+        return
+      } else if (event.key === "Escape" && ui.imageLightbox?.open) {
         return
       } else if (detailOpen && event.key === "Escape") {
         event.preventDefault()

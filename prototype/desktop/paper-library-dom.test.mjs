@@ -64,6 +64,10 @@ class MemoryNode {
     this.checked = false
     this.disabled = false
     this.value = ""
+    this.files = []
+    this.open = false
+    this.isConnected = true
+    this.tabIndex = 0
     this.classList = {
       toggle: (name, enabled) => {
         const names = new Set(this.className.split(/\s+/u).filter(Boolean))
@@ -134,15 +138,22 @@ class MemoryNode {
       key: init.key ?? "",
       metaKey: init.metaKey ?? false,
       ctrlKey: init.ctrlKey ?? false,
-      preventDefault: () => {},
+      defaultPrevented: false,
+      preventDefaultCount: 0,
+      preventDefault() {
+        this.defaultPrevented = true
+        this.preventDefaultCount += 1
+      },
     }
     for (let node = this; node; node = node.parentNode) {
       for (const listener of node.listeners.get(type) ?? []) listener(event)
     }
+    if (type === "cancel" && this.tagName === "DIALOG" && this.open && !event.defaultPrevented) this.close()
     return event
   }
 
   click() {
+    if (this.disabled) return
     this.dispatch("click")
   }
 
@@ -155,18 +166,42 @@ class MemoryNode {
     return null
   }
 
+  contains(candidate) {
+    for (let node = candidate; node; node = node.parentNode) if (node === this) return true
+    return false
+  }
+
+  showModal() {
+    this.open = true
+  }
+
+  close() {
+    if (!this.open) return
+    this.open = false
+    this.dispatch("close")
+  }
+
   reset() {
     for (const input of this.querySelectorAll("input")) input.checked = false
   }
 
   matches(selector) {
+    if (selector.includes(",")) return selector.split(",").some((part) => this.matches(part.trim()))
     if (selector === "input") return this.tagName === "INPUT"
     if (selector === "input:not(:disabled)") return this.tagName === "INPUT" && !this.disabled
     if (selector.startsWith(".")) return this.className.split(/\s+/u).includes(selector.slice(1))
-    const dataMatch = /^\[data-([a-z-]+)(?:="([^"]+)")?\]$/u.exec(selector)
-    if (!dataMatch) return false
-    const key = camelDataName(dataMatch[1])
-    return Object.hasOwn(this.dataset, key) && (dataMatch[2] === undefined || this.dataset[key] === dataMatch[2])
+    if (selector.startsWith("#")) return this.getAttribute("id") === selector.slice(1)
+    const compoundMatch = /^([a-z][a-z0-9-]*)?(\[[^\]]+\])?$/iu.exec(selector)
+    if (!compoundMatch) return false
+    if (compoundMatch[1] && this.tagName !== compoundMatch[1].toUpperCase()) return false
+    if (!compoundMatch[2]) return Boolean(compoundMatch[1])
+    const attributeMatch = /^\[([a-z][a-z0-9-]*)(?:="([^"]+)")?\]$/iu.exec(compoundMatch[2])
+    if (!attributeMatch) return false
+    const [, name, expected] = attributeMatch
+    const actual = name.startsWith("data-")
+      ? this.dataset[camelDataName(name.slice(5))]
+      : this.getAttribute(name)
+    return actual !== undefined && actual !== null && (expected === undefined || actual === expected)
   }
 
   querySelector(selector) {
@@ -298,9 +333,280 @@ function createControllerDocument() {
       listeners.push(listener)
       documentListeners.set(type, listeners)
     },
+    dispatch(type, init = {}) {
+      const event = {
+        target: init.target ?? document,
+        key: init.key ?? "",
+        metaKey: init.metaKey ?? false,
+        ctrlKey: init.ctrlKey ?? false,
+        defaultPrevented: false,
+        preventDefaultCount: 0,
+        preventDefault() {
+          this.defaultPrevented = true
+          this.preventDefaultCount += 1
+        },
+      }
+      for (const listener of documentListeners.get(type) ?? []) listener(event)
+      return event
+    },
   }
   for (const node of [form, search, reset, count, warning, panel, selected, document.body, ...triggers]) node.ownerDocument = document
-  return { document, form, search, reset, count, warning, panel, selected, triggers }
+  return { document, form, search, reset, count, warning, panel, selected, triggers, ids, documentListeners }
+}
+
+function finalLocalCapabilities(overrides = {}) {
+  const categories = [
+    ["note", "论文精读", "note"],
+    ["derivation", "推导过程", "derivation"],
+    ["source_map", "来源映射", "derivation"],
+    ["modeling", "建模复盘", "simulation"],
+    ["simulation", "仿真描述", "simulation"],
+    ["code_compare", "代码对照", "code_compare"],
+    ["reproduction_report", "复现报告", "simulation"],
+  ].map(([value, label, target_tab]) => ({ value, label, target_tab }))
+  return {
+    api_version: 1,
+    note_import: true,
+    source_path: false,
+    candidate_archive: false,
+    archive_rebuild: false,
+    discovery: false,
+    agent_task_center: false,
+    archive_source_id: null,
+    categories,
+    recovery: {
+      required: false,
+      kind: null,
+      reason_code: null,
+      archive_source_id: null,
+      paper_id: null,
+      openalex_id: null,
+    },
+    ...overrides,
+  }
+}
+
+function noteInspection(overrides = {}) {
+  return {
+    inspection_id: "inspection-1",
+    suggested_file_name: "Paper-01_论文精读.md",
+    checks: {
+      items: [{ code: "MARKER_MATCH", severity: "pass", message: "笔记类型标记正确" }],
+      blocking_codes: [],
+      warning_codes: [],
+      can_import: true,
+    },
+    target_tab: "note",
+    expires_at: "2030-01-01T00:00:00.000Z",
+    ...overrides,
+  }
+}
+
+function importedNote(overrides = {}) {
+  return {
+    paper_id: "Paper-01",
+    actual_file_name: "Paper-01_论文精读.md",
+    target_tab: "note",
+    new_preview_url: `../../local_library_data/notes/paper-01/note/${"b".repeat(64)}.html`,
+    index_version: "c".repeat(64),
+    ...overrides,
+  }
+}
+
+function createNoteImportControllerDocument() {
+  const ui = createControllerDocument()
+  const { document, ids } = ui
+  const make = (id, tagName = "div") => {
+    const node = new MemoryNode(tagName)
+    node.ownerDocument = document
+    node.setAttribute("id", id)
+    ids.set(id, node)
+    return node
+  }
+
+  const results = make("library-results")
+  const empty = make("library-empty")
+  const error = make("library-error")
+  error.hidden = true
+  const template = new MemoryTemplateElement()
+  template.ownerDocument = document
+  ids.set("library-paper-row-template", template)
+  const listView = make("library-list-view", "section")
+  listView.dataset.view = "list"
+  listView.append(results, empty, error)
+  const detail = make("library-detail", "section")
+  detail.hidden = true
+  const detailBack = make("library-detail-back", "button")
+  const readerTabs = make("library-reader-tabs")
+  const tabs = ["overview", "source", "note", "derivation", "simulation", "code_compare", "writing"].map((key) => {
+    const tab = new MemoryNode("button")
+    tab.ownerDocument = document
+    tab.dataset.readerTab = key
+    tab.setAttribute("role", "tab")
+    readerTabs.append(tab)
+    return tab
+  })
+  const readerPanels = tabs.map((tab) => {
+    const panel = new MemoryNode("section")
+    panel.ownerDocument = document
+    panel.dataset.readerPanel = tab.dataset.readerTab
+    panel.setAttribute("role", "tabpanel")
+    detail.append(panel)
+    return panel
+  })
+  const readerLoadStatus = new MemoryNode("span")
+  readerLoadStatus.ownerDocument = document
+  readerLoadStatus.dataset.readerLoadStatus = ""
+  const readerToc = make("library-reader-toc", "aside")
+  const readerTocToggle = make("library-reader-toc-toggle", "button")
+  readerTocToggle.setAttribute("aria-expanded", "true")
+  const readerTocLinks = new MemoryNode("nav")
+  readerTocLinks.ownerDocument = document
+  readerTocLinks.dataset.readerTocLinks = ""
+  readerToc.append(readerTocLinks)
+  const addNote = make("library-add-note", "button")
+  addNote.disabled = true
+  const noteImportHelp = make("library-note-import-help", "span")
+  const indexReloadStatus = new MemoryNode("span")
+  indexReloadStatus.ownerDocument = document
+  indexReloadStatus.dataset.indexReloadStatus = ""
+  indexReloadStatus.ownText = "笔记已导入，但索引刷新失败。"
+  indexReloadStatus.hidden = true
+  const indexReload = make("library-index-reload", "button")
+  indexReloadStatus.append(indexReload)
+  detail.append(detailBack, readerTabs, readerLoadStatus, readerTocToggle, addNote, noteImportHelp, indexReloadStatus)
+
+  const previewMounts = {}
+  const materialControls = {}
+  const materialSelects = {}
+  for (const kind of ["note", "derivation", "simulation", "code_compare"]) {
+    const mountId = kind === "code_compare" ? "library-code-compare-preview" : `library-${kind}-preview`
+    previewMounts[kind] = make(mountId)
+    materialControls[kind] = new MemoryNode("label")
+    materialControls[kind].ownerDocument = document
+    materialControls[kind].dataset.readerMaterialControl = kind
+    materialSelects[kind] = new MemoryNode("select")
+    materialSelects[kind].ownerDocument = document
+    materialSelects[kind].dataset.readerMaterialSelect = kind
+    materialControls[kind].append(materialSelects[kind])
+    const panel = readerPanels.find((candidate) => candidate.dataset.readerPanel === kind)
+    panel.append(materialControls[kind], previewMounts[kind])
+  }
+
+  const inspectorRoot = make("library-inspector", "aside")
+  const inspector = new MemoryNode("div")
+  inspector.ownerDocument = document
+  inspector.dataset.inspectorContent = ""
+  const inspectorStatus = new MemoryNode("p")
+  inspectorStatus.ownerDocument = document
+  inspectorStatus.dataset.inspectorStatus = ""
+  inspectorRoot.append(inspector, inspectorStatus)
+  const inspectorTitle = make("library-inspector-title", "h2")
+  const contextTitle = make("library-context-title", "span")
+
+  const noteDialog = make("library-note-import-dialog", "dialog")
+  const noteForm = make("library-note-import-form", "form")
+  const notePaperId = new MemoryNode("code")
+  notePaperId.ownerDocument = document
+  notePaperId.dataset.noteImportPaperId = ""
+  const noteCategory = make("library-note-import-category", "select")
+  noteCategory.value = "note"
+  const noteFile = make("library-note-import-file", "input")
+  const noteChecks = make("library-note-import-checks", "ul")
+  const noteFileName = make("library-note-import-file-name", "input")
+  const noteStatus = new MemoryNode("p")
+  noteStatus.ownerDocument = document
+  noteStatus.dataset.noteImportStatus = ""
+  const noteClose = make("library-note-import-close", "button")
+  const noteCancel = make("library-note-import-cancel", "button")
+  const noteSubmit = make("library-note-import-submit", "button")
+  noteSubmit.disabled = true
+  noteForm.append(notePaperId, noteCategory, noteFile, noteChecks, noteFileName, noteStatus, noteClose, noteCancel, noteSubmit)
+  noteDialog.append(noteForm)
+
+  const baseQuery = document.querySelector
+  const baseQueryAll = document.querySelectorAll
+  const selectorNodes = new Map([
+    ['[data-view="list"]', listView],
+    ["#library-inspector [data-inspector-content]", inspector],
+    ["#library-inspector [data-inspector-status]", inspectorStatus],
+    ["[data-reader-load-status]", readerLoadStatus],
+    ["[data-index-reload-status]", indexReloadStatus],
+    ["#library-reader-toc [data-reader-toc-links]", readerTocLinks],
+    ["[data-note-import-paper-id]", notePaperId],
+    ["[data-note-import-status]", noteStatus],
+  ])
+  for (const kind of ["note", "derivation", "simulation", "code_compare"]) {
+    selectorNodes.set(`[data-reader-material-control="${kind}"]`, materialControls[kind])
+    selectorNodes.set(`[data-reader-material-select="${kind}"]`, materialSelects[kind])
+  }
+  document.querySelector = (selector) => {
+    if (selectorNodes.has(selector)) return selectorNodes.get(selector)
+    if (selector.startsWith('#library-results [data-paper-id="')) {
+      return results.querySelector('[data-action="open-detail"]')
+    }
+    return baseQuery(selector)
+  }
+  document.querySelectorAll = (selector) => {
+    if (selector === "[data-reader-panel]") return readerPanels
+    if (selector === "button[data-source-mode]") return []
+    return baseQueryAll(selector)
+  }
+
+  document.body.append(listView, detail, readerToc, inspectorRoot, noteDialog)
+  return {
+    ...ui,
+    results,
+    empty,
+    error,
+    listView,
+    detail,
+    detailBack,
+    readerTabs,
+    tabs,
+    readerPanels,
+    readerToc,
+    readerTocToggle,
+    addNote,
+    noteImportHelp,
+    indexReloadStatus,
+    indexReload,
+    materialSelects,
+    noteDialog,
+    noteForm,
+    notePaperId,
+    noteCategory,
+    noteFile,
+    noteChecks,
+    noteFileName,
+    noteStatus,
+    noteClose,
+    noteCancel,
+    noteSubmit,
+  }
+}
+
+function memoryStorage() {
+  const values = new Map()
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  }
+}
+
+function markdownFile(name, markdown) {
+  const bytes = new TextEncoder().encode(markdown)
+  return { name, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }
+}
+
+function localJsonResponse(payload, { ok = true, status = ok ? 200 : 400 } = {}) {
+  return { ok, status, json: async () => structuredClone(payload) }
+}
+
+async function settleControllerEvents() {
+  await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setImmediate(resolve))
 }
 
 function normalizedPaper(overrides = {}) {
@@ -1972,6 +2278,400 @@ test("file decoding uses fatal UTF-8 before inspection", async () => {
     () => decodeUtf8MarkdownFile({ name: "note.txt", arrayBuffer: async () => new ArrayBuffer() }),
     /Markdown/u,
   )
+})
+
+test("successful import refetches only when URL and filename identify one preview", async () => {
+  const { findImportedPreviewSelection } = await import("./library.mjs")
+  const previewUrl = controlledPreviewDocument("source_map", {
+    label: "Paper-01_source_map.md",
+    hashCharacter: "b",
+  }).url
+  const paper = normalizedPaper({
+    controlled_preview_documents: controlledPreviewDocuments({
+      source_map: [
+        controlledPreviewDocument("source_map", { label: "Paper-01_source_map.md", hashCharacter: "b" }),
+        controlledPreviewDocument("source_map", { label: "another.md", hashCharacter: "c" }),
+      ],
+    }),
+  })
+  assert.equal(findImportedPreviewSelection({
+    paper,
+    targetTab: "derivation",
+    previewUrl,
+    fileName: "Paper-01_source_map.md",
+  }), "source_map:0")
+  assert.equal(findImportedPreviewSelection({
+    paper,
+    targetTab: "derivation",
+    previewUrl,
+    fileName: "another.md",
+  }), null)
+})
+
+test("note dialog focus and cancel stay inside an open paper detail", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      return localJsonResponse(v3Index())
+    },
+  })
+
+  assert.deepEqual(await controller.start(), { ok: true, paperCount: 1 })
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  assert.equal(ui.detail.hidden, false)
+  ui.addNote.click()
+  assert.equal(ui.noteDialog.open, true)
+  assert.equal(ui.notePaperId.textContent, "Paper-01")
+  assert.equal(ui.document.activeElement, ui.noteCategory)
+
+  const cancel = ui.noteDialog.dispatch("cancel")
+  assert.equal(cancel.defaultPrevented, false)
+  assert.equal(ui.noteDialog.open, false)
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(ui.document.activeElement, ui.addNote)
+})
+
+test("stale note inspection cannot replace newer warning or blocking checks", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const inspectionRequests = []
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url, options = {}) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+      if (url === "/api/v1/notes/inspect") {
+        return new Promise((resolve) => inspectionRequests.push({ body: JSON.parse(options.body), resolve }))
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+
+  await controller.start()
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  ui.addNote.click()
+  ui.noteFile.files = [markdownFile("local.md", "# 本地笔记")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  assert.equal(inspectionRequests.length, 1)
+
+  ui.noteCategory.value = "simulation"
+  ui.noteCategory.dispatch("change")
+  await settleControllerEvents()
+  assert.equal(inspectionRequests.length, 2)
+  inspectionRequests[1].resolve(localJsonResponse(noteInspection({
+    inspection_id: "inspection-new",
+    suggested_file_name: "Paper-01_仿真描述.md",
+    target_tab: "simulation",
+    checks: {
+      items: [
+        { code: "MARKER_MATCH", severity: "pass", message: "仿真描述标记正确" },
+        { code: "FRONTMATTER_MISSING", severity: "warning", message: "建议补充 frontmatter" },
+      ],
+      blocking_codes: [],
+      warning_codes: ["FRONTMATTER_MISSING"],
+      can_import: true,
+    },
+  })))
+  await settleControllerEvents()
+  assert.equal(ui.noteFileName.value, "Paper-01_仿真描述.md")
+  assert.match(ui.noteChecks.textContent, /通过：仿真描述标记正确/u)
+  assert.match(ui.noteChecks.textContent, /提醒：建议补充 frontmatter/u)
+  assert.equal(ui.noteChecks.children[1].dataset.checkSeverity, "warning")
+  assert.equal(ui.noteSubmit.disabled, false)
+
+  inspectionRequests[0].resolve(localJsonResponse(noteInspection({
+    inspection_id: "inspection-stale",
+    checks: {
+      items: [{ code: "MARKER_MISMATCH", severity: "blocking", message: "旧检查不应出现" }],
+      blocking_codes: ["MARKER_MISMATCH"],
+      warning_codes: [],
+      can_import: false,
+    },
+  })))
+  await settleControllerEvents()
+  assert.equal(ui.noteFileName.value, "Paper-01_仿真描述.md")
+  assert.doesNotMatch(ui.noteChecks.textContent, /旧检查/u)
+
+  ui.noteCategory.value = "code_compare"
+  ui.noteCategory.dispatch("change")
+  await settleControllerEvents()
+  inspectionRequests[2].resolve(localJsonResponse(noteInspection({
+    inspection_id: "inspection-blocking",
+    suggested_file_name: "Paper-01_代码对比.md",
+    target_tab: "code_compare",
+    checks: {
+      items: [{ code: "MARKER_MISMATCH", severity: "blocking", message: "缺少代码对比标记" }],
+      blocking_codes: ["MARKER_MISMATCH"],
+      warning_codes: [],
+      can_import: false,
+    },
+  })))
+  await settleControllerEvents()
+  assert.equal(ui.noteChecks.children[0].dataset.checkSeverity, "blocking")
+  assert.match(ui.noteChecks.textContent, /阻止：缺少代码对比标记/u)
+  assert.equal(ui.noteSubmit.disabled, true)
+})
+
+test("LIBRARY_WRITE_BUSY alone preserves the inspection and blocks every dialog escape path", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const importBodies = []
+  let indexCount = 0
+  let releaseBusy
+  const imported = importedNote()
+  const refreshedPaper = normalizedPaper({
+    controlled_preview_documents: controlledPreviewDocuments({
+      note: [controlledPreviewDocument("note", {
+        label: imported.actual_file_name,
+        hashCharacter: "b",
+      })],
+    }),
+  })
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url, options = {}) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) {
+        indexCount += 1
+        return localJsonResponse(indexCount === 1 ? v3Index() : v3Index([refreshedPaper]))
+      }
+      if (url === "/api/v1/notes/inspect") return localJsonResponse(noteInspection())
+      if (url === "/api/v1/notes/import") {
+        importBodies.push(JSON.parse(options.body))
+        if (importBodies.length === 1) return new Promise((resolve) => { releaseBusy = resolve })
+        return localJsonResponse(imported)
+      }
+      return { ok: false, text: async () => "" }
+    },
+  })
+
+  await controller.start()
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  ui.addNote.click()
+  ui.noteFile.files = [markdownFile("local.md", "# 论文精读")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  assert.equal(ui.noteSubmit.disabled, false)
+  const retainedName = ui.noteFileName.value
+  const retainedChecks = ui.noteChecks.textContent
+
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+  for (const control of [
+    ui.noteCategory, ui.noteFile, ui.noteFileName, ui.noteClose, ui.noteCancel, ui.noteSubmit,
+  ]) assert.equal(control.disabled, true)
+  ui.noteClose.click()
+  ui.noteCancel.click()
+  const cancel = ui.noteDialog.dispatch("cancel")
+  const escape = ui.document.dispatch("keydown", { key: "Escape" })
+  ui.detailBack.click()
+  assert.equal(cancel.defaultPrevented, true)
+  assert.equal(escape.defaultPrevented, true)
+  assert.equal(ui.noteDialog.open, true)
+  assert.equal(ui.detail.hidden, false)
+
+  releaseBusy(localJsonResponse({
+    error: {
+      code: "LIBRARY_WRITE_BUSY",
+      message: "正在重建，请稍后重试",
+      file_name: retainedName,
+    },
+  }, { ok: false, status: 409 }))
+  await settleControllerEvents()
+  assert.equal(ui.noteDialog.open, true)
+  assert.equal(ui.noteFileName.value, retainedName)
+  assert.equal(ui.noteChecks.textContent, retainedChecks)
+  assert.equal(ui.noteSubmit.disabled, false)
+  assert.match(ui.noteStatus.textContent, /正在重建，请稍后重试/u)
+
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+  assert.equal(importBodies.length, 2)
+  assert.equal(importBodies[0].inspection_id, "inspection-1")
+  assert.equal(importBodies[1].inspection_id, "inspection-1")
+  assert.equal(ui.noteDialog.open, false)
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(indexCount, 2)
+})
+
+test("stale note inspection is required again after any non-busy import error", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  let importCount = 0
+  const privatePath = rootedValue("private", "papers", "Paper-01")
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+      if (url === "/api/v1/notes/inspect") return localJsonResponse(noteInspection())
+      if (url === "/api/v1/notes/import") {
+        importCount += 1
+        return localJsonResponse({
+          error: {
+            code: "INSPECTION_EXPIRED",
+            message: "检查结果已过期，请重新选择文件",
+            file_name: "local.md",
+            source_path: privatePath,
+            raw_body: `do not render ${privatePath}`,
+          },
+        }, { ok: false, status: 409 })
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+
+  await controller.start()
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  ui.addNote.click()
+  ui.noteFile.files = [markdownFile("local.md", "# 论文精读")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+
+  assert.equal(ui.noteDialog.open, true)
+  assert.equal(ui.noteSubmit.disabled, true)
+  assert.equal(ui.noteChecks.children.length, 0)
+  assert.match(ui.noteStatus.textContent, /检查结果已过期，请重新选择文件/u)
+  assert.match(ui.noteStatus.textContent, /local\.md/u)
+  assert.doesNotMatch(ui.noteDialog.textContent, /private|source_path|raw_body/u)
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+  assert.equal(importCount, 1)
+})
+
+test("successful import refetches the index, preserves detail and TOC, and selects the new preview", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  let indexCount = 0
+  const preview = controlledPreviewDocument("source_map", {
+    label: "Paper-01_source_map.md",
+    hashCharacter: "d",
+  })
+  const importResult = importedNote({
+    actual_file_name: preview.label,
+    target_tab: "derivation",
+    new_preview_url: preview.url,
+  })
+  const refreshedPaper = normalizedPaper({
+    controlled_preview_documents: controlledPreviewDocuments({ source_map: [preview] }),
+  })
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url, options = {}) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) {
+        indexCount += 1
+        return localJsonResponse(indexCount === 1 ? v3Index() : v3Index([refreshedPaper]))
+      }
+      if (url === "/api/v1/notes/inspect") {
+        const body = JSON.parse(options.body)
+        assert.equal(body.category, "source_map")
+        return localJsonResponse(noteInspection({
+          inspection_id: "source-map-inspection",
+          suggested_file_name: preview.label,
+          target_tab: "derivation",
+        }))
+      }
+      if (url === "/api/v1/notes/import") return localJsonResponse(importResult)
+      return { ok: false, text: async () => "" }
+    },
+  })
+
+  await controller.start()
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  ui.readerTocToggle.click()
+  assert.equal(ui.readerTocToggle.getAttribute("aria-expanded"), "false")
+  ui.addNote.click()
+  ui.noteCategory.value = "source_map"
+  ui.noteCategory.dispatch("change")
+  ui.noteFile.files = [markdownFile("source.md", "source_map\n")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+
+  assert.equal(indexCount, 2)
+  assert.equal(ui.noteDialog.open, false)
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(ui.readerTocToggle.getAttribute("aria-expanded"), "false")
+  assert.equal(ui.tabs.find((tab) => tab.dataset.readerTab === "derivation").getAttribute("aria-selected"), "true")
+  assert.equal(ui.materialSelects.derivation.value, "source_map:0")
+  assert.equal(ui.indexReloadStatus.hidden, true)
+  assert.equal(ui.error.hidden, true)
+})
+
+test("index reload failure preserves the old view and a retry reconciles the imported preview", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  let indexCount = 0
+  const preview = controlledPreviewDocument("source_map", {
+    label: "Paper-01_source_map.md",
+    hashCharacter: "e",
+  })
+  const importResult = importedNote({
+    actual_file_name: preview.label,
+    target_tab: "derivation",
+    new_preview_url: preview.url,
+  })
+  const refreshedPaper = normalizedPaper({
+    controlled_preview_documents: controlledPreviewDocuments({ source_map: [preview] }),
+  })
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) {
+        indexCount += 1
+        if (indexCount === 2) throw new Error("temporary index failure")
+        return localJsonResponse(indexCount === 1 ? v3Index() : v3Index([refreshedPaper]))
+      }
+      if (url === "/api/v1/notes/inspect") return localJsonResponse(noteInspection({
+        inspection_id: "reload-inspection",
+        suggested_file_name: preview.label,
+        target_tab: "derivation",
+      }))
+      if (url === "/api/v1/notes/import") return localJsonResponse(importResult)
+      return { ok: false, text: async () => "" }
+    },
+  })
+
+  await controller.start()
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  ui.addNote.click()
+  ui.noteCategory.value = "source_map"
+  ui.noteCategory.dispatch("change")
+  ui.noteFile.files = [markdownFile("source.md", "source_map\n")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+
+  assert.equal(indexCount, 2)
+  assert.equal(ui.noteDialog.open, false)
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(ui.results.querySelectorAll('[data-paper-id="Paper-01"]').length, 1)
+  assert.equal(ui.error.hidden, true)
+  assert.equal(ui.indexReloadStatus.hidden, false)
+  assert.match(ui.indexReloadStatus.textContent, /笔记已导入，但索引刷新失败/u)
+
+  ui.indexReload.click()
+  await settleControllerEvents()
+  assert.equal(indexCount, 3)
+  assert.equal(ui.indexReloadStatus.hidden, true)
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(ui.materialSelects.derivation.value, "source_map:0")
 })
 
 test("load visibility preserves a failure instead of replacing it with empty results", async () => {
