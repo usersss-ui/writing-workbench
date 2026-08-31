@@ -82,3 +82,28 @@ exit 0, no output
 ### Known deferred
 
 - The current GitHub package dependency audit remains incomplete until Task 13 performs the explicitly planned manifest/resource union. Task 7 does not modify package manifests and does not claim the current package closure is complete.
+
+## Fix round 2 — cross-tab pending recovery and credential variants
+
+- Review fix implementation: `5045170dc6d349385fe33643b2bcdf942d525e8a` (`fix: preserve cross-tab snapshot fallback`).
+- The credential extension test was RED (`0/1`): a Digest authorization value produced `ready` instead of `unsafe_metadata`. The same fragmented-fixture test now proves rejection of arbitrary authorization schemes, `oauth_token` and generic `token` assignments, plus scheme-qualified username-only URL user information. Ordinary academic prose containing the word `token` remains accepted.
+- The shared-storage A/P/B regression test was RED (`0/1`): after A left `pending(previous=P)`, another store committed B, and A failed again, the logical current incorrectly resolved to P rather than B. Retrying an existing pending snapshot now refreshes its fallback from the durable pointer before changing current. If raw current already equals A, the validated logical current is retained so an A-to-A pending cycle cannot be created.
+- Fault-injection coverage verifies pending-refresh writes that throw before or after mutation, unavailable post-write reads, recovery under the same snapshot ID, and a separately reopened store observing B after the failed retry. Pending refresh is proven before current changes, so an unproven refresh returns `false` while B remains durable and logical.
+- Correction to the fix-round-1 wording: a failed append already hid its uncommitted candidate, but before this round an old pending fallback could still regress the logical current from a newer cross-tab B to the older P. The stronger cross-tab statement is valid only with the refresh behavior added here.
+- Clarification to the original delivered-boundary wording: “no fetch route” means no executor, model, agent, health or task route. The one canonical read-only paper-index request through `loadPaperIndex` remains intentional and tested.
+
+Final fix-round-2 verification:
+
+```text
+node --test prototype/desktop/direction-snapshot.test.mjs prototype/desktop/agent-task-input.test.mjs prototype/desktop/agent-tasks.test.mjs prototype/desktop/desktop-pages.test.mjs exporter/paper-library/build.test.mjs
+77 passed, 0 failed
+
+node --check prototype/desktop/agent-task-input.mjs
+node --check prototype/desktop/agent-task-input.test.mjs
+both exit 0
+
+git diff --cached --check
+exit 0, no output
+```
+
+- This round changes only `agent-task-input.mjs` and its focused test. Package manifests remain untouched, and the Task 13 package-closure deferral above remains in force.
