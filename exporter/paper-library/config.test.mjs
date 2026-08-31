@@ -67,3 +67,54 @@ test("rejects a relative source path", async () => {
 
   await assert.rejects(() => loadLibraryConfig(configPath), /必须是绝对路径/)
 })
+
+test("loads an explicit archive_source_id only when it matches one configured source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paper-library-config-"))
+  const configPath = join(root, "library.local.json")
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    archive_source_id: "archive_papers",
+    sources: [
+      { source_id: "main_papers", path: join(root, "main") },
+      { source_id: "archive_papers", path: join(root, "archive") },
+    ],
+  }))
+
+  const config = await loadLibraryConfig(configPath)
+  assert.equal(config.archive_source_id, "archive_papers")
+})
+
+test("does not infer archive capability when archive_source_id is absent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paper-library-config-"))
+  const configPath = join(root, "library.local.json")
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    sources: [{ source_id: "only_source", path: join(root, "papers") }],
+  }))
+
+  const config = await loadLibraryConfig(configPath)
+  assert.equal(config.archive_source_id, null)
+})
+
+test("rejects unknown, path-like, empty, non-string, or ambiguous archive_source_id values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paper-library-config-"))
+  const configPath = join(root, "library.local.json")
+  for (const archiveSourceId of [
+    "missing_source",
+    "../main_papers",
+    "/main_papers",
+    "main\\papers",
+    "",
+    42,
+    ["main_papers"],
+    "MAIN_PAPERS",
+    " main_papers ",
+  ]) {
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      archive_source_id: archiveSourceId,
+      sources: [{ source_id: "main_papers", path: join(root, "papers") }],
+    }))
+    await assert.rejects(() => loadLibraryConfig(configPath), /archive_source_id/u)
+  }
+})

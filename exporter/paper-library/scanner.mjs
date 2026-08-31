@@ -5,6 +5,7 @@ import { basename, extname, relative, resolve, sep } from "node:path"
 import posix from "node:path/posix"
 import { isDeepStrictEqual } from "node:util"
 import { classifyArtifact as classifyBaseArtifact, createEmptyArtifacts, summarizeArtifactAvailability, ARTIFACT_KEYS } from "./artifacts.mjs"
+import { ARCHIVE_METADATA_FILE, ARCHIVE_METADATA_MAX_BYTES, parseArchiveMetadata } from "./archive-metadata.mjs"
 import { parsePaperFrontmatter } from "./frontmatter.mjs"
 import { makeOverrideKey, makePathPaperId, makeSlug, normalizeRelativePath } from "./ids.mjs"
 import { isPathOnlyReadingNoteEligible, validatePaperOverride } from "./overrides.mjs"
@@ -14,6 +15,7 @@ const EXPLICIT_ID = /^[A-Za-z][A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/
 const MARKDOWN_PREFIX_BYTES = 8192
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"])
 const DEFAULT_MARKDOWN_FILE_SYSTEM = Object.freeze({ lstat, open, realpath, noFollowFlag: constants.O_NOFOLLOW })
+const DEFAULT_METADATA_FILE_SYSTEM = Object.freeze({ lstat, open, realpath, noFollowFlag: constants.O_NOFOLLOW })
 
 export function classifyArtifact(options) {
   if (options.explicitCategory !== null && options.explicitCategory !== undefined && options.explicitCategory !== "note") {
@@ -35,6 +37,7 @@ export function classifyArtifact(options) {
 }
 
 class UnsafeMarkdownReadError extends Error {}
+class UnsafeArchiveMetadataReadError extends Error {}
 
 export function isPathInsideRoot(root, target, pathApi = nativePath) {
   const pathToTarget = pathApi.relative(root, target)
@@ -110,6 +113,81 @@ function createSafeMarkdownPrefixReader(fileSystem = {}) {
   }
 }
 
+function unsafeArchiveMetadata(message = "归档元数据在安全读取期间发生变化") {
+  return new UnsafeArchiveMetadataReadError(message)
+}
+
+function createSafeArchiveMetadataReader(fileSystem = {}) {
+  const io = { ...DEFAULT_METADATA_FILE_SYSTEM, ...fileSystem }
+  for (const method of ["lstat", "open", "realpath"]) {
+    if (typeof io[method] !== "function") throw new TypeError(`归档元数据文件系统缺少 ${method}`)
+  }
+
+  async function pathSnapshot(path, sourceRoot) {
+    let info
+    let canonicalPath
+    try {
+      info = await io.lstat(path, { bigint: true })
+      canonicalPath = await io.realpath(path)
+    } catch {
+      throw unsafeArchiveMetadata()
+    }
+    if (
+      info.isSymbolicLink()
+      || !info.isFile()
+      || Number(info.size) > ARCHIVE_METADATA_MAX_BYTES
+      || !insideRoot(sourceRoot, canonicalPath)
+    ) throw unsafeArchiveMetadata()
+    return { canonicalPath, fingerprint: statFingerprint(info), size: Number(info.size) }
+  }
+
+  return async function readArchiveMetadata({ file, sourceRoot }) {
+    const before = await pathSnapshot(file.lexical_path, sourceRoot)
+    if (before.canonicalPath !== file.absolute_path || before.fingerprint !== file.discovery_fingerprint) throw unsafeArchiveMetadata()
+    if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw unsafeArchiveMetadata("当前平台不支持安全打开归档元数据")
+
+    let handle
+    try {
+      try {
+        handle = await io.open(file.lexical_path, constants.O_RDONLY | io.noFollowFlag)
+      } catch (error) {
+        if (["ELOOP", "ENOENT", "ENOTDIR"].includes(error?.code)) throw unsafeArchiveMetadata()
+        throw error
+      }
+      const openedBefore = await handle.stat({ bigint: true })
+      if (
+        !openedBefore.isFile()
+        || Number(openedBefore.size) > ARCHIVE_METADATA_MAX_BYTES
+        || statFingerprint(openedBefore) !== before.fingerprint
+      ) throw unsafeArchiveMetadata()
+
+      const bytes = Buffer.alloc(Number(openedBefore.size))
+      let offset = 0
+      while (offset < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset)
+        if (bytesRead === 0) throw unsafeArchiveMetadata()
+        offset += bytesRead
+      }
+      const probe = Buffer.alloc(1)
+      if ((await handle.read(probe, 0, 1, offset)).bytesRead !== 0) throw unsafeArchiveMetadata()
+      const openedAfter = await handle.stat({ bigint: true })
+      const after = await pathSnapshot(file.lexical_path, sourceRoot)
+      if (
+        statFingerprint(openedAfter) !== statFingerprint(openedBefore)
+        || after.fingerprint !== statFingerprint(openedAfter)
+        || after.canonicalPath !== before.canonicalPath
+      ) throw unsafeArchiveMetadata()
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+      } catch {
+        throw unsafeArchiveMetadata("归档元数据不是有效 UTF-8")
+      }
+    } finally {
+      if (handle) await handle.close()
+    }
+  }
+}
+
 function emptyAudit() {
   return {
     version: 1,
@@ -117,10 +195,12 @@ function emptyAudit() {
     sources: [],
     counts: { paper_units: 0, standard_units: 0, identity_pending_units: 0, generated_note_previews: 0, generated_pages: 0 },
     private_path_lookup: {},
+    archive_identity_lookup: {},
     excluded_units: [],
     blocking: {
       duplicate_ids: [], duplicate_explicit_ids: [], identity_conflicts: [], metadata_conflicts: [], parent_relationships: [],
       path_escapes: [], slug_collisions: [], exclusion_targets: [], invalid_note_overrides: [], invalid_preferred_notes: [],
+      duplicate_archive_source_ids: [],
     },
     warnings: {
       multiple_versions: [], unreadable_markdown: [], unsafe_markdown: [], broken_paths: [], external_symlinks: [], internal_symlinks: [],
@@ -134,6 +214,7 @@ function blockingError(audit) {
   if (audit.blocking.duplicate_ids.length > 0) labels.push("重复论文 ID")
   if (audit.blocking.identity_conflicts.length > 0) labels.push("笔记短码冲突")
   if (audit.blocking.metadata_conflicts.length > 0) labels.push("frontmatter 元数据冲突")
+  if (audit.blocking.duplicate_archive_source_ids.length > 0) labels.push("归档来源身份重复")
   const relationshipCodes = new Set(audit.blocking.parent_relationships.map((item) => item.split(":", 1)[0]))
   if (relationshipCodes.has("missing_parent")) labels.push("父项不存在")
   if (relationshipCodes.has("self_parent")) labels.push("父子引用自引用")
@@ -322,6 +403,10 @@ async function walkSource({ source, rootPath, audit }) {
       }
       if (info.isDirectory()) await visit(actualPath, childRelative, viaSymlink || entryIsSymlink)
       else if (info.isFile()) {
+        if (entryIsSymlink && entry.name === ARCHIVE_METADATA_FILE) {
+          audit.warnings.internal_symlinks.push(childRelative)
+          continue
+        }
         const fileStat = await stat(actualPath, { bigint: true })
         const resolvedRelativePath = relative(rootPath, actualPath).replaceAll("\\", "/") || "."
         record.files.push({
@@ -341,6 +426,15 @@ function directPdfFiles(directory) {
   return directory.files.filter((file) => extname(file.file_name).toLowerCase() === ".pdf" && (!file.via_symlink || isWithinUnit(file.resolved_relative_path, directory.relative_path)))
 }
 
+function directArchiveMetadataFile(directory) {
+  const expectedPath = relativeSourcePath(directory.relative_path, ARCHIVE_METADATA_FILE)
+  return directory.files.find((file) => (
+    file.file_name === ARCHIVE_METADATA_FILE
+    && file.relative_path === expectedPath
+    && !file.via_symlink
+  )) ?? null
+}
+
 function isDescendant(path, parent) {
   return parent !== "" && path.startsWith(`${parent}/`)
 }
@@ -355,9 +449,9 @@ function higherPriorityMetadataSource(field, override, catalog) {
   return null
 }
 
-async function markdownMetadata(files, audit, { readMarkdownPrefix, sourceRoot, unitKey, override, catalog }) {
-  const data = {}
-  let explicitId = null
+async function markdownMetadata(files, audit, { readMarkdownPrefix, sourceRoot, unitKey, override, catalog, initialMetadata = null }) {
+  const data = initialMetadata ? { ...initialMetadata } : {}
+  let explicitId = initialMetadata?.paper_id ?? null
   for (const file of files.filter((item) => [".md", ".markdown"].includes(extname(item.file_name).toLowerCase()))) {
     try {
       const prefix = await readMarkdownPrefix({ file, sourceRoot })
@@ -391,6 +485,22 @@ async function markdownMetadata(files, audit, { readMarkdownPrefix, sourceRoot, 
     }
   }
   return { data, explicitId }
+}
+
+async function archiveMetadataForUnit({ file, readArchiveMetadata, sourceRoot, sourceId, unitKey, audit }) {
+  if (!file) return null
+  try {
+    const text = await readArchiveMetadata({ file, sourceRoot })
+    const parsed = parseArchiveMetadata(text)
+    if (parsed.archive_source_id !== sourceId) {
+      audit.blocking.metadata_conflicts.push(`${unitKey}:archive_source_id`)
+      return null
+    }
+    return parsed
+  } catch {
+    audit.blocking.metadata_conflicts.push(`${unitKey}:${ARCHIVE_METADATA_FILE}`)
+    return null
+  }
 }
 
 function validateArtifactOverrides({ override, sourceRoot, unit, allFiles, audit }) {
@@ -455,12 +565,13 @@ function sortedFilesForUnit(unit, unitRoots, directories) {
   return files.sort((left, right) => left.relative_path.localeCompare(right.relative_path))
 }
 
-async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, readMarkdownPrefix) {
+async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, { readMarkdownPrefix, readArchiveMetadata }) {
   const audit = emptyAudit()
   const papers = []
   const paperIds = new Map()
   const explicitIds = new Map()
   const slugIds = new Map()
+  const archiveIdentities = new Map()
   const overridePapers = overrides?.papers ?? {}
   if (overrides && (overrides.version !== 1 || !overridePapers || typeof overridePapers !== "object" || Array.isArray(overridePapers))) {
     throw new Error("覆盖文件必须是 version 为 1 的 papers 对象")
@@ -472,7 +583,9 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
   for (const { source, rootPath } of canonicalSources) {
     const walked = await walkSource({ source, rootPath, audit })
     audit.sources.push({ source_id: source.source_id, root_path: walked.rootPath, scanned_directories: walked.scannedDirectories })
-    const unitPaths = new Set([...walked.directories.values()].filter((directory) => directPdfFiles(directory).length > 0).map((directory) => directory.relative_path))
+    const unitPaths = new Set([...walked.directories.values()].filter((directory) => (
+      directPdfFiles(directory).length > 0 || directArchiveMetadataFile(directory) !== null
+    )).map((directory) => directory.relative_path))
     if (unitPaths.has("")) throw new Error("配置根目录不能直接包含论文 PDF")
     for (const directory of walked.directories.values()) {
       if (!directory.relative_path) continue
@@ -493,7 +606,15 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
           reason: override.exclude_reason,
         })
       }
-      return { relative_path: relativePath, absolute_path: directory.absolute_path, override, catalog, all_unit_files: allUnitFiles, excluded }
+      return {
+        relative_path: relativePath,
+        absolute_path: directory.absolute_path,
+        archive_file: directArchiveMetadataFile(directory),
+        override,
+        catalog,
+        all_unit_files: allUnitFiles,
+        excluded,
+      }
     })
     for (const unit of preparedUnits) {
       if (unit.excluded) continue
@@ -506,12 +627,21 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
         }
         return false
       })
+      unit.archive_metadata = await archiveMetadataForUnit({
+        file: unit.archive_file,
+        readArchiveMetadata,
+        sourceRoot: walked.rootPath,
+        sourceId: source.source_id,
+        unitKey: makeOverrideKey({ sourceId: source.source_id, relativePath: unit.relative_path }),
+        audit,
+      })
       unit.metadata = await markdownMetadata(unit.files, audit, {
         readMarkdownPrefix,
         sourceRoot: walked.rootPath,
         unitKey: makeOverrideKey({ sourceId: source.source_id, relativePath: unit.relative_path }),
         override: unit.override,
         catalog: unit.catalog,
+        initialMetadata: unit.archive_metadata?.metadata ?? null,
       })
     }
     const thesisPaths = preparedUnits
@@ -536,6 +666,7 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
       const artifacts = createEmptyArtifacts()
       const siblingPdfStems = files.filter((file) => extname(file.file_name).toLowerCase() === ".pdf").map((file) => basename(file.file_name, extname(file.file_name)))
       for (const file of files) {
+        if (file.file_name === ARCHIVE_METADATA_FILE) continue
         const localPath = normalizeRelativePath(posix.relative(unit.relative_path, file.relative_path))
         const explicitCategory = artifactCategories.get(file.relative_path) ?? null
         const category = classifyArtifact({ relativePath: localPath, siblingPdfStems, explicitCategory })
@@ -569,6 +700,12 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
       idMatching.push(`${source.source_id}::${unit.relative_path}`)
       paperIds.set(paper_id, idMatching)
       audit.private_path_lookup[paper_id] = unit.absolute_path
+      if (unit.archive_metadata) {
+        audit.archive_identity_lookup[paper_id] = unit.archive_metadata.archive_identity
+        const matching = archiveIdentities.get(unit.archive_metadata.archive_identity) ?? []
+        matching.push(`${source.source_id}::${unit.relative_path}`)
+        archiveIdentities.set(unit.archive_metadata.archive_identity, matching)
+      }
       if (identity_source === "path_hash") audit.counts.identity_pending_units += 1
       else audit.counts.standard_units += 1
       if (identity_source !== "path_hash") {
@@ -593,6 +730,9 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
   for (const [id, locations] of paperIds) if (locations.length > 1) audit.blocking.duplicate_ids.push(id)
   for (const [id, locations] of explicitIds) if (locations.length > 1) audit.blocking.duplicate_explicit_ids.push(id)
   for (const [slug, ids] of slugIds) if (new Set(ids).size > 1) audit.blocking.slug_collisions.push(slug)
+  for (const [identity, locations] of archiveIdentities) {
+    if (locations.length > 1) audit.blocking.duplicate_archive_source_ids.push(identity)
+  }
   for (const items of Object.values(audit.blocking)) items.sort((left, right) => left.localeCompare(right))
   if (audit.blocking.duplicate_ids.length > 0) throw blockingError(audit)
   validateParentRelationships(papers, audit)
@@ -602,9 +742,10 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
   return { papers, audit }
 }
 
-export function createPaperSourceScanner({ markdownFileSystem } = {}) {
+export function createPaperSourceScanner({ markdownFileSystem, metadataFileSystem } = {}) {
   const readMarkdownPrefix = createSafeMarkdownPrefixReader(markdownFileSystem)
-  return (options) => scanPaperSourcesWithReader(options, readMarkdownPrefix)
+  const readArchiveMetadata = createSafeArchiveMetadataReader(metadataFileSystem)
+  return (options) => scanPaperSourcesWithReader(options, { readMarkdownPrefix, readArchiveMetadata })
 }
 
 export const scanPaperSources = createPaperSourceScanner()

@@ -39,5 +39,19 @@ export async function loadLibraryConfig(configPath) {
     return Object.freeze({ source_id: sourceId, path, catalog_path: catalogPath ?? null })
   })
 
-  return Object.freeze({ version: 1, sources: Object.freeze(sources) })
+  const archiveSourceId = raw.archive_source_id
+  if (archiveSourceId !== undefined) {
+    if (typeof archiveSourceId !== "string" || !SOURCE_ID_PATTERN.test(archiveSourceId)) {
+      throw new Error("archive_source_id 格式无效")
+    }
+    if (sources.filter((source) => source.source_id === archiveSourceId).length !== 1) {
+      throw new Error("archive_source_id 必须唯一匹配一个已配置来源")
+    }
+  }
+
+  return Object.freeze({
+    version: 1,
+    archive_source_id: archiveSourceId ?? null,
+    sources: Object.freeze(sources),
+  })
 }

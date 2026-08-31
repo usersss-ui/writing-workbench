@@ -175,6 +175,25 @@ async function makeFixture() {
   }
 }
 
+function metadataOnlyFixture() {
+  return [
+    "paper_id: Wang23-DIO",
+    'title: "Distributed Interval Optimization Over Time-Varying Networks"',
+    "authors:",
+    '  - "Yinghui Wang"',
+    "year: 2023",
+    'venue: "IEEE Access"',
+    'url: "https://openalex.org/W4387886124"',
+    "unit_type: article",
+    "archive_mode: metadata_only",
+    "archive_source_id: main_papers",
+    "candidate_source: openalex",
+    "openalex_id: W4387886124",
+    'archived_at: "2026-08-30T04:05:06.000Z"',
+    "",
+  ].join("\n")
+}
+
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"))
 }
@@ -347,6 +366,34 @@ test("public index exposes only the aggregate count of audit warning arrays", as
   assert.equal(indexText.includes("multiple_versions"), false)
   assert.equal(indexText.includes("unrecognized_artifacts"), false)
   assert.equal(indexText.includes("unclassified.bin"), false)
+})
+
+test("metadata-only build keeps archive identity private and emits only the existing public URL field", async () => {
+  const fixture = await makeFixture()
+  fixture.config.archive_source_id = "main_papers"
+  await put(fixture.sourceRoot, "Candidate/metadata.yaml", metadataOnlyFixture())
+
+  await buildPrivateLibrary(fixture)
+  const indexPath = join(fixture.repoRoot, "local_library_data/paper-index.json")
+  const auditPath = join(fixture.repoRoot, "local_library_data/paper-library-audit.json")
+  const indexText = await readFile(indexPath, "utf8")
+  const index = JSON.parse(indexText)
+  const audit = await readJson(auditPath)
+  const paper = index.papers[0]
+
+  assert.equal(paper.source_id, "main_papers")
+  assert.equal(paper.relative_path, "Candidate")
+  assert.equal(paper.doi_or_url, "https://openalex.org/W4387886124")
+  assert.equal(paper.note_status, "metadata_only")
+  assert.deepEqual(paper.facet_states, {})
+  assert.deepEqual(paper.source_documents, { pdf: [], ocr: [] })
+  assert.equal(Object.values(paper.controlled_previews).every((value) => value === null), true)
+  assert.equal(Object.values(paper.controlled_preview_documents).every((items) => items.length === 0), true)
+  assert.deepEqual(audit.archive_identity_lookup, { "Wang23-DIO": "openalex:W4387886124" })
+  for (const forbidden of ["archive_source_id", "candidate_source", "openalex_id", "archive_identity_lookup"]) {
+    assert.equal(indexText.includes(`\"${forbidden}\"`), false)
+  }
+  assert.equal(indexText.includes(fixture.sourceRoot), false)
 })
 
 test("shared built-index validator accepts only the complete v3 public boundary", async () => {
