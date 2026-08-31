@@ -6,6 +6,8 @@ import {
   rebuildConfiguredLibrary,
 } from "./runtime.mjs"
 
+const institution = Object.freeze({ institution_id: "nuist", providers: [] })
+
 test("loads one configured context and indexes one scan by stable paper id", async () => {
   const repoRoot = "/fixture/repo"
   const loads = []
@@ -29,17 +31,20 @@ test("loads one configured context and indexes one scan by stable paper id", asy
       papers: [paper],
       audit: { private_path_lookup: { "Paper-01": "/vault/Topic/Paper" } },
     }),
+    loadInstitution: async (path) => { loads.push(path); return institution },
   })
 
   assert.deepEqual(loads, [
     join(repoRoot, "local_library_config/library.local.json"),
     join(repoRoot, "local_library_config/paper-overrides.json"),
     join(repoRoot, "local_library_config/paper-tags.json"),
+    join(repoRoot, "exporter/config/institutions/nuist.json"),
     "/catalog.md:main",
   ])
   assert.equal(context.papersById.get("Paper-01"), paper)
   assert.equal(context.unitDirectoryByPaperId.get("Paper-01"), "/vault/Topic/Paper")
   assert.equal(context.scanned.papers[0], paper)
+  assert.equal(context.institution, institution)
 })
 
 test("rejects duplicate paper ids and papers without one scan path mapping", async () => {
@@ -48,6 +53,7 @@ test("rejects duplicate paper ids and papers without one scan path mapping", asy
     loadConfig: async () => ({ version: 1, sources: [] }),
     loadOverrides: async () => ({ version: 1, papers: {} }),
     loadTags: async () => ({ version: 3, papers: {} }),
+    loadInstitution: async () => institution,
   }
   const duplicate = { paper_id: "Paper-01", source_id: "main", relative_path: "Paper" }
 
@@ -64,8 +70,8 @@ test("rejects duplicate paper ids and papers without one scan path mapping", asy
   }), /扫描映射无效/u)
 })
 
-test("rebuild reuses exactly the loaded context and approved template root", async () => {
-  const context = { config: {}, overrides: {}, tagCatalog: {}, catalogs: {} }
+test("rebuild reuses exactly the loaded context, validated institution and approved template root", async () => {
+  const context = { config: {}, overrides: {}, tagCatalog: {}, catalogs: {}, institution }
   const calls = []
   const result = await rebuildConfiguredLibrary({
     repoRoot: "/fixture/repo",
@@ -80,6 +86,7 @@ test("rebuild reuses exactly the loaded context and approved template root", asy
     overrides: context.overrides,
     catalogs: context.catalogs,
     tagCatalog: context.tagCatalog,
+    institution,
     templateRoot: join("/fixture/repo", "prototype/desktop"),
   }])
 })

@@ -37,7 +37,13 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "paper-library-model.mjs",
   "paper-library-storage.mjs",
   "paper-user-tags.mjs",
+  "candidate-storage.mjs",
+  "discovery.mjs",
+  "institution-access.mjs",
+  "openalex-search.mjs",
 ])
+
+const INSTITUTION = Object.freeze({ version: 1, institution_id: "nuist", display_name: "南京信息工程大学", access_mode: "carsi", library_home: "https://lib.nuist.edu.cn/", fallback_page: "https://lib.nuist.edu.cn/zy1/wwsjk.htm", providers: [{ provider_id: "ieee", display_name: "IEEE Xplore", hosts: ["ieeexplore.ieee.org"], doi_prefixes: ["10.1109"], library_page: "https://lib.nuist.edu.cn/info/1015/1430.htm", carsi_entry_url: "https://ieeexplore.ieee.org/servlet/wayf.jsp", carsi_supported: true }] })
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -163,6 +169,7 @@ async function makeFixture() {
   const sourceRoot = await mkdtemp(join(tmpdir(), "paper-build-source-"))
   const templateRoot = join(repoRoot, "templates")
   await put(templateRoot, "library.template.html", "<!doctype html><html lang=\"zh-CN\"><main id=\"library-results\"></main></html>")
+  await put(templateRoot, "discovery.template.html", "<!doctype html><html lang=\"zh-CN\"><main id=\"discovery-mode-tabs\"></main></html>")
   for (const asset of REQUIRED_DESKTOP_ASSETS) await put(templateRoot, asset, `approved:${asset}`)
   await put(templateRoot, "vendor/katex/katex.mjs", "export default { render() {} }")
   await put(templateRoot, "vendor/katex/katex.min.css", "@font-face{src:url(fonts/KaTeX_Test-Regular.woff2) format('woff2')}")
@@ -176,6 +183,7 @@ async function makeFixture() {
     config: { version: 1, sources: [{ source_id: "main_papers", path: sourceRoot }] },
     overrides: { version: 1, papers: {} },
     tagCatalog: { version: 3, papers: {} },
+    institution: INSTITUTION,
   }
 }
 
@@ -234,9 +242,11 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
   const indexPath = join(fixture.repoRoot, "local_library_data/paper-index.json")
   const auditPath = join(fixture.repoRoot, "local_library_data/paper-library-audit.json")
   const pagePath = join(fixture.repoRoot, "local_library_output/desktop/library.html")
+  const discoveryPath = join(fixture.repoRoot, "local_library_output/desktop/discovery.html")
   await stat(indexPath)
   await stat(auditPath)
   await stat(pagePath)
+  await stat(discoveryPath)
   assert.equal(result.paperCount, 1)
   assert.equal(result.previewCount, 1)
   assert.equal(result.pageCount, 2)
@@ -267,6 +277,7 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
   )
   assert.equal(await exists(join(fixture.repoRoot, "local_library_output/desktop/assets/vendor/katex/private-extra.txt")), false)
   assert.equal(await exists(join(fixture.repoRoot, "local_library_output/desktop/assets/private-extra.txt")), false)
+  assert.deepEqual(await readJson(join(fixture.repoRoot, "local_library_output/desktop/assets/nuist.institution.json")), INSTITUTION)
 })
 
 test("buildPrivateLibrary forwards catalogs and serializes normalized safe metadata fields", async () => {

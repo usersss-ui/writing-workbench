@@ -37,6 +37,7 @@ import {
 import { hasExactJsonObjectKeys, serializeFacetSchema } from "./facet-schema.mjs"
 import { METADATA_PROVENANCE_FIELDS } from "./overrides.mjs"
 import { applyPaperTagCatalog } from "./tag-catalog.mjs"
+import { validateInstitutionConfig } from "./institution-config.mjs"
 
 const GENERATED_BASENAMES = new Set(["local_library_data", "local_library_output"])
 const NOTE_SIZE_LIMIT = 1024 * 1024
@@ -71,6 +72,10 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "paper-library-model.mjs",
   "paper-library-storage.mjs",
   "paper-user-tags.mjs",
+  "candidate-storage.mjs",
+  "discovery.mjs",
+  "institution-access.mjs",
+  "openalex-search.mjs",
 ])
 const KATEX_VENDOR_ROOT = "vendor/katex"
 const KATEX_REQUIRED_FILES = Object.freeze(["katex.mjs", "katex.min.css", "LICENSE"])
@@ -457,6 +462,13 @@ async function loadApprovedDesktopBundle(repoRoot, templateRoot) {
     missingMessage: "固定论文库模板不存在",
     invalidMessage: "论文库模板必须是项目内普通非符号链接文件",
   })
+  const discoveryTemplateBytes = await loadApprovedDesktopFile({
+    repoRoot,
+    templateRoot: canonicalTemplateRoot,
+    fileName: "discovery.template.html",
+    missingMessage: "固定论文发现模板不存在",
+    invalidMessage: "论文发现模板必须是项目内普通非符号链接文件",
+  })
   const assets = new Map()
   for (const fileName of REQUIRED_DESKTOP_ASSETS) {
     const bytes = await loadApprovedDesktopFile({
@@ -470,7 +482,7 @@ async function loadApprovedDesktopBundle(repoRoot, templateRoot) {
   }
   const katexAssets = await loadApprovedKaTeXBundle(repoRoot, canonicalTemplateRoot)
   for (const [relativePath, bytes] of katexAssets) assets.set(relativePath, bytes)
-  return { templateBytes, assets }
+  return { templateBytes, discoveryTemplateBytes, assets }
 }
 
 function cloneArtifactEntry(artifact) {
@@ -982,9 +994,10 @@ function aggregateWarningCount(audit) {
   )
 }
 
-export async function buildPrivateLibrary({ repoRoot, config, overrides, catalogs = {}, tagCatalog = null, templateRoot, scan = scanPaperSources }) {
+export async function buildPrivateLibrary({ repoRoot, config, overrides, catalogs = {}, tagCatalog = null, institution, templateRoot, scan = scanPaperSources }) {
   const canonicalRoot = canonicalRepositoryRoot(repoRoot)
-  const { templateBytes, assets: desktopAssets } = await loadApprovedDesktopBundle(canonicalRoot, templateRoot)
+  const { templateBytes, discoveryTemplateBytes, assets: desktopAssets } = await loadApprovedDesktopBundle(canonicalRoot, templateRoot)
+  const validatedInstitution = validateInstitutionConfig(institution)
   const scanned = await scan({ config, overrides, catalogs })
   const audit = scanned.audit
   const tagged = tagCatalog
@@ -1162,6 +1175,8 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
           const assetDirectory = join(desktopDirectory, "assets")
           await mkdir(assetDirectory, { recursive: true })
           await writeFile(join(desktopDirectory, "library.html"), templateBytes)
+          await writeFile(join(desktopDirectory, "discovery.html"), discoveryTemplateBytes)
+          await writeFile(join(assetDirectory, "nuist.institution.json"), prettyJson(validatedInstitution), "utf8")
           for (const [fileName, bytes] of desktopAssets) {
             const assetPath = join(assetDirectory, fileName)
             await mkdir(dirname(assetPath), { recursive: true })

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="学术研究工作台论文发现页：检索公开书目并人工核验访问线索。" />
+    <title>论文发现 · 学术研究工作台</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body class="discovery-page">
+    <main class="app-window" aria-label="论文发现桌面工作台">
+      <header class="window-bar">
+        <div class="traffic-lights" aria-hidden="true"><span class="traffic-light traffic-light--red"></span><span class="traffic-light traffic-light--yellow"></span><span class="traffic-light traffic-light--green"></span></div>
+        <div class="window-context"><span class="context-kicker">研究工作台</span><span class="context-divider">/</span><strong>论文发现</strong></div>
+        <div class="command-search discovery-command-summary" aria-label="当前页面说明"><span aria-hidden="true">⌕</span><span>公开书目检索 · 人工确认访问</span></div>
+        <div class="window-actions"><a class="icon-button" href="./library.html" aria-label="打开论文库">▤</a><span class="avatar-button" aria-label="当前用户">杨</span></div>
+      </header>
+
+      <div class="workspace-shell discovery-shell">
+        <aside class="sidebar">
+          <a class="brand" href="../../prototype/desktop/index.html" aria-label="返回研究首页"><span class="brand-mark" aria-hidden="true">R</span><span><strong>学术研究工作台</strong><small>个人研究控制台</small></span></a>
+          <nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">研究流程</p>
+            <a class="nav-item" href="../../prototype/desktop/index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
+            <a class="nav-item" href="../../prototype/desktop/directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
+            <a class="nav-item nav-item--active" href="./discovery.html" aria-current="page"><span aria-hidden="true">⌕</span><span>论文发现</span></a>
+            <a class="nav-item" href="./library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
+            <a class="nav-item" href="../../prototype/desktop/p02.html"><span aria-hidden="true">□</span><span>我的论文</span></a>
+          </nav>
+          <section class="sidebar-plan" aria-labelledby="discovery-plan-title"><div class="plan-title-row"><h2 id="discovery-plan-title">发现边界</h2><strong>手动</strong></div><p>候选只保存公开元数据；是否获取全文、是否形成笔记，均须后续人工核验。</p></section>
+        </aside>
+
+        <section class="main-column discovery-main">
+          <div class="page-heading discovery-heading"><div><p class="eyebrow">公开书目 · 人工筛选</p><h1>从研究意图发现可核验的论文线索</h1><p>先检索 OpenAlex，再将候选放入当前浏览器队列；候选归档均标为“元数据待核验”。</p></div><a class="button button--secondary" href="https://openalex.org/" target="_blank" rel="noopener noreferrer">打开 OpenAlex ↗</a></div>
+
+          <section class="panel discovery-panel" aria-labelledby="discovery-mode-title">
+            <div class="discovery-mode-tabs" id="discovery-mode-tabs" role="tablist" aria-label="论文发现方式">
+              <button type="button" id="discovery-mode-keyword" data-discovery-mode="keyword" role="tab" aria-controls="keyword-discovery-panel" aria-selected="true" tabindex="0">关键词发现</button>
+              <button type="button" id="discovery-mode-access" data-discovery-mode="access" role="tab" aria-controls="known-paper-panel" aria-selected="false" tabindex="-1">已知论文访问</button>
+            </div>
+
+            <section id="keyword-discovery-panel" role="tabpanel" aria-labelledby="discovery-mode-keyword">
+              <div class="section-heading"><div><p class="eyebrow">关键词发现</p><h2 id="discovery-mode-title">将中文研究意图转换为可编辑英文检索式</h2><p>转换不确定时会停止；你可以直接编辑英文检索式后再发送公开检索。</p></div></div>
+              <form id="keyword-search-form" class="discovery-form">
+                <label>中文研究意图<textarea id="keyword-query" rows="2">时变有向网络中的低通信分布式约束优化</textarea></label>
+                <label>英文检索式<textarea id="english-query" rows="2" placeholder="生成后可编辑"></textarea></label>
+                <label>排序方式<select id="keyword-sort"><option value="relevance">相关性</option><option value="cited_by_count">引用次数</option><option value="publication_date">发表时间</option></select></label>
+                <div class="discovery-form-actions"><button class="button button--secondary" type="submit">生成英文检索式</button><button class="button button--primary" id="keyword-live-search" type="button">搜索 OpenAlex</button></div>
+              </form>
+              <p id="keyword-search-status" class="discovery-status" role="status" aria-live="polite">尚未向 OpenAlex 发起检索。</p>
+              <section id="keyword-search-results" class="discovery-results" tabindex="-1" aria-labelledby="keyword-results-title"><div class="result-header"><h3 id="keyword-results-title">公开检索结果</h3><span data-live-result-count>0 条真实结果</span></div><div id="keyword-live-results-list" class="discovery-result-list"></div></section>
+            </section>
+
+            <section id="known-paper-panel" role="tabpanel" aria-labelledby="discovery-mode-access" hidden>
+              <section id="access-guide-panel" class="access-guide"><div class="section-heading"><div><p class="eyebrow">已知论文访问</p><h2>先识别公开访问线索，再手动从学校入口访问</h2><p>此页不会嵌入登录、传递 Cookie、后台下载或隐藏跳转。</p></div><a class="text-button" href="https://lib.nuist.edu.cn/" target="_blank" rel="noopener noreferrer">NUIST 图书馆主页 ↗</a></div>
+                <form id="institution-access-form" class="discovery-form"><label>DOI、英文题名或 HTTPS 原文网址<input id="access-locator" type="text" autocomplete="off" placeholder="例如：10.1109/5.771073" /></label><label>平台（可选）<select id="access-provider"><option value="">自动识别</option></select></label><div class="discovery-form-actions"><button class="button button--primary" type="submit">生成手动访问步骤</button></div></form>
+                <p id="access-status" class="discovery-status" role="status" aria-live="polite"></p>
+                <section id="access-result" class="access-result" hidden aria-live="polite"><h3>人工访问步骤</h3><p><strong data-provider-name>平台尚未识别</strong>。先核对开放获取或平台落地页；学校入口不代表目标论文已订购。</p><ol><li><a id="institution-step-open" target="_blank" rel="noopener noreferrer">打开论文落地页或开放获取线索 ↗</a></li><li><a id="institution-step-auth" target="_blank" rel="noopener noreferrer">从 NUIST / CARSI 公开入口登录 ↗</a></li><li><a id="institution-step-library" target="_blank" rel="noopener noreferrer">打开图书馆数据库入口 ↗</a></li></ol><label>用于手动定位的 DOI / 网址 / 题名<input id="access-copy-target" readonly /></label><button class="text-button" id="access-copy" type="button">复制定位信息</button><span id="access-copy-status" class="discovery-status" role="status"></span><ul id="access-warnings" class="access-warnings"></ul></section>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <aside class="inspector discovery-inspector" id="candidate-queue-panel" aria-labelledby="candidate-queue-title">
+          <div class="inspector-heading"><div><p class="eyebrow">候选队列</p><h2 id="candidate-queue-title">待人工筛选</h2></div><span class="count-badge" data-candidate-count>0</span></div>
+          <p class="candidate-boundary">确认仅代表候选元数据待核验，不代表已有 PDF 或阅读笔记。</p>
+          <dl class="candidate-counts"><div><dt>待筛选</dt><dd data-candidate-pending-count>0</dd></div><div><dt>待归档</dt><dd data-candidate-confirmed-count>0</dd></div></dl>
+          <p id="candidate-queue-status" class="discovery-status" role="status" aria-live="polite"></p>
+          <div id="candidate-queue-list" class="candidate-queue-list"><p data-candidate-empty>尚无候选论文。搜索结果后可手动加入。</p></div>
+        </aside>
+      </div>
+    </main>
+    <script type="module" src="./assets/discovery.mjs"></script>
+  </body>
+</html>

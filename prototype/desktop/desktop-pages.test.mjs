@@ -54,6 +54,22 @@ test("研究首页与方向探索页可以通过公开链接互相到达", async
   assert.match(directionsHtml, /aria-labelledby="search-dialog-title"/)
 })
 
+test("论文发现页可从工作台主导航到达，并与论文库双向链接", async (context) => {
+  const server = createStaticServer()
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  context.after(() => server.close())
+  const address = server.address()
+  const baseUrl = `http://127.0.0.1:${address.port}/prototype/desktop`
+
+  const homeHtml = await (await fetch(`${baseUrl}/`)).text()
+  const discoveryResponse = await fetch(`${baseUrl}/discovery.template.html`)
+  const discoveryHtml = await discoveryResponse.text()
+  assert.match(homeHtml, /href="\.\.\/\.\.\/local_library_output\/desktop\/discovery\.html"/u)
+  assert.equal(discoveryResponse.status, 200)
+  assert.match(discoveryHtml, /href="\.\/library\.html"/u)
+  assert.match(discoveryHtml, /论文发现/u)
+})
+
 test("P02 工作台从首页可达并区分算法材料与理论结果", async (context) => {
   const server = createStaticServer()
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))

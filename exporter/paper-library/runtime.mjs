@@ -5,6 +5,7 @@ import { loadLibraryConfig } from "./config.mjs"
 import { loadPaperOverrides } from "./overrides.mjs"
 import { scanPaperSources } from "./scanner.mjs"
 import { loadPaperTagCatalog } from "./tag-catalog.mjs"
+import { loadInstitutionConfig } from "./institution-config.mjs"
 
 export async function loadPrivateLibraryContext({
   repoRoot,
@@ -12,12 +13,14 @@ export async function loadPrivateLibraryContext({
   loadOverrides = loadPaperOverrides,
   loadTags = loadPaperTagCatalog,
   loadCatalog = loadPaperCatalog,
+  loadInstitution = loadInstitutionConfig,
   scan = scanPaperSources,
 } = {}) {
   if (typeof repoRoot !== "string" || repoRoot.length === 0) throw new TypeError("论文库根目录无效")
   const config = await loadConfig(join(repoRoot, "local_library_config/library.local.json"))
   const overrides = await loadOverrides(join(repoRoot, "local_library_config/paper-overrides.json"))
   const tagCatalog = await loadTags(join(repoRoot, "local_library_config/paper-tags.json"))
+  const institution = await loadInstitution(join(repoRoot, "exporter/config/institutions/nuist.json"))
   const catalogs = {}
   for (const source of config.sources) {
     if (source.catalog_path === null || source.catalog_path === undefined) continue
@@ -35,11 +38,11 @@ export async function loadPrivateLibraryContext({
     papersById.set(paper.paper_id, paper)
     unitDirectoryByPaperId.set(paper.paper_id, directory)
   }
-  return { config, overrides, tagCatalog, catalogs, scanned, papersById, unitDirectoryByPaperId }
+  return { config, overrides, tagCatalog, catalogs, institution, scanned, papersById, unitDirectoryByPaperId }
 }
 
 export function rebuildConfiguredLibrary({ repoRoot, context, build = buildPrivateLibrary } = {}) {
-  if (!context?.config || !context?.overrides || !context?.catalogs || !context?.tagCatalog) {
+  if (!context?.config || !context?.overrides || !context?.catalogs || !context?.tagCatalog || !context?.institution) {
     throw new TypeError("论文库运行上下文无效")
   }
   return build({
@@ -48,6 +51,7 @@ export function rebuildConfiguredLibrary({ repoRoot, context, build = buildPriva
     overrides: context.overrides,
     catalogs: context.catalogs,
     tagCatalog: context.tagCatalog,
+    institution: context.institution,
     templateRoot: join(repoRoot, "prototype/desktop"),
   })
 }
