@@ -145,3 +145,30 @@
 - The real generated output was deliberately not rebuilt, so it will not contain `assets/paper-user-tags.mjs` until master Task 14 runs the combined build.
 - The new E2E flow is source-complete and syntax-valid but has not been exercised against a browser or the real 3/2 output; Task 14 must supply that evidence.
 - Keep the existing private catalog backup until the combined build/browser acceptance passes and an operator explicitly decides it is no longer required.
+
+## Fix Loop — Unicode line separators
+
+### Status and implementation head
+
+- Independent review found that U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR were not covered by the label prohibition.
+- Fix implementation head before this report-only commit: `bbc593a12fa113d55e903f9840dcbf06f48fc25b` (`fix: reject Unicode tag line separators`).
+- No configured build, browser run, localStorage access, service change, or private-data mutation was performed.
+
+### RED/GREEN evidence
+
+- RED command: `node --test --test-name-pattern="Unicode line|paragraph separators" prototype/desktop/paper-user-tags.test.mjs`.
+- RED result: exit 1; 0 passed and 2 failed with `Missing expected exception`, proving both direct `add()` and merge import accepted the separators.
+- The import test used a valid first paper entry before the invalid second entry and asserted both the returned state and exact persisted storage bytes remained unchanged.
+- GREEN command: `node --test prototype/desktop/paper-user-tags.test.mjs`.
+- GREEN result: exit 0; 10 passed, 0 failed.
+- Minimal fix: the existing prohibited-character expression now also includes `\u2028` and `\u2029`; normalization, dedupe, limits, storage, and import flow are otherwise unchanged.
+
+### Final verification
+
+- Exact Task 3 focused suite: 209 passed, 0 failed.
+- Full exporter/desktop suite: 404 passed, 0 failed.
+- Package-audit suite: 32 passed, 0 failed.
+- GitHub package audit: passed with 75 candidates.
+- `node --check` passed for the changed store and test modules.
+- Real catalog and retained backup SHA-256 values remained unchanged at the values recorded above.
+- Pre-existing untracked `audits/` and `tmp/` remained untouched.
