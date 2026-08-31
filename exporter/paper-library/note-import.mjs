@@ -145,11 +145,19 @@ function isGfmDelimiterRow(line) {
   return cells.length > 0 && cells.every((cell) => /^[ \t]*:?-{3,}:?[ \t]*$/u.test(cell))
 }
 
+function hasUnescapedDisplayDollar(line) {
+  for (let index = 0; index < line.length - 1; index += 1) {
+    if (line.startsWith("$$", index) && !escapedAt(line, index)) return true
+  }
+  return false
+}
+
 function beginsMarkdownBlock(line) {
   return /^(?: {4}|\t)/u.test(line)
     || /^ {0,3}(?:#{1,6}(?:[ \t]+|$)|>|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))/u.test(line)
     || /^ {0,3}(?:=+[ \t]*|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/u.test(line)
-    || /^ {0,3}(?:\$\$|\\\[|\\\])/u.test(line)
+    || hasUnescapedDisplayDollar(line)
+    || /^ {0,3}(?:\\\[|\\\])/u.test(line)
     || /^ {0,3}</u.test(line)
     || /^ {0,3}\[[^\]]+\]:/u.test(line)
     || /^ {0,3}\|/u.test(line)

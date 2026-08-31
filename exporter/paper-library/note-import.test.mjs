@@ -196,6 +196,7 @@ test("does not let an inline code span cross a recognizable Markdown block bound
 test("does not let an inline code span cross a display-math block boundary", async (t) => {
   const cases = [
     ["single-line dollars", "`code starts\n$$x$$\n$unclosed\n`"],
+    ["in-paragraph dollars", "`code starts\nprefix $$x$$ suffix\n$unclosed\n`"],
     ["multiline dollars", "``code starts\n$$\nx\n$$\n$unclosed\n``"],
     ["bracket display", "`code starts\n\\[\nx\n\\]\n$unclosed\n`"],
   ]
