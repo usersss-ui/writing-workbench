@@ -70,6 +70,35 @@ test("论文发现页可从工作台主导航到达，并与论文库双向链�
   assert.match(discoveryHtml, /论文发现/u)
 })
 
+test("研究任务输入页从五个工作台表面可达且方向页公开显式保存状态", async (context) => {
+  const server = createStaticServer()
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  context.after(() => server.close())
+  const address = server.address()
+  const baseUrl = `http://127.0.0.1:${address.port}/prototype/desktop`
+
+  const [homeHtml, directionsHtml, p02Html, libraryHtml, discoveryHtml, agentResponse] = await Promise.all([
+    fetch(`${baseUrl}/`).then((response) => response.text()),
+    fetch(`${baseUrl}/directions.html`).then((response) => response.text()),
+    fetch(`${baseUrl}/p02.html`).then((response) => response.text()),
+    fetch(`${baseUrl}/library.template.html`).then((response) => response.text()),
+    fetch(`${baseUrl}/discovery.template.html`).then((response) => response.text()),
+    fetch(`${baseUrl}/agent-tasks.html`),
+  ])
+  const agentHtml = await agentResponse.text()
+
+  for (const html of [homeHtml, directionsHtml, p02Html]) assert.match(html, /href="\.\/agent-tasks\.html"/u)
+  for (const html of [libraryHtml, discoveryHtml]) {
+    assert.match(html, /href="\.\.\/\.\.\/prototype\/desktop\/agent-tasks\.html"/u)
+  }
+  assert.equal(agentResponse.status, 200)
+  assert.match(agentHtml, /研究任务输入/u)
+  assert.match(agentHtml, /href="\.\/directions\.html"/u)
+  assert.match(agentHtml, /href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html"/u)
+  assert.match(directionsHtml, /id="direction-save-state"/u)
+  assert.match(directionsHtml, /id="direction-save-axes"/u)
+})
+
 test("P02 工作台从首页可达并区分算法材料与理论结果", async (context) => {
   const server = createStaticServer()
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))

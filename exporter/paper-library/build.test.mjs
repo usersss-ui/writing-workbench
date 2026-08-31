@@ -41,6 +41,8 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "discovery.mjs",
   "institution-access.mjs",
   "openalex-search.mjs",
+  "direction-snapshot.mjs",
+  "agent-task-input.mjs",
 ])
 
 const INSTITUTION = Object.freeze({ version: 1, institution_id: "nuist", display_name: "南京信息工程大学", access_mode: "carsi", library_home: "https://lib.nuist.edu.cn/", fallback_page: "https://lib.nuist.edu.cn/zy1/wwsjk.htm", providers: [{ provider_id: "ieee", display_name: "IEEE Xplore", hosts: ["ieeexplore.ieee.org"], doi_prefixes: ["10.1109"], library_page: "https://lib.nuist.edu.cn/info/1015/1430.htm", carsi_entry_url: "https://ieeexplore.ieee.org/servlet/wayf.jsp", carsi_supported: true }] })

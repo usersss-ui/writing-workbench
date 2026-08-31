@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="学术研究工作台只读研究任务输入快照与历史。" />
+    <title>研究任务输入 · 学术研究工作台</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./agent-tasks.css" />
+  </head>
+  <body class="agent-tasks-page">
+    <main class="app-window" aria-label="研究任务输入工作台">
+      <header class="window-bar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light traffic-light--red"></span>
+          <span class="traffic-light traffic-light--yellow"></span>
+          <span class="traffic-light traffic-light--green"></span>
+        </div>
+        <div class="window-context"><span class="context-kicker">研究工作台</span><span class="context-divider">/</span><strong>研究任务输入</strong></div>
+        <div class="agent-model-boundary" role="status"><span aria-hidden="true">○</span>未连接任何执行器或模型</div>
+        <div class="window-actions"><button class="avatar-button" type="button" aria-label="用户菜单">杨</button></div>
+      </header>
+
+      <div class="workspace-shell agent-task-shell">
+        <aside class="sidebar">
+          <a class="brand" href="./index.html" aria-label="返回研究首页">
+            <span class="brand-mark" aria-hidden="true">R</span>
+            <span><strong>学术研究工作台</strong><small>个人研究控制台</small></span>
+          </a>
+          <nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">研究流程</p>
+            <a class="nav-item" href="./index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
+            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>论文发现</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
+            <a class="nav-item nav-item--active" href="./agent-tasks.html" aria-current="page"><span aria-hidden="true">✦</span><span>研究任务</span></a>
+            <a class="nav-item" href="./p02.html"><span aria-hidden="true">□</span><span>我的论文</span></a>
+            <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
+          </nav>
+          <section class="sidebar-plan" aria-labelledby="snapshot-boundary-title">
+            <div class="plan-title-row"><h2 id="snapshot-boundary-title">本页边界</h2><strong>只读</strong></div>
+            <p>只固定任务输入，不分析论文、不生成研究结论，也不改写笔记原文。</p>
+          </section>
+        </aside>
+
+        <section class="main-column agent-task-main">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">输入准备层</p>
+              <h1>研究任务输入</h1>
+              <p>把已保存方向和 P02 用途架固定成可追溯输入；后续若接入智能体，也只读取你明确确认的这一版。</p>
+            </div>
+          </div>
+
+          <section class="theory-boundary" aria-label="模型连接边界">
+            <span aria-hidden="true">i</span>
+            <div><strong>当前没有执行功能。</strong><p>页面不会请求模型、生成候选结论或自动扩写论文，只保存最小输入快照。</p></div>
+          </section>
+
+          <div class="agent-input-grid">
+            <section class="panel agent-input-card" aria-labelledby="agent-direction-title">
+              <div class="section-heading"><div><p class="eyebrow">来源一</p><h2 id="agent-direction-title">已保存研究方向</h2></div></div>
+              <div class="agent-tag-list" id="agent-direction-tags"></div>
+              <p class="agent-source-meta" id="agent-direction-meta">正在读取方向来源</p>
+            </section>
+
+            <section class="panel agent-input-card" aria-labelledby="agent-paper-title">
+              <div class="section-heading"><div><p class="eyebrow">来源二</p><h2 id="agent-paper-title">P02 用途架论文</h2></div></div>
+              <ul class="agent-paper-list" id="agent-paper-list"></ul>
+            </section>
+          </div>
+
+          <section class="panel agent-confirm-panel" aria-labelledby="agent-confirm-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">显式确认</p><h2 id="agent-confirm-title">固定当前输入</h2><p id="agent-input-status" aria-live="polite">正在核对输入</p></div>
+              <button class="button button--primary" id="save-input-snapshot" type="button">确认并固定输入快照</button>
+            </div>
+            <label class="agent-confirm-check"><input id="snapshot-confirm" type="checkbox" />我确认：只保存当前方向和用途架材料，不运行任何模型，也不生成研究结论。</label>
+            <p class="agent-page-status" id="agent-page-status" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="panel" aria-labelledby="snapshot-history-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">追加式记录</p><h2 id="snapshot-history-title">历史输入快照</h2><p>最新记录显示在最前；来源变化只提示差异，不覆盖旧快照。</p></div>
+            </div>
+            <ol class="agent-snapshot-history" id="snapshot-history"></ol>
+          </section>
+        </section>
+
+        <aside class="inspector agent-task-inspector" aria-labelledby="agent-inspector-title">
+          <div class="inspector-heading"><div><p class="eyebrow">输入检查器</p><h2 id="agent-inspector-title">后续可用范围</h2></div></div>
+          <section class="inspector-section"><h3>允许</h3><p>研究方向、P02 角色、最小书目信息和核验状态。</p></section>
+          <section class="inspector-section"><h3>明确排除</h3><p>笔记正文、原始路径、个人标签、发现候选、访问历史与凭据。</p></section>
+          <section class="agent-inspector-boundary"><strong>为什么要固定</strong><p>之后的分析可以说明“基于哪一版输入”，而不是随论文库变化后悄悄改写过去的判断依据。</p></section>
+        </aside>
+      </div>
+    </main>
+    <script type="module" src="./agent-tasks.mjs"></script>
+  </body>
+</html>

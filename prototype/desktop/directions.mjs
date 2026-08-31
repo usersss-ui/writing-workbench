@@ -1,5 +1,10 @@
 import { countByReadingState, filterPapers, rankPapers } from "./paper-filter.mjs"
 import { contributionLabel, defaultDirectionSelection, papers, stateLabel } from "./papers-data.mjs"
+import {
+  createDirectionSaveController,
+  createDirectionSnapshotStore,
+  wireDirectionSaveButtons,
+} from "./direction-snapshot.mjs"
 
 const selected = {}
 let activeState = "all"
@@ -10,6 +15,16 @@ const paperList = document.querySelector("#paper-list")
 const sortSelect = document.querySelector("#paper-sort")
 const dialog = document.querySelector("#search-dialog")
 const toast = document.querySelector("#toast")
+
+function browserStorage() {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+const directionStore = createDirectionSnapshotStore(browserStorage())
 
 function valuesForSelection() {
   return Object.values(selected).flat()
@@ -39,6 +54,37 @@ function showToast(message) {
   toast.classList.add("toast--visible")
   window.clearTimeout(showToast.timeout)
   showToast.timeout = window.setTimeout(() => toast.classList.remove("toast--visible"), 2200)
+}
+
+function formatSavedTime(value) {
+  const date = new Date(value)
+  return Number.isFinite(date.valueOf())
+    ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date)
+    : value
+}
+
+function renderSavedDirection(snapshot) {
+  const state = document.querySelector("#direction-save-state")
+  const axes = document.querySelector("#direction-save-axes")
+  if (state) {
+    state.textContent = snapshot
+      ? `已显式保存 · ${formatSavedTime(snapshot.saved_at)}`
+      : "尚未显式保存研究方向"
+  }
+  if (!axes) return
+  axes.replaceChildren()
+  const values = snapshot ? Object.values(snapshot.axes).flat() : []
+  if (values.length === 0) {
+    const hint = document.createElement("span")
+    hint.textContent = "选择条件后点击“保存课题候选”固定当前输入"
+    axes.append(hint)
+    return
+  }
+  values.forEach((value) => {
+    const tag = document.createElement("span")
+    tag.textContent = value
+    axes.append(tag)
+  })
 }
 
 function activePapers() {
@@ -277,18 +323,22 @@ document.querySelector("#search-new-paper")?.addEventListener("click", () => {
 })
 
 document.querySelector("#save-search")?.addEventListener("click", () => {
-  showToast("检索任务已保存，等待接入学术搜索")
+  showToast("检索功能尚未接入；当前未保存检索任务")
 })
 
-function saveCandidate() {
-  const count = valuesForSelection().length
-  showToast(count === 0 ? "请先选择研究条件" : `已保存包含 ${count} 个条件的课题候选`)
-}
+const directionSaveController = createDirectionSaveController({
+  store: directionStore,
+  getSelection: () => selected,
+  renderSaved: renderSavedDirection,
+  notify: showToast,
+})
+wireDirectionSaveButtons([
+  document.querySelector("#save-candidate"),
+  document.querySelector("#save-candidate-side"),
+], directionSaveController.save)
 
-document.querySelector("#save-candidate")?.addEventListener("click", saveCandidate)
-document.querySelector("#save-candidate-side")?.addEventListener("click", saveCandidate)
-
-setSelection(defaultDirectionSelection)
+const savedDirection = directionSaveController.initialize()
+setSelection(savedDirection?.axes ?? defaultDirectionSelection)
 
 requestAnimationFrame(() => {
   if (!location.hash) return
