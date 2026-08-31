@@ -13,6 +13,7 @@ const validRecord = (overrides = {}) => ({
     ...createEmptyFacets(),
     research: { domain: ["分布式优化"], mode: [] },
   },
+  facet_states: {},
   source_terms: ["Dual Decomposition"],
   ...overrides,
 })
@@ -72,7 +73,7 @@ const expectedRealPaperIds = [
   "Zhu26-DPZO",
 ]
 
-const expectedRepresentativeRecords = {
+const expectedRepresentativeRecordsWithoutStates = {
   "Falsone17-DD": {
     record_type: "外部论文",
     facets: {
@@ -135,26 +136,38 @@ const expectedRepresentativeRecords = {
   },
 }
 
+const expectedRepresentativeRecords = Object.fromEntries(
+  Object.entries(expectedRepresentativeRecordsWithoutStates).map(([paperId, record]) => [
+    paperId,
+    { ...record, facet_states: {} },
+  ]),
+)
+
 const writeCatalog = async (catalog) => {
-  const root = await mkdtemp(join(tmpdir(), "paper-tags-v2-"))
+  const root = await mkdtemp(join(tmpdir(), "paper-tags-v3-"))
   const path = join(root, "paper-tags.json")
   await writeFile(path, JSON.stringify(catalog))
   return path
 }
 
-test("loads a version-2 stable-ID facet catalog", async () => {
-  const path = await writeCatalog({ version: 2, papers: { "Falsone17-DD": validRecord() } })
+test("loads a version-3 stable-ID facet catalog", async () => {
+  const path = await writeCatalog({ version: 3, papers: { "Falsone17-DD": validRecord() } })
 
   const catalog = await loadPaperTagCatalog(path)
 
-  assert.equal(catalog.version, 2)
+  assert.equal(catalog.version, 3)
+  assert.deepEqual(catalog.papers["Falsone17-DD"].facet_states, {})
   assert.deepEqual(catalog.papers["Falsone17-DD"].facets.research.domain, ["分布式优化"])
   assert.deepEqual(catalog.papers["Falsone17-DD"].source_terms, ["Dual Decomposition"])
 })
 
-test("the real version-2 catalog covers every currently included stable paper ID", async () => {
+test("the real version-3 catalog covers every currently included stable paper ID without inferred states", async () => {
   const catalog = await loadPaperTagCatalog(new URL("../../local_library_config/paper-tags.json", import.meta.url))
-  assert.equal(catalog.version, 2)
+  assert.equal(catalog.version, 3)
+  assert.ok(Object.keys(catalog.papers).length > 0)
+  assert.equal(Object.values(catalog.papers).every((record) => (
+    Object.keys(record.facet_states).length === 0
+  )), true)
   assert.equal(Object.keys(catalog.papers).length, expectedRealPaperIds.length)
   assert.equal(new Set(Object.keys(catalog.papers)).size, expectedRealPaperIds.length)
   assert.deepEqual(
@@ -196,7 +209,7 @@ test("rejects legacy compound tag fields", () => {
   }), /未知标签字段/u)
 })
 
-test("requires exactly record_type, facets, and source_terms", () => {
+test("requires exactly record_type, facets, facet_states, and source_terms", () => {
   assert.throws(() => validatePaperTagRecord("Falsone17-DD", {
     record_type: "外部论文",
     facets: createEmptyFacets(),
@@ -205,6 +218,30 @@ test("requires exactly record_type, facets, and source_terms", () => {
     ...validRecord(),
     extra: true,
   }), /未知标签字段/u)
+})
+
+test("catalog requires facet_states and rejects collisions with populated facets", () => {
+  const missing = validRecord()
+  delete missing.facet_states
+  assert.throws(() => validatePaperTagRecord("Paper-01", missing), /字段缺失: facet_states/u)
+  assert.throws(() => validatePaperTagRecord("Paper-01", validRecord({
+    facet_states: { "research.domain": "pending_verification" },
+  })), /不能覆盖已有分面值/u)
+  assert.throws(() => validatePaperTagRecord("Paper-01", validRecord({
+    facet_states: { applications: "not_applicable", private: "unrecorded" },
+  })), /路径无效/u)
+})
+
+test("catalog merge clones sparse states and records their provenance", () => {
+  const tagCatalog = {
+    version: 3,
+    papers: { "Paper-01": validRecord({ facet_states: { results: "pending_verification" } }) },
+  }
+  const input = [{ paper_id: "Paper-01", unit_type: "article", metadata_provenance: {}, warnings: [] }]
+  const result = applyPaperTagCatalog({ papers: input, tagCatalog })
+  assert.deepEqual(result.papers[0].facet_states, { results: "pending_verification" })
+  assert.equal(result.papers[0].metadata_provenance.facet_states, "tag_catalog")
+  assert.notStrictEqual(result.papers[0].facet_states, tagCatalog.papers["Paper-01"].facet_states)
 })
 
 test("validates record type, controlled facets, and source terms", () => {
@@ -231,7 +268,7 @@ test("merges facet records by stable paper_id and preserves inputs", () => {
     { paper_id: "Falsone17-DD", unit_type: "article", metadata_provenance: {}, warnings: [] },
     { paper_id: "New-01", unit_type: "review", metadata_provenance: {}, warnings: [] },
   ]
-  const tagCatalog = { version: 2, papers: { "Falsone17-DD": validRecord() } }
+  const tagCatalog = { version: 3, papers: { "Falsone17-DD": validRecord() } }
   const originalPapers = structuredClone(papers)
   const originalCatalog = structuredClone(tagCatalog)
 
@@ -243,6 +280,7 @@ test("merges facet records by stable paper_id and preserves inputs", () => {
   assert.deepEqual(result.papers[0].metadata_provenance, {
     record_type: "tag_catalog",
     facets: "tag_catalog",
+    facet_states: "tag_catalog",
     source_terms: "tag_catalog",
   })
   assert.deepEqual(papers, originalPapers)
@@ -259,7 +297,7 @@ test("keeps unmatched papers visible with empty facets and pending warning", () 
     { paper_id: "Chapter-01", unit_type: "chapter", metadata_provenance: {}, warnings: [] },
   ]
 
-  const result = applyPaperTagCatalog({ papers, tagCatalog: { version: 2, papers: {} } })
+  const result = applyPaperTagCatalog({ papers, tagCatalog: { version: 3, papers: {} } })
 
   assert.deepEqual(result.tagging, {
     tagged_count: 0,
@@ -271,6 +309,7 @@ test("keeps unmatched papers visible with empty facets and pending warning", () 
   ])
   for (const paper of result.papers) {
     assert.deepEqual(paper.facets, createEmptyFacets())
+    assert.deepEqual(paper.facet_states, {})
     assert.deepEqual(paper.source_terms, [])
     assert.match(paper.warnings.join(" "), /标签待整理/u)
   }
@@ -280,6 +319,6 @@ test("keeps unmatched papers visible with empty facets and pending warning", () 
 test("rejects catalog records that no scanned paper_id can consume", () => {
   assert.throws(() => applyPaperTagCatalog({
     papers: [{ paper_id: "Paper-01", unit_type: "article", metadata_provenance: {}, warnings: [] }],
-    tagCatalog: { version: 2, papers: { "Paper-99": validRecord() } },
+    tagCatalog: { version: 3, papers: { "Paper-99": validRecord() } },
   }), /未匹配论文/u)
 })

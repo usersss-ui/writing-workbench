@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises"
 
-import { createEmptyFacets, validatePaperFacets } from "./facet-schema.mjs"
+import { createEmptyFacets, validateFacetStates, validatePaperFacets } from "./facet-schema.mjs"
 
 const PAPER_ID = /^[A-Za-z][A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/u
-const RECORD_FIELDS = new Set(["record_type", "facets", "source_terms"])
+const RECORD_FIELDS = new Set(["record_type", "facets", "facet_states", "source_terms"])
 export const PAPER_RECORD_TYPES = Object.freeze(["外部论文", "学位论文", "学位论文章节", "专题综述"])
 const UNIT_TYPE_RECORD_TYPES = Object.freeze({
   article: "外部论文",
@@ -44,17 +44,18 @@ export function validatePaperTagRecord(paperId, record) {
     throw new Error("record_type 枚举值无效")
   }
   validatePaperFacets(record.facets)
+  validateFacetStates(record.facets, record.facet_states)
   validateSourceTerms(record.source_terms)
   return record
 }
 
 export async function loadPaperTagCatalog(catalogPath) {
   const raw = JSON.parse(await readFile(catalogPath, "utf8"))
-  if (!isPlainObject(raw) || raw.version !== 2 || !isPlainObject(raw.papers)) {
-    throw new Error("标签目录必须是 version 为 2 的 papers 对象")
+  if (!isPlainObject(raw) || raw.version !== 3 || !isPlainObject(raw.papers)) {
+    throw new Error("标签目录必须是 version 为 3 的 papers 对象")
   }
   for (const [paperId, record] of Object.entries(raw.papers)) validatePaperTagRecord(paperId, record)
-  return Object.freeze({ version: 2, papers: Object.freeze(raw.papers) })
+  return Object.freeze({ version: 3, papers: Object.freeze(raw.papers) })
 }
 
 function recordTypeForUnit(unitType) {
@@ -63,8 +64,8 @@ function recordTypeForUnit(unitType) {
 
 export function applyPaperTagCatalog({ papers, tagCatalog }) {
   if (!Array.isArray(papers)) throw new Error("论文集合必须是数组")
-  if (!isPlainObject(tagCatalog) || tagCatalog.version !== 2 || !isPlainObject(tagCatalog.papers)) {
-    throw new Error("标签目录必须是 version 为 2 的 papers 对象")
+  if (!isPlainObject(tagCatalog) || tagCatalog.version !== 3 || !isPlainObject(tagCatalog.papers)) {
+    throw new Error("标签目录必须是 version 为 3 的 papers 对象")
   }
   for (const [paperId, record] of Object.entries(tagCatalog.papers)) validatePaperTagRecord(paperId, record)
 
@@ -82,11 +83,13 @@ export function applyPaperTagCatalog({ papers, tagCatalog }) {
         ...paper,
         record_type: record.record_type,
         facets: structuredClone(record.facets),
+        facet_states: { ...record.facet_states },
         source_terms: [...record.source_terms],
         metadata_provenance: {
           ...(paper.metadata_provenance ?? {}),
           record_type: "tag_catalog",
           facets: "tag_catalog",
+          facet_states: "tag_catalog",
           source_terms: "tag_catalog",
         },
       }
@@ -96,6 +99,7 @@ export function applyPaperTagCatalog({ papers, tagCatalog }) {
       ...paper,
       record_type: recordTypeForUnit(paper.unit_type),
       facets: createEmptyFacets(),
+      facet_states: {},
       source_terms: [],
       warnings: [...(Array.isArray(paper.warnings) ? paper.warnings : []), "标签待整理"],
     }
