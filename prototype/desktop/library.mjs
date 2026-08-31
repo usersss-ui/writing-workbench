@@ -39,6 +39,7 @@ const FACET_PANEL_PATHS = Object.freeze({
   ]),
 })
 const FACET_PATHS = Object.freeze(Object.values(FACET_PANEL_PATHS).flat())
+const FACET_STATE_VALUES = Object.freeze(["unrecorded", "not_applicable", "pending_verification"])
 const CANONICAL_FACET_GROUPS = Object.freeze([
   ["research", "research.domain", "研究领域", ["分布式优化", "分布式学习", "联邦学习"]],
   ["research", "research.mode", "任务范式", ["静态优化", "在线优化", "随机优化", "鲁棒优化"]],
@@ -68,10 +69,12 @@ const PUBLIC_PAPER_FIELDS = Object.freeze([
   "title_original", "title_zh", "title_en", "publication_year", "version_date", "year", "venue", "doi_or_url",
   "record_type", "contribution_role", "p02_relevance", "source_status", "evidence_status", "reproduction_status",
   "writing_material_count", "note_status", "preferred_note", "note_preview_url", "authors", "source_terms", "warnings",
-  "facets", "metadata_provenance", "artifacts", "artifact_availability", "controlled_previews",
+  "facets", "facet_states", "metadata_provenance", "artifacts", "artifact_availability", "controlled_previews",
   "controlled_preview_documents", "source_documents",
 ])
-const LEGACY_PUBLIC_PAPER_FIELDS = Object.freeze(PUBLIC_PAPER_FIELDS.filter((field) => field !== "controlled_preview_documents"))
+const V3_LEGACY_PUBLIC_PAPER_FIELDS = Object.freeze(PUBLIC_PAPER_FIELDS.filter((field) => field !== "controlled_preview_documents"))
+const V2_PUBLIC_PAPER_FIELDS = Object.freeze(PUBLIC_PAPER_FIELDS.filter((field) => field !== "facet_states"))
+const V2_LEGACY_PUBLIC_PAPER_FIELDS = Object.freeze(V2_PUBLIC_PAPER_FIELDS.filter((field) => field !== "controlled_preview_documents"))
 const EXPLICIT_PAPER_ID = /^[A-Za-z][A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/u
 const FALLBACK_PAPER_ID = /^LIB-[A-F0-9]{12}$/u
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
@@ -96,7 +99,7 @@ const PRIVATE_URL_VALUE_LIMIT = 16 * 1024
 const METADATA_PROVENANCE_SOURCES = Object.freeze(["override", "tag_catalog", "catalog", "frontmatter", "note_shortcode", "adapter", "default"])
 const METADATA_PROVENANCE_FIELDS = Object.freeze([
   "paper_id", "title_original", "title_zh", "title_en", "authors", "publication_year", "version_date", "year", "venue", "doi_or_url",
-  "unit_type", "parent_paper_id", "record_type", "facets", "source_terms", "contribution_role", "p02_relevance",
+  "unit_type", "parent_paper_id", "record_type", "facets", "facet_states", "source_terms", "contribution_role", "p02_relevance",
 ])
 export const READER_TAB_KEYS = Object.freeze(["overview", "source", "note", "derivation", "simulation", "code_compare", "writing"])
 const CONTROLLED_PREVIEW_KEYS = Object.freeze(["note", "derivation", "simulation", "code_compare"])
@@ -260,8 +263,8 @@ function exactStringKeys(value, expected) {
   return keys.length === required.length && keys.every((key, index) => key === required[index])
 }
 
-function validFacetSchema(value) {
-  if (!exactStringKeys(value, ["version", "groups"]) || value.version !== 1 || !Array.isArray(value.groups)) return false
+function validFacetSchema(value, expectedVersion) {
+  if (!exactStringKeys(value, ["version", "groups"]) || value.version !== expectedVersion || !Array.isArray(value.groups)) return false
   if (value.groups.length !== CANONICAL_FACET_GROUPS.length) return false
   for (const [index, group] of value.groups.entries()) {
     const canonical = CANONICAL_FACET_GROUPS[index]
@@ -299,9 +302,21 @@ function validPaperFacets(facets, facetSchema) {
   return true
 }
 
-function validPaperRecord(paper, facetSchema) {
+function validFacetStates(facets, facetStates) {
+  if (!isPlainObject(facetStates)) return false
+  return Object.entries(facetStates).every(([path, state]) => (
+    FACET_PATHS.includes(path)
+    && FACET_STATE_VALUES.includes(state)
+    && facetValueAt(facets, path).length === 0
+  ))
+}
+
+function validPaperRecord(paper, facetSchema, indexVersion) {
   const hasPreviewDocuments = isPlainObject(paper) && Object.hasOwn(paper, "controlled_preview_documents")
-  return (exactStringKeys(paper, hasPreviewDocuments ? PUBLIC_PAPER_FIELDS : LEGACY_PUBLIC_PAPER_FIELDS))
+  const expectedFields = indexVersion === 3
+    ? (hasPreviewDocuments ? PUBLIC_PAPER_FIELDS : V3_LEGACY_PUBLIC_PAPER_FIELDS)
+    : (hasPreviewDocuments ? V2_PUBLIC_PAPER_FIELDS : V2_LEGACY_PUBLIC_PAPER_FIELDS)
+  return exactStringKeys(paper, expectedFields)
     && LEGACY_ACADEMIC_FIELDS.every((field) => !Object.hasOwn(paper, field))
     && validPaperId(paper.paper_id)
     && SLUG.test(paper.slug)
@@ -321,6 +336,7 @@ function validPaperRecord(paper, facetSchema) {
     && typeof paper.doi_or_url === "string"
     && RECORD_TYPES.includes(paper.record_type)
     && validPaperFacets(paper.facets, facetSchema)
+    && (indexVersion === 2 || validFacetStates(paper.facets, paper.facet_states))
     && validTagList(paper.source_terms)
     && new Set(paper.source_terms).size === paper.source_terms.length
     && (paper.version_date === null || typeof paper.version_date === "string")
@@ -808,24 +824,27 @@ export async function loadPaperIndex(fetchImpl = globalThis.fetch) {
   } catch {
     throw new Error("论文库索引格式无效")
   }
+  const schemaVersion = payload?.version === 3 ? 2 : payload?.version === 2 ? 1 : null
   if (
     !exactStringKeys(payload, ["version", "facet_schema", "warning_count", "papers"])
-    || payload.version !== 2
-    || !validFacetSchema(payload.facet_schema)
+    || schemaVersion === null
+    || !validFacetSchema(payload.facet_schema, schemaVersion)
     || !Array.isArray(payload.papers)
-    || !payload.papers.every((paper) => validPaperRecord(paper, payload.facet_schema))
+    || !payload.papers.every((paper) => validPaperRecord(paper, payload.facet_schema, payload.version))
   ) {
     throw new Error("论文库索引格式无效")
   }
-  const paperIds = new Set()
-  for (const paper of payload.papers) {
-    if (paperIds.has(paper.paper_id)) throw new Error("论文库索引格式无效")
-    paperIds.add(paper.paper_id)
+  const paperIds = payload.papers.map((paper) => paper.paper_id)
+  if (new Set(paperIds).size !== paperIds.length) throw new Error("论文库索引格式无效")
+  const warningCount = Number.isInteger(payload.warning_count) && payload.warning_count >= 0 ? payload.warning_count : 0
+  return {
+    version: payload.version,
+    facet_schema: payload.facet_schema,
+    warning_count: warningCount,
+    papers: payload.papers.map((paper) => (
+      payload.version === 2 ? { ...paper, facet_states: {} } : paper
+    )),
   }
-  const warningCount = Number.isInteger(payload.warning_count) && payload.warning_count >= 0
-    ? payload.warning_count
-    : null
-  return { version: 2, facet_schema: payload.facet_schema, warning_count: warningCount, papers: payload.papers }
 }
 
 function displayAuthors(paper) {
@@ -845,7 +864,7 @@ export function renderPaperRows({ document, rows, selectedPaperId, facetSchema }
   const template = document.getElementById("library-paper-row-template")
   if (!container || !(template instanceof document.defaultView.HTMLTemplateElement)) return
   const fragment = document.createDocumentFragment()
-  const validRows = (Array.isArray(rows) ? rows : []).filter((rowState) => validPaperRecord(rowState?.paper, facetSchema))
+  const validRows = (Array.isArray(rows) ? rows : []).filter((rowState) => validPaperRecord(rowState?.paper, facetSchema, 3))
 
   for (const group of groupRowsByNoteStatus(validRows)) {
     const section = document.createElement("section")

@@ -326,6 +326,7 @@ function normalizedPaper(overrides = {}) {
     doi_or_url: "https://doi.org/10.1000/example",
     record_type: "外部论文",
     facets: validFacets(),
+    facet_states: {},
     source_terms: ["Tracking-ADMM"],
     contribution_role: "unclassified",
     p02_relevance: null,
@@ -352,6 +353,7 @@ function normalizedPaper(overrides = {}) {
       parent_paper_id: "adapter",
       record_type: "tag_catalog",
       facets: "tag_catalog",
+      facet_states: "tag_catalog",
       source_terms: "tag_catalog",
       contribution_role: "default",
       p02_relevance: "default",
@@ -407,9 +409,9 @@ const facetGroups = Object.freeze([
   ["more", "applications", "应用领域", ["车联网", "无线物联网", "临床机器学习", "工业信息物理系统"]],
 ])
 
-function validFacetSchema() {
+function validFacetSchema(version = 2) {
   return {
-    version: 1,
+    version,
     groups: facetGroups.map(([panel, path, label, values]) => ({ panel, path, label, values: [...values] })),
   }
 }
@@ -429,7 +431,21 @@ function validFacets() {
 }
 
 function v2Index(papers = [normalizedPaper()]) {
-  return { version: 2, facet_schema: validFacetSchema(), warning_count: 0, papers }
+  return {
+    version: 2,
+    facet_schema: validFacetSchema(1),
+    warning_count: 0,
+    papers: papers.map(({ facet_states: _facetStates, ...paper }) => ({
+      ...paper,
+      metadata_provenance: Object.fromEntries(
+        Object.entries(paper.metadata_provenance).filter(([field]) => field !== "facet_states"),
+      ),
+    })),
+  }
+}
+
+function v3Index(papers = [normalizedPaper()]) {
+  return { version: 3, facet_schema: validFacetSchema(2), warning_count: 0, papers }
 }
 
 function cssRule(selector) {
@@ -1211,14 +1227,61 @@ test("loadPaperIndex accepts only a version-2 schema-driven index and keeps warn
     assert.deepEqual(options, { cache: "no-store" })
     return { ok: true, json: async () => payload }
   })
-  assert.deepEqual(loaded, payload)
+  assert.equal(loaded.version, 2)
+  assert.equal(loaded.warning_count, 3)
+  assert.deepEqual(loaded.facet_schema, payload.facet_schema)
+  assert.deepEqual(loaded.papers[0].facet_states, {})
 
   for (const warningCount of [undefined, -1, 1.5, "0"]) {
     const uncertain = await loadPaperIndex(async () => ({
       ok: true,
       json: async () => ({ ...v2Index([]), warning_count: warningCount }),
     }))
-    assert.equal(uncertain.warning_count, null)
+    assert.equal(uncertain.warning_count, 0)
+  }
+})
+
+test("loadPaperIndex accepts v3 states and normalizes v2 papers to empty states", async () => {
+  const { loadPaperIndex } = await import("./library.mjs")
+  const current = await loadPaperIndex(async () => ({
+    ok: true,
+    json: async () => v3Index([normalizedPaper({
+      facets: { ...validFacets(), results: [] },
+      facet_states: { results: "pending_verification" },
+    })]),
+  }))
+  assert.equal(current.version, 3)
+  assert.deepEqual(current.papers[0].facet_states, { results: "pending_verification" })
+
+  const legacy = await loadPaperIndex(async () => ({ ok: true, json: async () => v2Index() }))
+  assert.equal(legacy.version, 2)
+  assert.deepEqual(legacy.papers[0].facet_states, {})
+})
+
+test("loadPaperIndex enforces version pairs and facet-state consistency", async () => {
+  const { loadPaperIndex } = await import("./library.mjs")
+  const invalid = [
+    { ...v3Index(), facet_schema: validFacetSchema(1) },
+    { ...v2Index(), facet_schema: validFacetSchema(2) },
+    v3Index([{ ...normalizedPaper(), facet_states: { private: "unrecorded" } }]),
+    v3Index([{ ...normalizedPaper(), facet_states: { results: "waiting" } }]),
+    v3Index([normalizedPaper({
+      facets: { ...validFacets(), results: [] },
+      facet_states: { results: "pending_verification" },
+    })]),
+    (() => {
+      const paper = normalizedPaper()
+      delete paper.facet_states
+      return v3Index([paper])
+    })(),
+    { ...v2Index(), papers: [normalizedPaper()] },
+  ]
+  invalid[4].papers[0].facets.results = ["线性收敛"]
+  for (const payload of invalid) {
+    await assert.rejects(
+      () => loadPaperIndex(async () => ({ ok: true, json: async () => payload })),
+      /论文库索引格式无效/u,
+    )
   }
 })
 
