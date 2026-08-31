@@ -22,6 +22,56 @@ function fakeStorage(initial = new Map()) {
   }
 }
 
+function adversarialStorage(initial = new Map()) {
+  const values = new Map(initial)
+  const faults = []
+
+  function takeFault(method, key) {
+    const index = faults.findIndex((fault) => fault.method === method && fault.key === key)
+    if (index < 0) return null
+    const fault = faults[index]
+    if (fault.skip > 0) {
+      fault.skip -= 1
+      return null
+    }
+    faults.splice(index, 1)
+    return fault
+  }
+
+  function maybeThrow(fault, phase) {
+    if (fault?.phase === phase) throw new Error(`${fault.method} ${phase}`)
+  }
+
+  return {
+    get length() { return values.size },
+    key(index) { return [...values.keys()][index] ?? null },
+    getItem(key) {
+      const fault = takeFault("getItem", key)
+      maybeThrow(fault, "before")
+      const value = values.get(key) ?? null
+      maybeThrow(fault, "after")
+      return value
+    },
+    setItem(key, value) {
+      const fault = takeFault("setItem", key)
+      maybeThrow(fault, "before")
+      values.set(key, String(value))
+      maybeThrow(fault, "after")
+    },
+    removeItem(key) {
+      const fault = takeFault("removeItem", key)
+      maybeThrow(fault, "before")
+      values.delete(key)
+      maybeThrow(fault, "after")
+    },
+    failOnce(method, key, phase = "before", skip = 0) {
+      faults.push({ method, key, phase, skip })
+    },
+    raw(key) { return values.get(key) },
+    values,
+  }
+}
+
 function directionSnapshot(savedAt = "2026-08-29T07:00:00.000Z") {
   return createDirectionSnapshot(defaultDirectionSelection, { savedAt })
 }
@@ -143,6 +193,31 @@ test("缺少方向、用途架、论文记录或安全元数据都会阻止固�
   }
 })
 
+test("授权头、OAuth 令牌、客户端密钥、私钥和 URL 用户信息都会阻止任务输入", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const forbiddenMetadata = [
+    ["Author", "ization: Bear", "er fixture-token"].join(""),
+    ["Author", "ization: Bas", "ic Zml4dHVyZQ=="].join(""),
+    ["refresh", "_token=fixture-value"].join(""),
+    ["id", "_token: fixture-value"].join(""),
+    ["access", "_token=fixture-value"].join(""),
+    ["client", "_secret: fixture-value"].join(""),
+    ["-----BEGIN PRI", "VATE KEY-----"].join(""),
+    ["https://fixture-user", ":fixture-pass@example.invalid/path"].join(""),
+  ]
+
+  for (const unsafeValue of forbiddenMetadata) {
+    const index = structuredClone(paperIndex())
+    index.papers[0].title_zh = unsafeValue
+    const preview = module.buildTaskInputPreview({
+      directionSnapshot: directionSnapshot(), workspaceState: workspaceState(), paperIndex: index,
+    })
+    assert.equal(preview.status, "unsafe_metadata")
+    assert.equal(preview.ready, false)
+    assert.equal(JSON.stringify(preview).includes(unsafeValue), false)
+  }
+})
+
 test("同一毫秒创建的默认快照获得唯一 ID 且历史只追加不覆盖", async () => {
   const module = await import("./agent-task-input.mjs")
   const preview = readyPreview(module)
@@ -217,6 +292,104 @@ test("current 写入失败会撤掉未提交 pending 并保持原有历史", asy
   assert.equal([...storage.map.keys()].some((key) => key.includes(second.snapshot_id)), false)
 })
 
+test("append 对 pending、current、committed 的 write-then-throw 与 pending 删除失败诚实返回成功", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const scenarios = [
+    { method: "setItem", suffix: "pending", phase: "after" },
+    { method: "setItem", suffix: "current", phase: "after" },
+    { method: "setItem", suffix: "snapshot", phase: "after" },
+    { method: "setItem", suffix: "snapshot", phase: "after", readFailures: 2 },
+    { method: "removeItem", suffix: "pending", phase: "before" },
+  ]
+
+  for (const [index, scenario] of scenarios.entries()) {
+    const storage = adversarialStorage()
+    const store = module.createTaskInputSnapshotStore(storage)
+    const snapshot = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: `2026-08-29T11:0${index}:00.000Z`,
+      snapshotNonce: `${String.fromCharCode(71 + index).repeat(16)}`,
+    })
+    const key = scenario.suffix === "current"
+      ? `${module.TASK_INPUT_STORAGE_KEY}.current`
+      : `${module.TASK_INPUT_STORAGE_KEY}.${scenario.suffix}.${snapshot.snapshot_id}`
+    storage.failOnce(scenario.method, key, scenario.phase)
+    if (scenario.readFailures) {
+      storage.failOnce("getItem", key, "before", 1)
+      storage.failOnce("getItem", key, "before")
+    }
+
+    assert.equal(store.append(snapshot), true, `${scenario.suffix} ${scenario.phase}`)
+    assert.equal(store.readCurrent().snapshot_id, snapshot.snapshot_id)
+    assert.deepEqual(store.readAll().map((item) => item.snapshot_id), [snapshot.snapshot_id])
+  }
+})
+
+test("append 的 committed throw-before 不产生逻辑历史并可从 pending 重试同一 ID", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const first = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:10:00.000Z", snapshotNonce: "KKKKKKKKKKKKKKKK",
+  })
+  const retryable = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:11:00.000Z", snapshotNonce: "LLLLLLLLLLLLLLLL",
+  })
+  assert.equal(store.append(first), true)
+  storage.failOnce("setItem", `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${retryable.snapshot_id}`, "before")
+
+  assert.equal(store.append(retryable), false)
+  assert.equal(store.readCurrent().snapshot_id, first.snapshot_id)
+  assert.deepEqual(store.readAll().map((item) => item.snapshot_id), [first.snapshot_id])
+  assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, first.snapshot_id)
+
+  assert.equal(store.append(retryable), true)
+  assert.equal(store.readCurrent().snapshot_id, retryable.snapshot_id)
+})
+
+test("append 的 current throw-before 即使 pending 删除失败也可重试同一 ID", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const first = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:20:00.000Z", snapshotNonce: "MMMMMMMMMMMMMMMM",
+  })
+  const retryable = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:21:00.000Z", snapshotNonce: "NNNNNNNNNNNNNNNN",
+  })
+  assert.equal(store.append(first), true)
+  storage.failOnce("setItem", `${module.TASK_INPUT_STORAGE_KEY}.current`, "before")
+  storage.failOnce("removeItem", `${module.TASK_INPUT_STORAGE_KEY}.pending.${retryable.snapshot_id}`, "before")
+
+  assert.equal(store.append(retryable), false)
+  assert.equal(store.readCurrent().snapshot_id, first.snapshot_id)
+  assert.deepEqual(store.readAll().map((item) => item.snapshot_id), [first.snapshot_id])
+  assert.equal(store.append(retryable), true)
+  assert.equal(store.readCurrent().snapshot_id, retryable.snapshot_id)
+})
+
+test("append 无法复核 write-then-throw 的 current 时保留可恢复 pending 而不破坏旧当前项", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const first = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:25:00.000Z", snapshotNonce: "VVVVVVVVVVVVVVVV",
+  })
+  const retryable = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:26:00.000Z", snapshotNonce: "WWWWWWWWWWWWWWWW",
+  })
+  assert.equal(store.append(first), true)
+  const currentKey = `${module.TASK_INPUT_STORAGE_KEY}.current`
+  storage.failOnce("setItem", currentKey, "after")
+  storage.failOnce("getItem", currentKey, "before", 2)
+  storage.failOnce("getItem", currentKey, "before")
+
+  assert.equal(store.append(retryable), false)
+  assert.equal(store.readCurrent().snapshot_id, first.snapshot_id)
+  assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, first.snapshot_id)
+  assert.equal(store.append(retryable), true)
+  assert.equal(store.readCurrent().snapshot_id, retryable.snapshot_id)
+})
+
 test("损坏 root、current 或独立 snapshot 会使完整事务失效并拒绝覆盖", async () => {
   const module = await import("./agent-task-input.mjs")
   const snapshot = module.createTaskInputSnapshot(readyPreview(module), {
@@ -245,6 +418,24 @@ test("损坏 root、current 或独立 snapshot 会使完整事务失效并拒绝
   }
 })
 
+test("聚合 root 只是缓存，缺少独立 snapshot 与 current 时不能成为快照权威", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const snapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:30:00.000Z", snapshotNonce: "UUUUUUUUUUUUUUUU",
+  })
+  const rootOnly = new Map([[
+    module.TASK_INPUT_STORAGE_KEY,
+    JSON.stringify({ version: 1, current_snapshot_id: snapshot.snapshot_id, snapshots: [snapshot] }),
+  ]])
+  const storage = fakeStorage(rootOnly)
+  const store = module.createTaskInputSnapshotStore(storage)
+
+  assert.equal(store.readCurrent(), null)
+  assert.deepEqual(store.readAll(), [])
+  assert.equal(store.append(snapshot), false)
+  assert.deepEqual(storage.map, rootOnly)
+})
+
 test("选择历史快照会先重读跨窗口状态，未知或写失败不会改变当前指针", async () => {
   const module = await import("./agent-task-input.mjs")
   const storage = fakeStorage()
@@ -270,6 +461,84 @@ test("选择历史快照会先重读跨窗口状态，未知或写失败不会�
   assert.equal(firstStore.readCurrent().snapshot_id, first.snapshot_id)
 })
 
+test("selectCurrent 守护初始与写前 getItem 失败且 false 不会选中新快照", async () => {
+  const module = await import("./agent-task-input.mjs")
+  for (const fault of [
+    { key: module.TASK_INPUT_STORAGE_KEY, skip: 0 },
+    { key: `${module.TASK_INPUT_STORAGE_KEY}.current`, skip: 1 },
+  ]) {
+    const storage = adversarialStorage()
+    const store = module.createTaskInputSnapshotStore(storage)
+    const first = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T12:00:00.000Z", snapshotNonce: "OOOOOOOOOOOOOOOO",
+    })
+    const current = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T12:01:00.000Z", snapshotNonce: "PPPPPPPPPPPPPPPP",
+    })
+    assert.equal(store.append(first), true)
+    assert.equal(store.append(current), true)
+    storage.failOnce("getItem", fault.key, "before", fault.skip)
+
+    assert.equal(store.selectCurrent(first.snapshot_id), false)
+    assert.equal(store.readCurrent().snapshot_id, current.snapshot_id)
+    assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, current.snapshot_id)
+  }
+})
+
+test("selectCurrent 将 current write-then-throw、root 缓存失败和一次性复核失败判为已提交", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const scenarios = [
+    { method: "setItem", key: "current", phase: "after" },
+    { method: "setItem", key: "root", phase: "before" },
+    { method: "setItem", key: "root", phase: "after" },
+    { method: "getItem", key: "current", phase: "before", skip: 2 },
+  ]
+
+  for (const scenario of scenarios) {
+    const storage = adversarialStorage()
+    const store = module.createTaskInputSnapshotStore(storage)
+    const selected = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T12:10:00.000Z", snapshotNonce: "QQQQQQQQQQQQQQQQ",
+    })
+    const current = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T12:11:00.000Z", snapshotNonce: "RRRRRRRRRRRRRRRR",
+    })
+    assert.equal(store.append(selected), true)
+    assert.equal(store.append(current), true)
+    const key = scenario.key === "current"
+      ? `${module.TASK_INPUT_STORAGE_KEY}.current`
+      : module.TASK_INPUT_STORAGE_KEY
+    storage.failOnce(scenario.method, key, scenario.phase, scenario.skip ?? 0)
+
+    assert.equal(store.selectCurrent(selected.snapshot_id), true, `${scenario.key} ${scenario.phase}`)
+    assert.equal(store.readCurrent().snapshot_id, selected.snapshot_id)
+    assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, selected.snapshot_id)
+  }
+})
+
+test("selectCurrent 在 write-then-throw 后回滚也失败时按 durable current 报告成功", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const selected = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T12:20:00.000Z", snapshotNonce: "SSSSSSSSSSSSSSSS",
+  })
+  const current = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T12:21:00.000Z", snapshotNonce: "TTTTTTTTTTTTTTTT",
+  })
+  assert.equal(store.append(selected), true)
+  assert.equal(store.append(current), true)
+  const currentKey = `${module.TASK_INPUT_STORAGE_KEY}.current`
+  storage.failOnce("setItem", currentKey, "after")
+  storage.failOnce("setItem", currentKey, "before")
+  storage.failOnce("getItem", currentKey, "before", 2)
+  storage.failOnce("getItem", currentKey, "before")
+
+  assert.equal(store.selectCurrent(selected.snapshot_id), true)
+  assert.equal(store.readCurrent().snapshot_id, selected.snapshot_id)
+  assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, selected.snapshot_id)
+})
+
 test("固定快照严格拒绝笔记正文、路径、乱序论文和不匹配 ID", async () => {
   const module = await import("./agent-task-input.mjs")
   const preview = readyPreview(module)
@@ -281,4 +550,23 @@ test("固定快照严格拒绝笔记正文、路径、乱序论文和不匹配 I
   assert.equal(module.isValidTaskInputSnapshot({ ...snapshot, source_path: "hidden" }), false)
   assert.equal(module.isValidTaskInputSnapshot({ ...snapshot, papers: [...snapshot.papers].reverse() }), false)
   assert.equal(module.isValidTaskInputSnapshot({ ...snapshot, snapshot_id: snapshot.snapshot_id.replace("080000", "080001") }), false)
+})
+
+test("任务快照拒绝自定义原型、symbol、不可枚举字段和访问器", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const snapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T10:00:00.000Z", snapshotNonce: "FFFFFFFFFFFFFFFF",
+  })
+  const customPrototype = structuredClone(snapshot)
+  Object.setPrototypeOf(customPrototype, { inherited: true })
+  const symbolField = structuredClone(snapshot)
+  symbolField[Symbol("hidden")] = true
+  const nonEnumerable = structuredClone(snapshot)
+  Object.defineProperty(nonEnumerable, "hidden", { value: true, enumerable: false })
+  const accessor = structuredClone(snapshot)
+  Object.defineProperty(accessor, "version", { enumerable: true, get: () => 1 })
+
+  for (const candidate of [customPrototype, symbolField, nonEnumerable, accessor]) {
+    assert.equal(module.isValidTaskInputSnapshot(candidate), false)
+  }
 })

@@ -17,14 +17,30 @@ const ROOT_KEYS = Object.freeze(["version", "project_id", "saved_at", "axes"])
 const AXIS_KEYS = Object.freeze(Object.keys(DIRECTION_AXIS_VALUES))
 
 function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  try {
+    return Object.getPrototypeOf(value) === Object.prototype
+  } catch {
+    return false
+  }
 }
 
 function hasExactKeys(value, keys) {
   if (!isPlainObject(value)) return false
-  const actual = Object.keys(value).sort()
+  let ownKeys
+  let descriptors
+  try {
+    ownKeys = Reflect.ownKeys(value)
+    descriptors = Object.getOwnPropertyDescriptors(value)
+  } catch {
+    return false
+  }
+  if (ownKeys.some((key) => typeof key !== "string")) return false
+  const actual = ownKeys.sort()
   const expected = [...keys].sort()
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index])
+    && actual.every((key) => descriptors[key]?.enumerable === true && "value" in descriptors[key])
 }
 
 function isCanonicalIsoDate(value) {

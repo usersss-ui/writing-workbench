@@ -78,7 +78,10 @@ export function createAgentTaskSession({ storage, paperIndex } = {}) {
       return snapshotStore.readAll().map((snapshot) => ({
         snapshot: clone(snapshot),
         source_changed: !snapshotMatchesPreview(snapshot, preview),
-      })).reverse()
+      })).sort((left, right) => (
+        right.snapshot.created_at.localeCompare(left.snapshot.created_at, "en")
+        || right.snapshot.snapshot_id.localeCompare(left.snapshot.snapshot_id, "en")
+      ))
     },
 
     selectSnapshot(snapshotId) {

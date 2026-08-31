@@ -119,3 +119,22 @@ test("两个保存入口共用显式保存动作，成功展示时间与轴且�
   assert.equal(storage.raw(module.DIRECTION_STORAGE_KEY), beforeEmptySave)
   assert.match(notices.at(-1), /请先选择研究条件/u)
 })
+
+test("方向快照拒绝自定义原型、symbol、不可枚举字段和访问器", async () => {
+  const module = await import("./direction-snapshot.mjs")
+  const valid = module.createDirectionSnapshot(defaultDirectionSelection, {
+    savedAt: "2026-08-29T10:00:00.000Z",
+  })
+  const customPrototype = structuredClone(valid)
+  Object.setPrototypeOf(customPrototype, { inherited: true })
+  const symbolField = structuredClone(valid)
+  symbolField[Symbol("hidden")] = true
+  const nonEnumerable = structuredClone(valid)
+  Object.defineProperty(nonEnumerable, "hidden", { value: true, enumerable: false })
+  const accessor = structuredClone(valid)
+  Object.defineProperty(accessor, "version", { enumerable: true, get: () => 1 })
+
+  for (const candidate of [customPrototype, symbolField, nonEnumerable, accessor]) {
+    assert.equal(module.isValidDirectionSnapshot(candidate), false)
+  }
+})

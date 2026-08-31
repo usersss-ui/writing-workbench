@@ -107,6 +107,33 @@ test("历史视图最新在前，来源变化只发出警告而不覆盖旧快�
   assert.equal(session.readCurrent().snapshot_id, first.snapshot_id)
 })
 
+test("历史视图按 created_at 降序并以 snapshot_id 稳定打破同一时刻平局", async () => {
+  const module = await import("./agent-tasks.mjs")
+  const storage = memoryStorage()
+  seedWorkspace(storage)
+  const session = module.createAgentTaskSession({ storage, paperIndex: paperIndex() })
+  const saved = [
+    ["2026-08-29T09:00:00.000Z", "MMMMMMMMMMMMMMMM"],
+    ["2026-08-29T11:00:00.000Z", "AAAAAAAAAAAAAAAA"],
+    ["2026-08-29T10:00:00.000Z", "AAAAAAAAAAAAAAAA"],
+    ["2026-08-29T10:00:00.000Z", "ZZZZZZZZZZZZZZZZ"],
+  ].map(([createdAt, snapshotNonce]) => session.saveCurrentInput({
+    confirmed: true, createdAt, snapshotNonce,
+  }).snapshot)
+  const oldestSnapshotKey = `${TASK_INPUT_STORAGE_KEY}.snapshot.${saved[0].snapshot_id}`
+  const oldestBytes = storage.getItem(oldestSnapshotKey)
+
+  assert.deepEqual(session.readHistory().map((entry) => entry.snapshot.snapshot_id), [
+    saved[1].snapshot_id,
+    saved[3].snapshot_id,
+    saved[2].snapshot_id,
+    saved[0].snapshot_id,
+  ])
+  session.refresh({ paperIndex: paperIndex(3, "Changed after snapshots") })
+  assert.equal(session.readHistory().every((entry) => entry.source_changed), true)
+  assert.equal(storage.getItem(oldestSnapshotKey), oldestBytes)
+})
+
 test("任务页论文数据只经过 canonical library loader 且 v1 仍被拒绝", async () => {
   const module = await import("./agent-tasks.mjs")
   const requests = []
@@ -123,12 +150,45 @@ test("任务页论文数据只经过 canonical library loader 且 v1 仍被拒�
 test("任务页只呈现输入预览、显式快照和历史，不提供执行、生成结论或导出入口", async () => {
   const html = await readFile(path.join(desktopRoot, "agent-tasks.html"), "utf8")
   const css = await readFile(path.join(desktopRoot, "agent-tasks.css"), "utf8")
+  const runtime = await readFile(path.join(desktopRoot, "agent-tasks.mjs"), "utf8")
   assert.match(html, /研究任务输入/u)
   assert.match(html, /确认并固定输入快照/u)
   assert.match(html, /历史输入快照/u)
   assert.match(html, /未连接任何执行器或模型/u)
   assert.match(html, /id="snapshot-confirm"/u)
   assert.match(html, /id="snapshot-history"/u)
-  assert.doesNotMatch(html, /id="(?:run-agent|create-revision|export-results)"|run_demo|\/api\/tasks|local-task-client/u)
+  assert.doesNotMatch(`${html}\n${runtime}`, /id="(?:run-agent|create-revision|export-results)"|run_demo|\/api\/(?:health|tasks)|local-task-client/u)
   assert.match(css, /\.agent-snapshot-history/u)
+})
+
+test("任务页初始化只通过 canonical loader 请求一次论文索引", async () => {
+  const module = await import("./agent-tasks.mjs")
+  const requests = []
+  const storage = memoryStorage()
+  const documentRef = { querySelector() { return null } }
+  const windowRef = { localStorage: storage, addEventListener() {} }
+
+  await module.initializeAgentTasks({
+    document: documentRef,
+    window: windowRef,
+    loadIndex: () => module.loadAgentTaskPaperIndex(async (url, options) => {
+      requests.push({ url, options })
+      return {
+        ok: true,
+        json: async () => ({ version: 1, facet_schema: {}, warning_count: 0, papers: [] }),
+      }
+    }),
+  })
+
+  assert.deepEqual(requests, [{
+    url: "../../local_library_data/paper-index.json",
+    options: { cache: "no-store" },
+  }])
+  const forbiddenRoutes = [
+    ["/api/", "tasks"].join(""),
+    ["/api/", "health"].join(""),
+    ["/model/", "run"].join(""),
+    ["/agent/", "run"].join(""),
+  ]
+  assert.equal(requests.some(({ url }) => forbiddenRoutes.some((route) => url.includes(route))), false)
 })

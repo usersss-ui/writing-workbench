@@ -25,14 +25,30 @@ const REPRODUCTION_STATUS = Object.freeze([
 ])
 
 function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  try {
+    return Object.getPrototypeOf(value) === Object.prototype
+  } catch {
+    return false
+  }
 }
 
 function hasExactKeys(value, keys) {
   if (!isPlainObject(value)) return false
-  const actual = Object.keys(value).sort()
+  let ownKeys
+  let descriptors
+  try {
+    ownKeys = Reflect.ownKeys(value)
+    descriptors = Object.getOwnPropertyDescriptors(value)
+  } catch {
+    return false
+  }
+  if (ownKeys.some((key) => typeof key !== "string")) return false
+  const actual = ownKeys.sort()
   const expected = [...keys].sort()
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index])
+    && actual.every((key) => descriptors[key]?.enumerable === true && "value" in descriptors[key])
 }
 
 function clone(value) {
@@ -116,7 +132,10 @@ function unsafeMetadataText(value) {
   return Boolean(text) && (
     /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(text)
     || containsAbsolutePath(text)
-    || /(?:api[_-]?key|password|secret|access[_-]?token)\s*[:=]/iu.test(text)
+    || /\bauthorization\s*[:=]\s*(?:bearer|basic)\s+\S+/iu.test(text)
+    || /(?:api[_-]?key|password|(?:client[_-]?)?secret|private[_-]?key|(?:access|refresh|id|auth|session)[_-]?token)\s*["']?\s*[:=]\s*["']?\s*\S+/iu.test(text)
+    || /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/iu.test(text)
+    || /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/iu.test(text)
   )
 }
 
@@ -290,16 +309,18 @@ function validPending(value) {
     && (value.previous_current_id === null || typeof value.previous_current_id === "string")
 }
 
-function mergeSnapshots(rootSnapshots, entrySnapshots) {
-  const snapshots = rootSnapshots.map(clone)
-  const byId = new Map(snapshots.map((snapshot) => [snapshot.snapshot_id, snapshot]))
+function orderAuthoritativeSnapshots(rootSnapshots, entrySnapshots) {
+  const entries = new Map(entrySnapshots.map((snapshot) => [snapshot.snapshot_id, snapshot]))
+  const snapshots = []
+  const seen = new Set()
+  for (const cached of rootSnapshots) {
+    const authoritative = entries.get(cached.snapshot_id)
+    if (!authoritative || JSON.stringify(authoritative) !== JSON.stringify(cached)) return null
+    snapshots.push(clone(authoritative))
+    seen.add(cached.snapshot_id)
+  }
   for (const snapshot of entrySnapshots) {
-    const existing = byId.get(snapshot.snapshot_id)
-    if (existing && JSON.stringify(existing) !== JSON.stringify(snapshot)) return null
-    if (!existing) {
-      snapshots.push(clone(snapshot))
-      byId.set(snapshot.snapshot_id, snapshot)
-    }
+    if (!seen.has(snapshot.snapshot_id)) snapshots.push(clone(snapshot))
   }
   return snapshots
 }
@@ -334,10 +355,12 @@ function inspectStore(storage) {
       }
       entries.push(snapshot)
     }
-    const snapshots = mergeSnapshots(root.snapshots, entries)
+    const snapshots = orderAuthoritativeSnapshots(root.snapshots, entries)
     if (snapshots === null) return { status: "invalid", state: emptyState() }
     const independentCurrent = storage.getItem(CURRENT_KEY)
-    let current = independentCurrent ?? root.current_snapshot_id ?? snapshots.at(-1)?.snapshot_id ?? null
+    if (independentCurrent === null && snapshots.length > 0) return { status: "invalid", state: emptyState() }
+    if (independentCurrent === null && root.current_snapshot_id !== null) return { status: "invalid", state: emptyState() }
+    let current = independentCurrent
     if (current !== null && !snapshots.some((snapshot) => snapshot.snapshot_id === current)) {
       const resolved = resolvePendingPointer(current, snapshots, storage, keys)
       if (!resolved.valid) return { status: "invalid", state: emptyState() }
@@ -352,6 +375,72 @@ function inspectStore(storage) {
   }
 }
 
+function getStorageItem(storage, key, attempts = 1) {
+  if (!storage || typeof storage.getItem !== "function") return { known: false, value: null }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return { known: true, value: storage.getItem(key) }
+    } catch {
+      // A later read can distinguish a transient fault from an unknown durable state.
+    }
+  }
+  return { known: false, value: null }
+}
+
+function setStorageItem(storage, key, value) {
+  if (!storage || typeof storage.setItem !== "function") return false
+  try {
+    storage.setItem(key, value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function removeStorageItem(storage, key) {
+  if (!storage || typeof storage.removeItem !== "function") return false
+  try {
+    storage.removeItem(key)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function parsePending(raw, snapshot) {
+  if (raw === null) return null
+  try {
+    const value = JSON.parse(raw)
+    return validPending(value)
+      && value.snapshot.snapshot_id === snapshot.snapshot_id
+      && JSON.stringify(value.snapshot) === JSON.stringify(snapshot)
+      ? value
+      : false
+  } catch {
+    return false
+  }
+}
+
+function storedSnapshotMatches(raw, snapshot) {
+  if (raw === null) return false
+  try {
+    const value = JSON.parse(raw)
+    return isValidTaskInputSnapshot(value)
+      && value.snapshot_id === snapshot.snapshot_id
+      && JSON.stringify(value) === JSON.stringify(snapshot)
+  } catch {
+    return false
+  }
+}
+
+function inspectStoreWithRetry(storage, attempts = 2) {
+  let inspected = inspectStore(storage)
+  for (let attempt = 1; attempt < attempts && inspected.status === "invalid"; attempt += 1) {
+    inspected = inspectStore(storage)
+  }
+  return inspected
+}
+
 export function createTaskInputSnapshotStore(storage) {
   let state = inspectStore(storage).state
 
@@ -360,51 +449,70 @@ export function createTaskInputSnapshotStore(storage) {
       const inspected = inspectStore(storage)
       if (!["missing", "valid"].includes(inspected.status) || !isValidTaskInputSnapshot(snapshot)) return false
       if (inspected.state.snapshots.some((item) => item.snapshot_id === snapshot.snapshot_id)) return false
-      try {
-        if (!storage || typeof storage.setItem !== "function") return false
-        const pending = pendingKey(snapshot.snapshot_id)
-        const committed = snapshotKey(snapshot.snapshot_id)
-        if (storage.getItem(pending) !== null || storage.getItem(committed) !== null) return false
-        const storedCurrent = storage.getItem(CURRENT_KEY)
-        const previousCurrentId = storedCurrent ?? inspected.state.current_snapshot_id
-        storage.setItem(pending, JSON.stringify({ version: 1, snapshot: clone(snapshot), previous_current_id: previousCurrentId }))
-        try {
-          storage.setItem(CURRENT_KEY, snapshot.snapshot_id)
-        } catch {
-          try {
-            if (typeof storage.removeItem === "function") storage.removeItem(pending)
-          } catch {
-            // A non-current pending record is ignored by validated readers.
-          }
-          state = inspectStore(storage).state
-          return false
+      const pending = pendingKey(snapshot.snapshot_id)
+      const committed = snapshotKey(snapshot.snapshot_id)
+      const pendingRead = getStorageItem(storage, pending)
+      const committedRead = getStorageItem(storage, committed)
+      if (!pendingRead.known || !committedRead.known || committedRead.value !== null) return false
+
+      let pendingRecord = parsePending(pendingRead.value, snapshot)
+      if (pendingRecord === false) return false
+      if (pendingRecord === null) {
+        const currentRead = getStorageItem(storage, CURRENT_KEY)
+        if (!currentRead.known) return false
+        pendingRecord = {
+          version: 1,
+          snapshot: clone(snapshot),
+          previous_current_id: currentRead.value ?? inspected.state.current_snapshot_id,
         }
-        try {
-          storage.setItem(committed, JSON.stringify(clone(snapshot)))
-        } catch {
-          // Keep the pending/current pair so readers can fall back to the previous
-          // committed current without racing another browser tab's newer pointer.
-          state = inspectStore(storage).state
-          return false
-        }
-        try {
-          if (typeof storage.removeItem === "function") storage.removeItem(pending)
-        } catch {
-          // A leftover pending copy is harmless once the committed entry exists.
-        }
-      } catch {
-        state = inspectStore(storage).state
+        setStorageItem(storage, pending, JSON.stringify(pendingRecord))
+        const durablePending = getStorageItem(storage, pending, 2)
+        if (!durablePending.known || parsePending(durablePending.value, snapshot) === false || durablePending.value === null) return false
+      }
+
+      setStorageItem(storage, CURRENT_KEY, snapshot.snapshot_id)
+      const durableCurrent = getStorageItem(storage, CURRENT_KEY, 2)
+      if (!durableCurrent.known || durableCurrent.value !== snapshot.snapshot_id) {
+        // An unknown post-write state must retain pending so any write-then-throw
+        // is masked back to previous_current_id and the same ID remains resumable.
+        if (durableCurrent.known) removeStorageItem(storage, pending)
+        state = inspectStoreWithRetry(storage).state
         return false
       }
-      const reconciled = inspectStore(storage)
-      const committedSnapshot = reconciled.state.snapshots.find((item) => item.snapshot_id === snapshot.snapshot_id)
-      if (reconciled.status !== "valid" || JSON.stringify(committedSnapshot) !== JSON.stringify(snapshot)) return false
-      state = reconciled.state
-      try {
-        storage.setItem(TASK_INPUT_STORAGE_KEY, JSON.stringify(reconciled.state))
-      } catch {
-        // Independent snapshot and current records are already authoritative.
+
+      const committedWriteReturned = setStorageItem(storage, committed, JSON.stringify(clone(snapshot)))
+      const durableSnapshot = getStorageItem(storage, committed, 2)
+      let committedProven = durableSnapshot.known
+        ? storedSnapshotMatches(durableSnapshot.value, snapshot)
+        : committedWriteReturned
+      let commitInspection = null
+      if (!committedProven && !durableSnapshot.known) {
+        commitInspection = inspectStoreWithRetry(storage)
+        const inspectedSnapshot = commitInspection.state.snapshots.find((item) => item.snapshot_id === snapshot.snapshot_id)
+        committedProven = commitInspection.status === "valid"
+          && commitInspection.state.current_snapshot_id === snapshot.snapshot_id
+          && JSON.stringify(inspectedSnapshot) === JSON.stringify(snapshot)
       }
+      if (!committedProven) {
+        // The pending/current pair deliberately remains: validated readers resolve
+        // it to previous_current_id, and the same snapshot ID can resume later.
+        state = (commitInspection ?? inspectStoreWithRetry(storage)).state
+        return false
+      }
+
+      removeStorageItem(storage, pending)
+      const reconciled = inspectStoreWithRetry(storage)
+      const committedSnapshot = reconciled.state.snapshots.find((item) => item.snapshot_id === snapshot.snapshot_id)
+      if (reconciled.status === "valid" && JSON.stringify(committedSnapshot) === JSON.stringify(snapshot)) {
+        state = reconciled.state
+      } else {
+        state = {
+          version: 1,
+          current_snapshot_id: snapshot.snapshot_id,
+          snapshots: [...inspected.state.snapshots.map(clone), clone(snapshot)],
+        }
+      }
+      setStorageItem(storage, TASK_INPUT_STORAGE_KEY, JSON.stringify(state))
       return true
     },
 
@@ -423,27 +531,45 @@ export function createTaskInputSnapshotStore(storage) {
       const inspected = inspectStore(storage)
       if (inspected.status !== "valid" || !inspected.state.snapshots.some((snapshot) => snapshot.snapshot_id === snapshotId)) return false
       const previousState = state
-      const previousPointer = storage.getItem(CURRENT_KEY)
+      const previousPointer = getStorageItem(storage, CURRENT_KEY)
+      if (!previousPointer.known) return false
       const nextState = { ...inspected.state, current_snapshot_id: snapshotId, snapshots: inspected.state.snapshots.map(clone) }
-      try {
-        storage.setItem(CURRENT_KEY, snapshotId)
-        storage.setItem(TASK_INPUT_STORAGE_KEY, JSON.stringify(nextState))
-      } catch {
-        try {
-          if (previousPointer === null && typeof storage.removeItem === "function") storage.removeItem(CURRENT_KEY)
-          else if (previousPointer !== null) storage.setItem(CURRENT_KEY, previousPointer)
-        } catch {
-          // Leave the durable store to a future full validation; in-memory selection stays unchanged.
+      const currentWriteReturned = setStorageItem(storage, CURRENT_KEY, snapshotId)
+      let durableCurrent = getStorageItem(storage, CURRENT_KEY, 2)
+      let selected = durableCurrent.known
+        ? durableCurrent.value === snapshotId
+        : currentWriteReturned
+
+      if (!selected && !durableCurrent.known) {
+        const rollbackReturned = previousPointer.value === null
+          ? removeStorageItem(storage, CURRENT_KEY)
+          : setStorageItem(storage, CURRENT_KEY, previousPointer.value)
+        durableCurrent = getStorageItem(storage, CURRENT_KEY, 2)
+        if (durableCurrent.known && durableCurrent.value === snapshotId) {
+          selected = true
+        } else if (!durableCurrent.known && !rollbackReturned) {
+          // Resolve an otherwise unknowable pair of thrown writes by explicitly
+          // completing the requested selection; a normal return is durable proof.
+          selected = setStorageItem(storage, CURRENT_KEY, snapshotId)
+          if (!selected) {
+            durableCurrent = getStorageItem(storage, CURRENT_KEY, 2)
+            selected = durableCurrent.known && durableCurrent.value === snapshotId
+          }
         }
+      }
+
+      if (!selected) {
         state = previousState
         return false
       }
-      const reconciled = inspectStore(storage)
-      if (reconciled.status !== "valid" || reconciled.state.current_snapshot_id !== snapshotId) {
-        state = previousState
-        return false
-      }
-      state = reconciled.state
+
+      // The root document is only a rebuildable cache after independent
+      // snapshot and current authority have both been proven.
+      setStorageItem(storage, TASK_INPUT_STORAGE_KEY, JSON.stringify(nextState))
+      const reconciled = inspectStoreWithRetry(storage)
+      state = reconciled.status === "valid" && reconciled.state.current_snapshot_id === snapshotId
+        ? reconciled.state
+        : nextState
       return true
     },
   }
