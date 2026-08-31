@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "institution_id": "nuist",
+  "display_name": "南京信息工程大学",
+  "access_mode": "carsi",
+  "library_home": "https://lib.nuist.edu.cn/",
+  "fallback_page": "https://lib.nuist.edu.cn/zy1/wwsjk.htm",
+  "providers": [
+    {
+      "provider_id": "ieee",
+      "display_name": "IEEE Xplore",
+      "hosts": ["ieeexplore.ieee.org"],
+      "doi_prefixes": ["10.1109"],
+      "library_page": "https://lib.nuist.edu.cn/info/1015/1430.htm",
+      "carsi_entry_url": "https://ieeexplore.ieee.org/servlet/wayf.jsp?entityId=https%3A%2F%2Fidp-lib.nuist.edu.cn%2Fidp%2Fshibboleth&url=https%3A%2F%2Fieeexplore.ieee.org",
+      "carsi_supported": true
+    },
+    {
+      "provider_id": "sciencedirect",
+      "display_name": "ScienceDirect",
+      "hosts": ["sciencedirect.com"],
+      "doi_prefixes": ["10.1016"],
+      "library_page": "https://lib.nuist.edu.cn/info/1015/1432.htm",
+      "carsi_entry_url": "https://auth.elsevier.com/ShibAuth/institutionLogin?appReturnURL=https%3A%2F%2Fwww.sciencedirect.com&entityID=https%3A%2F%2Fidp-lib.nuist.edu.cn%2Fidp%2Fshibboleth",
+      "carsi_supported": true
+    },
+    {
+      "provider_id": "springer",
+      "display_name": "Springer Link",
+      "hosts": ["link.springer.com"],
+      "doi_prefixes": ["10.1007"],
+      "library_page": "https://lib.nuist.edu.cn/zy1/wwsjk/1.htm",
+      "carsi_entry_url": null,
+      "carsi_supported": true
+    },
+    {
+      "provider_id": "wiley",
+      "display_name": "Wiley Online Library",
+      "hosts": ["onlinelibrary.wiley.com"],
+      "doi_prefixes": ["10.1002", "10.1111"],
+      "library_page": "https://lib.nuist.edu.cn/info/1341/4533.htm",
+      "carsi_entry_url": null,
+      "carsi_supported": true
+    },
+    {
+      "provider_id": "taylor-francis",
+      "display_name": "Taylor & Francis Online",
+      "hosts": ["tandfonline.com"],
+      "doi_prefixes": ["10.1080"],
+      "library_page": "https://lib.nuist.edu.cn/info/1341/4533.htm",
+      "carsi_entry_url": null,
+      "carsi_supported": true
+    },
+    {
+      "provider_id": "web-of-science",
+      "display_name": "Web of Science",
+      "hosts": ["webofscience.com"],
+      "doi_prefixes": [],
+      "library_page": "https://lib.nuist.edu.cn/info/1015/1436.htm",
+      "carsi_entry_url": "https://www.webofknowledge.com/?DestApp=UA&ShibFederation=ChineseFederation&auth=ShibbolethIdPForm&entityID=https%3A%2F%2Fidp-lib.nuist.edu.cn%2Fidp%2Fshibboleth&target=https%253A%252F%252Fwww.webofknowledge.com%252F%253FDestApp%253DUA",
+      "carsi_supported": true
+    }
+  ]
+}
