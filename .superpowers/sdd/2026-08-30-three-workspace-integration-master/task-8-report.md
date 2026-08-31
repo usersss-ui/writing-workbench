@@ -41,3 +41,14 @@
 
 - No filesystem writes, paths, note-import tokens, candidate store, queue, UI, browser state, server route, generated output, private data, service, donor worktree, or unrelated source file was changed.
 - Pre-existing untracked `audits/` and `tmp/` remain untouched and uncommitted.
+
+## Fix Loop — asynchronous logger rejection
+
+- Review found that a logger returning a rejected Promise could emit `unhandledRejection` with its raw error text, despite synchronous logger throws being contained.
+- Fix implementation head before this report update: `e2b03d25d9aad3d6f91bed4e69bdbc507d4deb22` (`fix: absorb async coordinator logger failures`).
+- RED command: `node --test exporter/paper-library/write-coordinator.test.mjs`.
+- RED result: exit 1; the new async-logger test failed as `unhandledRejection` with its private-looking error message.
+- Minimal fix: normalize the logger result through `Promise.resolve(...).catch(() => {})` without awaiting it. State is set before logging, and neither write locking nor recovery transitions wait for logger completion.
+- GREEN focused command: `node --test exporter/paper-library/write-coordinator.test.mjs` exited 0 with 11 passed and 0 failed.
+- Full exporter/desktop command: `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs` exited 0 with 415 passed and 0 failed.
+- `node --check` passed for the coordinator and its test; diff checks were clean. No private, generated, service, or unrelated paths changed.
