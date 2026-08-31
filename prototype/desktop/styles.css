@@ -723,10 +723,18 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
   font-size: 8px;
   overflow-wrap: anywhere;
 }
-.library-page .library-profile-pending { color: var(--amber-deep); font-size: 9px; font-weight: 800; }
+.library-page .library-profile-empty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: #64748b;
+  font-size: 12px;
+}
+.library-page .library-profile-empty--not-applicable { color: #7c6f64; }
+.library-page .library-profile-empty--pending-verification { color: #9a6700; font-weight: 650; }
 .library-page .library-source-terms { margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--line); }
 .library-page .library-source-terms summary { min-height: 36px; display: flex; align-items: center; color: var(--ink-soft); cursor: pointer; font-size: 9px; font-weight: 800; }
-.library-page .library-source-terms p { margin: 2px 0 0; color: var(--amber-deep); font-size: 9px; }
+.library-page .library-source-terms p { margin: 2px 0 0; color: #64748b; font-size: 9px; }
 .library-page .library-artifact-counts,
 .library-page .library-detail-metadata { display: grid; gap: 6px; margin: 0; }
 .library-page .library-artifact-counts div,

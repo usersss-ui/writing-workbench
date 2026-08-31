@@ -2,6 +2,7 @@ import {
   P02_ROLES,
   describePaperIdentity,
   displayPaperTitle,
+  facetEmptyLabel,
   facetValues,
   translateState,
 } from "./paper-library-model.mjs"
@@ -221,8 +222,15 @@ function appendResearchProfile(document, parent, paper, facetSchema) {
     group.dataset.profilePath = schemaGroup.path
     appendTextElement(document, group, "strong", schemaGroup.label)
     const values = facetValues(paper, schemaGroup.path)
-    if (values.length === 0) {
-      appendTextElement(document, group, "span", "待核验", "library-profile-pending")
+    const empty = facetEmptyLabel(paper, schemaGroup.path)
+    if (empty) {
+      appendTextElement(
+        document,
+        group,
+        "span",
+        empty.label,
+        `library-profile-empty library-profile-empty--${empty.state.replaceAll("_", "-")}`,
+      )
     } else {
       const list = document.createElement("ul")
       for (const value of values) appendTextElement(document, list, "li", value)
@@ -236,7 +244,7 @@ function appendResearchProfile(document, parent, paper, facetSchema) {
   sourceTerms.dataset.sourceTerms = ""
   appendTextElement(document, sourceTerms, "summary", "原文术语与算法名称")
   const terms = stringList(paper?.source_terms)
-  if (terms.length === 0) appendTextElement(document, sourceTerms, "p", "待核验")
+  if (terms.length === 0) appendTextElement(document, sourceTerms, "p", "未记录")
   else {
     const list = document.createElement("ul")
     for (const term of terms) appendTextElement(document, list, "li", term)

@@ -1048,20 +1048,25 @@ test("inspector renders the schema-ordered research profile and plain source ter
       ...validFacets(),
       constraints: { ...validFacets().constraints, consistency: [] },
       results: [],
+      applications: [],
     },
-    source_terms: ["Tracking-ADMM", "Proximal Subgradient"],
+    facet_states: {
+      results: "pending_verification",
+      applications: "not_applicable",
+    },
+    source_terms: [],
   })
-  const root = renderInspector({ document, paper, workspaceState: {}, facetSchema: validFacetSchema() })
+  const root = renderInspector({ document, paper, workspaceState: {}, facetSchema: validFacetSchema(2) })
   assert.deepEqual(
     root.querySelectorAll("[data-profile-path]").map((node) => node.dataset.profilePath),
     facetGroups.map(([, path]) => path),
   )
-  const consistency = root.querySelector('[data-profile-path="constraints.consistency"]')
-  const results = root.querySelector('[data-profile-path="results"]')
-  assert.match(consistency.textContent, /节点关系待核验/u)
-  assert.match(results.textContent, /理论结果待核验/u)
+  assert.match(root.querySelector('[data-profile-path="constraints.consistency"]').textContent, /节点关系未记录/u)
+  assert.match(root.querySelector('[data-profile-path="results"]').textContent, /理论结果待核验/u)
+  assert.match(root.querySelector('[data-profile-path="applications"]').textContent, /应用领域不适用/u)
+  assert.match(root.querySelector("[data-source-terms]").textContent, /原文术语与算法名称未记录/u)
+  assert.equal(root.querySelectorAll(".library-profile-empty--pending-verification").length, 1)
   assert.match(root.textContent, /论文研究画像/u)
-  assert.match(root.textContent, /原文术语与算法名称Tracking-ADMMProximal Subgradient/u)
   assert.equal(root.querySelectorAll("[data-source-terms]").length, 1)
   assert.equal(root.querySelectorAll("[data-filter-path]").length, 0)
   assert.equal(root.querySelectorAll('[data-action="set-reading"]').length, 3)

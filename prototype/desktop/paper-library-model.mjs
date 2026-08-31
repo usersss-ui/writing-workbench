@@ -199,6 +199,23 @@ export function facetValues(paper, path) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : []
 }
 
+const FACET_EMPTY_LABELS = Object.freeze({
+  unrecorded: "未记录",
+  not_applicable: "不适用",
+  pending_verification: "待核验",
+})
+
+export function facetStateAt(paper, path) {
+  const state = paper?.facet_states?.[path]
+  return Object.hasOwn(FACET_EMPTY_LABELS, state) ? state : "unrecorded"
+}
+
+export function facetEmptyLabel(paper, path) {
+  if (facetValues(paper, path).length > 0) return null
+  const state = facetStateAt(paper, path)
+  return { state, label: FACET_EMPTY_LABELS[state] }
+}
+
 export function matchFacetFilters(paper, facetFilters = {}) {
   if (!facetFilters || typeof facetFilters !== "object" || Array.isArray(facetFilters)) return true
   return Object.entries(facetFilters).every(([path, selected]) => {

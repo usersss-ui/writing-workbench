@@ -6,6 +6,8 @@ import {
   P02_ROLES,
   buildLibraryViewState,
   displayPaperTitle,
+  facetEmptyLabel,
+  facetStateAt,
   facetValues,
   filterLibrary,
   groupRowsByNoteStatus,
@@ -17,6 +19,25 @@ import {
   summarizeShelfRole,
   translateState,
 } from "./paper-library-model.mjs"
+
+test("empty facet labels default to 未记录 and honor explicit states", () => {
+  const facets = structuredClone(papers[0].facets)
+  facets.results = []
+  facets.applications = []
+  facets.privacy_robustness = []
+  const paper = {
+    facets,
+    facet_states: {
+      applications: "not_applicable",
+      results: "pending_verification",
+    },
+  }
+  assert.deepEqual(facetEmptyLabel(paper, "privacy_robustness"), { state: "unrecorded", label: "未记录" })
+  assert.deepEqual(facetEmptyLabel(paper, "applications"), { state: "not_applicable", label: "不适用" })
+  assert.deepEqual(facetEmptyLabel(paper, "results"), { state: "pending_verification", label: "待核验" })
+  assert.equal(facetEmptyLabel(paper, "research.domain"), null)
+  assert.equal(facetStateAt({ facets, facet_states: { results: "waiting" } }, "results"), "unrecorded")
+})
 
 const facetSchema = Object.freeze({
   version: 1,
