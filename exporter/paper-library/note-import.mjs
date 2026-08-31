@@ -138,6 +138,12 @@ function closesFence(line, fence) {
   return match !== null && match[1][0] === fence.marker && match[1].length >= fence.length
 }
 
+function beginsMarkdownBlock(line) {
+  return /^(?: {4}|\t)/u.test(line)
+    || /^ {0,3}(?:#{1,6}(?:[ \t]+|$)|>|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))/u.test(line)
+    || /^ {0,3}(?:=+[ \t]*|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/u.test(line)
+}
+
 function withoutCode(markdown) {
   const lines = markdown.split(/\r?\n/u)
   let fence = null
@@ -164,6 +170,11 @@ function withoutCode(markdown) {
       flushInlineLines()
       fence = opener
       visible.push("")
+      continue
+    }
+    if (beginsMarkdownBlock(line)) {
+      flushInlineLines()
+      visible.push(inlineCodeRemoved(line))
       continue
     }
     inlineLines.push(line)

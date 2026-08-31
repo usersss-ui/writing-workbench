@@ -171,6 +171,24 @@ test("does not let an inline code span cross a blank-line block boundary", async
   }
 })
 
+test("does not let an inline code span cross a recognizable Markdown block boundary", async (t) => {
+  const cases = [
+    ["ATX heading", "`code starts\n# Heading $unclosed\n`"],
+    ["blockquote", "``code starts\n> $unclosed\n``"],
+    ["unordered list", "`code starts\n- item $unclosed\n`"],
+    ["ordered list", "``code starts\n1. item $unclosed\n``"],
+    ["setext heading", "`code starts\nHeading $unclosed\n---\n`"],
+    ["thematic break", "``code starts\n***\n$unclosed\n``"],
+    ["indented code", "`code starts\n    $unclosed\n`"],
+  ]
+  for (const [name, markdown] of cases) {
+    await t.test(name, async () => {
+      const result = await inspect({ markdown })
+      assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), true)
+    })
+  }
+})
+
 test("keeps a longer backtick fence open across a shorter backtick line", async () => {
   const result = await inspect({
     markdown: [
