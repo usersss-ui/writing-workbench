@@ -218,6 +218,34 @@ test("授权头、OAuth 令牌、客户端密钥、私钥和 URL 用户信息都
   }
 })
 
+test("任意授权方案、通用令牌赋值和仅用户名 URL userinfo 被拒绝但学术 token 用语保留", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const forbiddenMetadata = [
+    ["Author", "ization: Dig", "est fixture-response"].join(""),
+    ["oauth", "_token=fixture-value"].join(""),
+    ["to", "ken: fixture-value"].join(""),
+    ["https://secret", "-token@example.invalid/path"].join(""),
+  ]
+
+  for (const unsafeValue of forbiddenMetadata) {
+    const index = structuredClone(paperIndex())
+    index.papers[0].title_zh = unsafeValue
+    const preview = module.buildTaskInputPreview({
+      directionSnapshot: directionSnapshot(), workspaceState: workspaceState(), paperIndex: index,
+    })
+    assert.equal(preview.status, "unsafe_metadata", unsafeValue.split(":", 1)[0])
+    assert.equal(preview.ready, false)
+  }
+
+  const academicIndex = structuredClone(paperIndex())
+  academicIndex.papers[0].title_zh = "Token passing methods for distributed optimization"
+  const academicPreview = module.buildTaskInputPreview({
+    directionSnapshot: directionSnapshot(), workspaceState: workspaceState(), paperIndex: academicIndex,
+  })
+  assert.equal(academicPreview.status, "ready")
+  assert.equal(academicPreview.ready, true)
+})
+
 test("同一毫秒创建的默认快照获得唯一 ID 且历史只追加不覆盖", async () => {
   const module = await import("./agent-task-input.mjs")
   const preview = readyPreview(module)
@@ -388,6 +416,113 @@ test("append 无法复核 write-then-throw 的 current 时保留可恢复 pendin
   assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, first.snapshot_id)
   assert.equal(store.append(retryable), true)
   assert.equal(store.readCurrent().snapshot_id, retryable.snapshot_id)
+})
+
+test("跨 store 重试 stale pending 会把回退基准刷新为最新 durable current", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const storeA = module.createTaskInputSnapshotStore(storage)
+  const storeB = module.createTaskInputSnapshotStore(storage)
+  const previous = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:40:00.000Z", snapshotNonce: "XXXXXXXXXXXXXXXX",
+  })
+  const stale = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:41:00.000Z", snapshotNonce: "YYYYYYYYYYYYYYYY",
+  })
+  const latest = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:42:00.000Z", snapshotNonce: "ZZZZZZZZZZZZZZZZ",
+  })
+  const staleCommittedKey = `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${stale.snapshot_id}`
+  const stalePendingKey = `${module.TASK_INPUT_STORAGE_KEY}.pending.${stale.snapshot_id}`
+
+  assert.equal(storeA.append(previous), true)
+  storage.failOnce("setItem", staleCommittedKey, "before")
+  assert.equal(storeA.append(stale), false)
+  assert.equal(JSON.parse(storage.raw(stalePendingKey)).previous_current_id, previous.snapshot_id)
+  assert.equal(storeB.append(latest), true)
+  assert.equal(storeB.readCurrent().snapshot_id, latest.snapshot_id)
+
+  storage.failOnce("setItem", staleCommittedKey, "before")
+  assert.equal(storeA.append(stale), false)
+  assert.equal(JSON.parse(storage.raw(stalePendingKey)).previous_current_id, latest.snapshot_id)
+  const reopened = module.createTaskInputSnapshotStore(storage)
+  assert.equal(reopened.readCurrent().snapshot_id, latest.snapshot_id)
+  assert.deepEqual(reopened.readAll().map((item) => item.snapshot_id), [previous.snapshot_id, latest.snapshot_id])
+
+  assert.equal(storeA.append(stale), true)
+  assert.equal(storeA.readCurrent().snapshot_id, stale.snapshot_id)
+})
+
+test("stale pending refresh 的写前、写后和读复核故障都保持最新 durable current", async () => {
+  const module = await import("./agent-task-input.mjs")
+
+  for (const scenario of ["write_before", "write_after", "read_unknown"]) {
+    const storage = adversarialStorage()
+    const storeA = module.createTaskInputSnapshotStore(storage)
+    const storeB = module.createTaskInputSnapshotStore(storage)
+    const previous = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T11:50:00.000Z", snapshotNonce: "1111111111111111",
+    })
+    const stale = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T11:51:00.000Z", snapshotNonce: "2222222222222222",
+    })
+    const latest = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T11:52:00.000Z", snapshotNonce: "3333333333333333",
+    })
+    const pendingKey = `${module.TASK_INPUT_STORAGE_KEY}.pending.${stale.snapshot_id}`
+    const committedKey = `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${stale.snapshot_id}`
+
+    assert.equal(storeA.append(previous), true)
+    storage.failOnce("setItem", committedKey, "before")
+    assert.equal(storeA.append(stale), false)
+    assert.equal(storeB.append(latest), true)
+
+    if (scenario === "write_before") {
+      storage.failOnce("setItem", pendingKey, "before")
+    } else {
+      storage.failOnce("setItem", pendingKey, "after")
+      if (scenario === "read_unknown") {
+        storage.failOnce("getItem", pendingKey, "before", 1)
+        storage.failOnce("getItem", pendingKey, "before")
+      } else {
+        storage.failOnce("setItem", committedKey, "before")
+      }
+    }
+
+    assert.equal(storeA.append(stale), false, scenario)
+    assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, latest.snapshot_id, scenario)
+    const refreshedPending = JSON.parse(storage.raw(pendingKey))
+    assert.equal(
+      refreshedPending.previous_current_id,
+      scenario === "write_before" ? previous.snapshot_id : latest.snapshot_id,
+      scenario,
+    )
+    assert.equal(storeA.append(stale), true, `${scenario} retry`)
+    assert.equal(storeA.readCurrent().snapshot_id, stale.snapshot_id, scenario)
+  }
+})
+
+test("重试时 raw current 等于 pending snapshot 不会写出自环回退", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const previous = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:55:00.000Z", snapshotNonce: "4444444444444444",
+  })
+  const pendingSnapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:56:00.000Z", snapshotNonce: "5555555555555555",
+  })
+  const pendingKey = `${module.TASK_INPUT_STORAGE_KEY}.pending.${pendingSnapshot.snapshot_id}`
+  const committedKey = `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${pendingSnapshot.snapshot_id}`
+
+  assert.equal(store.append(previous), true)
+  storage.failOnce("setItem", committedKey, "before")
+  assert.equal(store.append(pendingSnapshot), false)
+  storage.failOnce("setItem", committedKey, "before")
+  assert.equal(store.append(pendingSnapshot), false)
+  assert.equal(JSON.parse(storage.raw(pendingKey)).previous_current_id, previous.snapshot_id)
+  assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, previous.snapshot_id)
+  assert.equal(store.append(pendingSnapshot), true)
 })
 
 test("损坏 root、current 或独立 snapshot 会使完整事务失效并拒绝覆盖", async () => {

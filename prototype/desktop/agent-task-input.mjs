@@ -132,10 +132,10 @@ function unsafeMetadataText(value) {
   return Boolean(text) && (
     /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(text)
     || containsAbsolutePath(text)
-    || /\bauthorization\s*[:=]\s*(?:bearer|basic)\s+\S+/iu.test(text)
-    || /(?:api[_-]?key|password|(?:client[_-]?)?secret|private[_-]?key|(?:access|refresh|id|auth|session)[_-]?token)\s*["']?\s*[:=]\s*["']?\s*\S+/iu.test(text)
+    || /\bauthorization\s*[:=]\s*[A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]*\s+\S+/iu.test(text)
+    || /(?:api[_-]?key|password|(?:client[_-]?)?secret|private[_-]?key|oauth[_-]?token|token|(?:access|refresh|id|auth|session)[_-]?token)\s*["']?\s*[:=]\s*["']?\s*\S+/iu.test(text)
     || /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/iu.test(text)
-    || /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/iu.test(text)
+    || /\b[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/iu.test(text)
   )
 }
 
@@ -457,17 +457,25 @@ export function createTaskInputSnapshotStore(storage) {
 
       let pendingRecord = parsePending(pendingRead.value, snapshot)
       if (pendingRecord === false) return false
-      if (pendingRecord === null) {
-        const currentRead = getStorageItem(storage, CURRENT_KEY)
-        if (!currentRead.known) return false
-        pendingRecord = {
-          version: 1,
-          snapshot: clone(snapshot),
-          previous_current_id: currentRead.value ?? inspected.state.current_snapshot_id,
-        }
-        setStorageItem(storage, pending, JSON.stringify(pendingRecord))
+      const currentRead = getStorageItem(storage, CURRENT_KEY)
+      if (!currentRead.known) return false
+      const previousCurrentId = currentRead.value === snapshot.snapshot_id
+        ? inspected.state.current_snapshot_id
+        : currentRead.value ?? inspected.state.current_snapshot_id
+      if (previousCurrentId === snapshot.snapshot_id) return false
+      const refreshedPending = {
+        version: 1,
+        snapshot: clone(snapshot),
+        previous_current_id: previousCurrentId,
+      }
+      if (pendingRecord === null || pendingRecord.previous_current_id !== previousCurrentId) {
+        const pendingWriteReturned = setStorageItem(storage, pending, JSON.stringify(refreshedPending))
         const durablePending = getStorageItem(storage, pending, 2)
-        if (!durablePending.known || parsePending(durablePending.value, snapshot) === false || durablePending.value === null) return false
+        const storedPending = durablePending.known ? parsePending(durablePending.value, snapshot) : null
+        const pendingProven = durablePending.known
+          ? Boolean(storedPending) && storedPending.previous_current_id === previousCurrentId
+          : pendingWriteReturned
+        if (!pendingProven) return false
       }
 
       setStorageItem(storage, CURRENT_KEY, snapshot.snapshot_id)
