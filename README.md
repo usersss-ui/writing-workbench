@@ -56,6 +56,8 @@ node exporter/scripts/build-private-library.mjs
 
 新构建输出 index version 3 和 facet schema version 2；桌面页面仍可临时读取旧的 `2/1` 生成物，并把缺失状态按“未记录”处理。
 
+个人标签只保存在当前浏览器，不会进入论文目录、正式分面或公开包；导入为严格的仅合并 JSON。限额、备份和未知论文处理见[“我的标签”说明](prototype/desktop/README.md#我的标签)。
+
 ## 浏览 PDF 与 OCR
 
 打开任意论文详情后，进入“原文材料”页签：

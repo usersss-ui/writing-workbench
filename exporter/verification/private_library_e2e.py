@@ -45,6 +45,7 @@ URL = f"{ORIGIN}/local_library_output/desktop/library.html"
 INDEX_FILE = Path("local_library_data/paper-index.json")
 OUT = Path("output/playwright")
 STORAGE_KEY = "research-console.paper-library.v1"
+USER_TAG_STORAGE_KEY = "research-console.paper-user-tags.v1"
 P02_ROLES = (
     "algorithm_mechanism",
     "theory_evidence",
@@ -105,6 +106,7 @@ REQUIRED_ASSETS = (
     "paper-library-model.mjs",
     "paper-library-storage.mjs",
 )
+REQUIRED_ASSETS = (*REQUIRED_ASSETS, "paper-user-tags.mjs")
 READER_PAPER_ID = "Xiong20-PDO"
 IMAGE_PAPER_ID = "Liu24-LCT"
 
@@ -2330,6 +2332,68 @@ def run_copy_check(page: Page, guard: NetworkGuard) -> None:
     page.locator("#library-reset").click()
 
 
+def run_user_tag_checks(page: Page, selected_paper_id: str) -> None:
+    workspace_before = page.evaluate("key => localStorage.getItem(key)", STORAGE_KEY)
+    tag_input = page.locator("#library-inspector [data-user-tag-input]")
+    tag_input.fill("验收基线")
+    tag_input.press("Enter")
+    ensure(
+        page.locator("#library-inspector [data-user-tags]").get_by_text("验收基线", exact=True).count() == 1,
+        "user_tag_added",
+    )
+
+    page.reload(wait_until="networkidle")
+    ensure(
+        page.locator("#library-inspector [data-user-tags]").get_by_text("验收基线", exact=True).count() == 1,
+        "user_tag_persisted",
+    )
+    page.locator("#library-search").fill("验收基线")
+    ensure(page.locator("#library-results [data-paper-id]").count() == 1, "user_tag_search_count")
+    ensure(
+        page.locator("#library-results [data-paper-id]").first.get_attribute("data-paper-id") == selected_paper_id,
+        "user_tag_search_id",
+    )
+    page.locator("#library-reset").click()
+
+    page.locator(
+        "#library-inspector [data-action='remove-user-tag'][data-user-tag-label='验收基线']"
+    ).click()
+    ensure(
+        page.locator("#library-inspector [data-user-tags]").get_by_text("验收基线", exact=True).count() == 0,
+        "user_tag_removed",
+    )
+    ensure(
+        page.evaluate("key => localStorage.getItem(key)", STORAGE_KEY) == workspace_before,
+        "workspace_state_unchanged_by_tags",
+    )
+
+    import_payload = {
+        "schema": "research-console.paper-user-tags",
+        "version": 1,
+        "papers": {
+            selected_paper_id: ["导入标签"],
+            "Paper-Unknown": ["不会写入"],
+        },
+    }
+    with page.expect_file_chooser() as chooser_info:
+        page.locator("#library-inspector [data-action='import-user-tags']").click()
+    chooser_info.value.set_files({
+        "name": "paper-user-tags.json",
+        "mimeType": "application/json",
+        "buffer": json.dumps(import_payload, ensure_ascii=False).encode("utf-8"),
+    })
+    ensure(
+        page.locator("#library-inspector [data-user-tags]").get_by_text("导入标签", exact=True).count() == 1,
+        "user_tag_imported",
+    )
+    ensure(
+        "未匹配 1 篇论文" in page.locator("#library-inspector [data-user-tag-notice]").inner_text(),
+        "user_tag_unmatched_report",
+    )
+    stored_tags = page.evaluate("key => JSON.parse(localStorage.getItem(key))", USER_TAG_STORAGE_KEY)
+    ensure("Paper-Unknown" not in stored_tags["papers"], "user_tag_unknown_not_written")
+
+
 def exercise_page(page: Page, guard: NetworkGuard) -> None:
     guard.phase = "reader"
     run_reader_acceptance_checks(page, guard)
@@ -2345,6 +2409,8 @@ def exercise_page(page: Page, guard: NetworkGuard) -> None:
     run_metadata_display_checks(page)
     guard.phase = "selection"
     select_with_keyboard(page, PREVIEW_ID)
+    guard.phase = "user-tags"
+    run_user_tag_checks(page, PREVIEW_ID)
     guard.phase = "workspace"
     run_workspace_checks(page, guard, PREVIEW_ID)
     guard.phase = "keyboard"
@@ -2365,6 +2431,7 @@ def verify_page(browser: Browser, width: int, height: int, exercise: bool) -> No
         response = page.goto(URL, wait_until="networkidle")
         ensure(response is not None and response.status == 200, "page_http_200")
         page.evaluate("key => localStorage.removeItem(key)", STORAGE_KEY)
+        page.evaluate("key => localStorage.removeItem(key)", USER_TAG_STORAGE_KEY)
         response = page.reload(wait_until="networkidle")
         ensure(response is not None and response.status == 200, "page_reload_http_200")
         page.locator("#library-results [data-paper-id]").first.wait_for(state="visible")
@@ -2407,6 +2474,7 @@ def verify_page(browser: Browser, width: int, height: int, exercise: bool) -> No
                 print("请求失败安全诊断：" + json.dumps(detail, ensure_ascii=False, sort_keys=True))
         ensure(not guard.problems, "browser_guard")
     finally:
+        page.evaluate("key => localStorage.removeItem(key)", USER_TAG_STORAGE_KEY)
         context.close()
     print(f"桌面论文库自动验收：{width}×{height} 通过")
 
