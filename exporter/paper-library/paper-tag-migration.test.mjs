@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
@@ -142,6 +142,35 @@ test("migration CLI cleans only its owned temp when rename fails", async () => {
   assert.equal(code, 1)
   assert.equal(await readFile(catalogPath, "utf8"), original)
   await assert.rejects(() => readFile(temporaryPath), { code: "ENOENT" })
+  assert.deepEqual(stdout, [])
+  assert.deepEqual(stderr, ["标签目录迁移失败；原文件未被替换。"])
+})
+
+test("migration CLI preserves a foreign file that replaces its temp before rename failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paper-tag-migration-replaced-temp-"))
+  const catalogPath = join(root, "paper-tags.json")
+  const temporaryPath = `${catalogPath}.next-${process.pid}`
+  const original = `${JSON.stringify(legacyCatalog(), null, 2)}\n`
+  const foreignTemp = "foreign replacement bytes\n"
+  await writeFile(catalogPath, original, "utf8")
+  const stdout = []
+  const stderr = []
+
+  const code = await migrateCatalog({
+    catalogPath,
+    renameFile: async (source) => {
+      assert.equal(source, temporaryPath)
+      await rm(source)
+      await writeFile(source, foreignTemp, "utf8")
+      throw new Error("rename failed after replacement")
+    },
+    stdout: (line) => stdout.push(line),
+    stderr: (line) => stderr.push(line),
+  })
+
+  assert.equal(code, 1)
+  assert.equal(await readFile(catalogPath, "utf8"), original)
+  assert.equal(await readFile(temporaryPath, "utf8"), foreignTemp)
   assert.deepEqual(stdout, [])
   assert.deepEqual(stderr, ["标签目录迁移失败；原文件未被替换。"])
 })

@@ -1,4 +1,4 @@
-import { readFile, rename, rm, writeFile } from "node:fs/promises"
+import { lstat, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { migratePaperTagCatalogV2 } from "../paper-library/paper-tag-migration.mjs"
@@ -15,15 +15,25 @@ export async function main({
   const target = resolve(catalogPath)
   const temporary = `${target}.next-${process.pid}`
   let migrated
-  let ownsTemporary = false
+  let temporaryIdentity = null
   try {
     migrated = migratePaperTagCatalogV2(JSON.parse(await readFile(target, "utf8")))
     await writeFile(temporary, `${JSON.stringify(migrated, null, 2)}\n`, { encoding: "utf8", flag: "wx" })
-    ownsTemporary = true
+    const created = await lstat(temporary)
+    temporaryIdentity = { dev: created.dev, ino: created.ino }
     await renameFile(temporary, target)
-    ownsTemporary = false
+    temporaryIdentity = null
   } catch {
-    if (ownsTemporary) await rm(temporary, { force: true })
+    if (temporaryIdentity !== null) {
+      try {
+        const current = await lstat(temporary)
+        if (current.dev === temporaryIdentity.dev && current.ino === temporaryIdentity.ino) {
+          await unlink(temporary)
+        }
+      } catch {
+        // An absent or unverifiable path is never safe to delete.
+      }
+    }
     stderr("标签目录迁移失败；原文件未被替换。")
     return 1
   }
