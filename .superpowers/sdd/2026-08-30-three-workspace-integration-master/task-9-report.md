@@ -1,0 +1,81 @@
+# Task 9 Implementation Report
+
+## Status and commits
+
+- Status: complete for master-plan Task 9's shared runtime, seven-category Markdown inspection, lock-agnostic note transaction, and desktop note-import client scope.
+- Base: `7013fc2` (`docs: record async logger fix evidence`).
+- Implementation head before this report commit: `2feab98`.
+- Branch: `codex/three-workspace-integration`.
+- Checkpoint 1: `d84fb4f` (`refactor(paper-library): share private runtime loading`).
+- Checkpoint 2: `01c2951` (`feat(paper-library): inspect markdown note imports`).
+- Checkpoint 3: `4498226` (`feat(paper-library): commit note imports safely`).
+- Checkpoint 4: `adb482a` (`feat(paper-library): add local note import dialog shell`).
+- Checkpoint 5: `2feab98` (`feat(paper-library): complete note import workflow`).
+
+## RED/GREEN evidence
+
+### Checkpoint 1 — shared private runtime
+
+- Runtime RED: `node --test exporter/paper-library/runtime.test.mjs` exited 1 with `ERR_MODULE_NOT_FOUND` for `runtime.mjs`; 0 passed.
+- CLI injection RED: the focused CLI contract had 0 passed and 1 failed because the command still exposed the former dependency surface instead of only `loadContext` and `rebuild`.
+- Runtime GREEN: the runtime suite passed 3/3.
+- CLI GREEN: `node --test --test-name-pattern='CLI main|CLI loads catalogs' exporter/paper-library/build.test.mjs` passed its one matched test, with 0 failed.
+
+### Checkpoint 2 — seven note categories and image inspection
+
+- RED: `node --test exporter/paper-library/note-import.test.mjs` exited 1 with `ERR_MODULE_NOT_FOUND` for `note-import.mjs`; a second focused RED exposed the missing shared controlled-image inspection export.
+- Note inspection GREEN: 10/10 passed.
+- Shared image/build regression GREEN: the focused image matcher passed 3/3.
+- The implementation preserves the exact seven categories, the 1,048,576-byte limit, fatal UTF-8 decoding, fixed safe checks, filename/frontmatter/metadata/LaTeX validation, and the single shared controlled-image boundary.
+
+### Checkpoint 3 — inspection store and lock-agnostic transaction
+
+- RED: `node --test exporter/paper-library/note-import-transaction.test.mjs` exited 1 before executing tests because `createInspectionStore` was not exported; 0 passed.
+- Transaction GREEN: 8/8 passed.
+- Runtime plus note-inspection regression GREEN: 13/13 passed.
+- Consumed coordinator regression GREEN: 11/11 passed without modifying the coordinator.
+- The transaction remains coordinator-agnostic and preserves single-use ten-minute inspections, source/hash/symlink revalidation, exclusive no-follow creation, versioned conflicts, build/index reconciliation, fingerprint-guarded rollback, and fixed safe recovery codes.
+
+### Checkpoint 4 — dialog shell, strict client, and static fallback
+
+- RED: the governing focused matcher reported 0 passed and 6 failed. Failures covered the copy-path capability gate, loader invalidation, strict API capability schema, fatal UTF-8 decoding, and the missing note-import dialog shell.
+- Focused GREEN: all 6 matched tests passed.
+- Full DOM regression at this checkpoint: 101/101 passed.
+
+### Checkpoint 5 — state machine, refresh, and preview reconciliation
+
+- Initial RED: 0 passed and 2 failed because `findImportedPreviewSelection` was missing and the add-note entry was not bound.
+- Expanded governing RED: 0 passed and 7 failed across focus/cancel, stale inspection, `LIBRARY_WRITE_BUSY`, successful refetch, and index-reload behavior.
+- Governing focused GREEN: 7/7 passed.
+- Full DOM GREEN: 108/108 passed, including nested tests.
+- The final controller keeps Markdown local to the file handler, rejects stale inspection results, blocks dismissal while importing, preserves the inspection only for `LIBRARY_WRITE_BUSY`, invalidates all other failures, reloads without clearing the old view, and uniquely reconciles the imported preview by URL plus filename before selecting its `selectionKey`.
+
+## Final verification
+
+- Required focused suite:
+  `node --test exporter/paper-library/runtime.test.mjs exporter/paper-library/note-import.test.mjs exporter/paper-library/note-import-transaction.test.mjs prototype/desktop/paper-library-dom.test.mjs`
+  exited 0 with 129 passed and 0 failed.
+- Coordinator suite:
+  `node --test exporter/paper-library/write-coordinator.test.mjs`
+  exited 0 with 11 passed and 0 failed.
+- Required aggregate:
+  `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs`
+  discovered 449 tests and exited 1 with 448 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
+- Aggregate excluding the package-policy test:
+  `zsh -o extendedglob -o pipefail -c 'node --test exporter/paper-library/^package-audit.test.mjs prototype/desktop/*.test.mjs 2>&1 | tail -30'`
+  exited 0 with 434 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
+- Syntax checks passed independently for `runtime.mjs`, `note-import.mjs`, `library.mjs`, and `paper-inspector.mjs` using `node --check`.
+- `git diff --check` and `git diff --check 7013fc2..HEAD` both passed with no output.
+
+## Boundary statement
+
+- Changes are limited to the Task 9 implementation/test files and this required report. `write-coordinator.mjs` and its test were consumed but not modified.
+- All filesystem transaction tests used temporary directories. No real configured build CLI was run, and no real paper, note, PDF, OCR, image, private configuration, generated library output, browser storage, or live service was read or changed.
+- No server, route, candidate archive, discovery, Agent, migration, cutover, package policy, package manifest, E2E, screenshot, port, or service file was created or modified.
+- Pre-existing untracked `audits/` and `tmp/` remain untouched and uncommitted.
+
+## Deferred risks and ownership
+
+- Task 10 owns server integration and the coordinator order: acquire through `coordinator.run`, take the inspection token as the first statement after lock acquisition, and mark `manual_note` recovery for `ROLLBACK_FAILED` or `BUILD_OUTPUT_INVALID` before rethrowing. Task 9 intentionally contains no server or coordinator knowledge in `note-import.mjs`.
+- Task 13 owns exact build/package dependency closure. It must add the Task 9 runtime/import dependency set to the fixed package policy and manifest union. The one aggregate failure quoted above is therefore a planned Task 13 dependency-list closure item, not an in-scope Task 9 regression.
+- Task 14 owns final combined package, browser, visual, and E2E acceptance after Task 13 closes the package policy. It does not own the package-list implementation itself.
