@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  realpath,
   readdir,
   readFile,
   rename,
@@ -20,6 +21,7 @@ import {
   assertGeneratedPath,
   buildPrivateLibrary,
   guardedReplaceGeneratedDirectories,
+  inspectControlledImageReferences,
 } from "./build.mjs"
 import { main as runBuildCli } from "../scripts/build-private-library.mjs"
 import { loadLibraryConfig } from "./config.mjs"
@@ -562,6 +564,48 @@ test("buildPrivateLibrary copies only explicitly embedded images and reuses dupl
   assert.equal(preview.includes("![["), false)
   assert.equal(preview.includes("unused.png"), false)
   assert.equal((await readFile(usedPath)).compare(sourceBefore), 0)
+})
+
+test("shared image inspection and build audit reject the same escaping reference", async () => {
+  const fixture = await makeFixture()
+  await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
+  const markdown = "# note\n\n![escape](../escape.png)"
+  await put(fixture.sourceRoot, "Paper A/PaperA-01_论文精读.md", markdown)
+  fixture.overrides.papers["main_papers::Paper A"] = { paper_id: "PaperA-01" }
+
+  const inspected = await inspectControlledImageReferences({
+    markdown,
+    unitDirectory: await realpath(join(fixture.sourceRoot, "Paper A")),
+    noteRelativePath: "PaperA-01_论文精读.md",
+  })
+  await buildPrivateLibrary(fixture)
+  const audit = await readJson(join(fixture.repoRoot, "local_library_data/paper-library-audit.json"))
+
+  assert.deepEqual(inspected.map(({ target, status }) => ({ target, status })), [
+    { target: "../escape.png", status: "unsupported" },
+  ])
+  assert.equal(audit.image_assets[0].status, "unsupported")
+})
+
+test("shared image inspection and build resolve root-level note images identically", async () => {
+  const fixture = await makeFixture()
+  await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
+  const markdown = "# note\n\n![figure](images/figure.png)"
+  await put(fixture.sourceRoot, "Paper A/PaperA-01_论文精读.md", markdown)
+  await put(fixture.sourceRoot, "Paper A/images/figure.png", ONE_PIXEL_PNG)
+  fixture.overrides.papers["main_papers::Paper A"] = { paper_id: "PaperA-01" }
+
+  const inspected = await inspectControlledImageReferences({
+    markdown,
+    unitDirectory: await realpath(join(fixture.sourceRoot, "Paper A")),
+    noteRelativePath: "PaperA-01_论文精读.md",
+  })
+  await buildPrivateLibrary(fixture)
+  const audit = await readJson(join(fixture.repoRoot, "local_library_data/paper-library-audit.json"))
+
+  assert.equal(inspected[0].status, "resolved")
+  assert.equal(inspected[0].sourceRelativePath, "images/figure.png")
+  assert.equal(audit.image_assets[0].source_relative_path, inspected[0].sourceRelativePath)
 })
 
 test("public index uses a deep fixed-field allowlist and never contains private roots", async () => {

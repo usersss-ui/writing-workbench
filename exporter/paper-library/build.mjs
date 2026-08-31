@@ -803,36 +803,48 @@ async function resolveImageReference({ unitDirectory, noteRelativePath, referenc
   return { status: "missing" }
 }
 
-async function preparePreviewImages({ markdown, paper, category, artifact, unitDirectory, audit, assetFiles }) {
+export async function inspectControlledImageReferences({ markdown, unitDirectory, noteRelativePath }) {
   const references = []
   renderControlledMarkdown(markdown, {
     resolveImage(reference) {
-      references.push(reference)
+      references.push({ ...reference })
       return { status: "collecting" }
     },
   })
-  const resolvedByTarget = new Map()
+  const byTarget = new Map()
+  const results = []
   for (const reference of references) {
-    if (resolvedByTarget.has(reference.target)) continue
-    const result = await resolveImageReference({
-      unitDirectory,
-      noteRelativePath: artifact.relative_path,
-      reference,
-    })
+    if (!byTarget.has(reference.target)) {
+      byTarget.set(reference.target, await resolveImageReference({ unitDirectory, noteRelativePath, reference }))
+    }
+    results.push({ target: reference.target, ...byTarget.get(reference.target) })
+  }
+  return results
+}
+
+async function preparePreviewImages({ markdown, paper, category, artifact, unitDirectory, audit, assetFiles }) {
+  const inspected = await inspectControlledImageReferences({
+    markdown,
+    unitDirectory,
+    noteRelativePath: artifact.relative_path,
+  })
+  const resolvedByTarget = new Map()
+  for (const { target, ...result } of inspected) {
+    if (resolvedByTarget.has(target)) continue
     if (result.status === "resolved") {
       const assetGroup = category === "ocr" ? "sources" : "notes"
       const generatedRelativePath = `${assetGroup}/${paper.slug}/assets/${result.fileName}`
       assetFiles.set(generatedRelativePath, result.bytes)
-      resolvedByTarget.set(reference.target, {
+      resolvedByTarget.set(target, {
         ...result,
         src: `../../local_library_data/${generatedRelativePath}`,
         generatedRelativePath,
       })
     } else {
-      resolvedByTarget.set(reference.target, result)
+      resolvedByTarget.set(target, result)
     }
   }
-  for (const reference of references) {
+  for (const reference of inspected) {
     const result = resolvedByTarget.get(reference.target) ?? { status: "missing" }
     audit.image_assets.push({
       paper_id: paper.paper_id,
