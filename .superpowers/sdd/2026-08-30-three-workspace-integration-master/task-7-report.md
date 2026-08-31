@@ -1,0 +1,52 @@
+# Task 7 report — fixed research task input snapshots
+
+## Revision boundary
+
+- Review BASE: `8bc210bc56a8b4ff6c4d7be1509f17eede5120f7`
+- Implementation HEAD: `5d662f17c32eccd9cafadb913cf542a6f36ff4d8`
+- Implementation commit: `feat: add fixed research task input snapshots`
+
+## TDD evidence
+
+The Task 7 modules were introduced through focused RED → GREEN cycles:
+
+- `direction-snapshot.test.mjs`: initial module absence was RED (`0/3`), then the strict ten-axis snapshot/store contract passed (`3/3`). A later behavior-level save-wiring test failed because `createDirectionSaveController` did not exist, then passed after both visible buttons were wired to one explicit save action.
+- `agent-task-input.test.mjs`: initial module absence was RED (`0/6`), then the minimal preview, fixed snapshot, append-only transaction, corruption and selection contracts passed (`6/6`). Follow-up RED tests exposed root-cache and pending-cleanup behavior (`0/2`) and were made GREEN without weakening validation.
+- `agent-tasks.test.mjs`: initial page/session module absence was RED (`0/4`), then explicit confirmation, newest-first view, source-change warning, canonical loader and no-executor boundaries passed (`4/4`).
+- Page navigation was RED because the five source surfaces lacked the task route; the focused assertion became GREEN after the bounded navigation edits.
+- The focused builder test was RED with `ENOENT` for `assets/direction-snapshot.mjs`; it became GREEN after adding exactly the two approved browser assets.
+- The v3/v2 wire-to-schema mismatch test was RED until input validation required only `3/2` and legacy `2/1`; wire v1 remains rejected.
+
+Final required verification:
+
+```text
+node --test prototype/desktop/direction-snapshot.test.mjs prototype/desktop/agent-task-input.test.mjs prototype/desktop/agent-tasks.test.mjs prototype/desktop/desktop-pages.test.mjs exporter/paper-library/build.test.mjs
+60 passed, 0 failed
+
+node --check prototype/desktop/direction-snapshot.mjs
+node --check prototype/desktop/agent-task-input.mjs
+node --check prototype/desktop/agent-tasks.mjs
+all exit 0
+
+git diff --cached --check
+exit 0, no output
+```
+
+## Delivered boundary
+
+- Direction selection now has a strict P02 snapshot with all ten axes. Nothing is stored while filtering; either visible save button invokes the same explicit action. The page shows the durable `saved_at` time and saved axes, while an empty selection cannot overwrite the previous snapshot.
+- The new Chinese desktop `研究任务输入` page reads only the saved direction plus the read-only P02 shelf. Its preview and fixed snapshots retain only canonical shelf roles, minimal bibliography/status fields, and an always-empty `note_fragment_refs` array.
+- Paper data is loaded only through `loadPaperIndex` from `library.mjs`. The task boundary accepts canonical wire/schema pairs `3/2` and `2/1` and rejects v1.
+- Snapshot persistence uses validated root, independent current, committed snapshot and pending records. History is internally append order, rendered newest-first without mutating the store, and old snapshots remain immutable when sources change. Selecting a historical current re-reads the complete durable transaction and fails closed on unknown, corrupt or failed writes.
+- No executor, model request, fetch route, generated conclusion, revision, candidate or export workflow was added. Snapshots exclude note bodies, private paths, personal tags, discovery candidates, access history and credentials.
+- Existing Task 6 discovery/runtime behavior remains intact. Navigation points prototype pages to `./agent-tasks.html` and generated library/discovery surfaces to `../../prototype/desktop/agent-tasks.html`.
+- The builder copies only `direction-snapshot.mjs` and `agent-task-input.mjs` as new approved assets. `agent-tasks.html` remains prototype-only, so generated-page accounting is unchanged.
+
+## File boundary audit
+
+The implementation commit contains only the 17 Task 7 production, test, template and navigation files. `progress.md`, `audits/`, `tmp/`, generated/live outputs, real papers, ports and donor files were not edited or staged.
+
+## Risks / follow-up
+
+- This task deliberately stops at a read-only input snapshot page. Connecting any model, executor or research-analysis workflow requires a later separately reviewed task.
+- Browser-local storage can be unavailable or externally corrupted; saves fail closed and the UI reports that no snapshot was stored. The required suite covers durable transaction fallbacks, but real-paper builds and browser visual acceptance remain outside Task 7's bounded test plan.
