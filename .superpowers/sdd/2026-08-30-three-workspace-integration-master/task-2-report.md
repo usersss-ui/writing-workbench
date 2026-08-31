@@ -235,3 +235,34 @@ Master Task 14 owns the combined real build, generated-index inspection, and liv
 - The real catalog SHA-256 remained `ad980b7fe101b8b65c6db6e8bdeb4690464e06711176a8264dd9d8346398d423` across the fix verification; the fix loop did not mutate it.
 - The retained backup SHA-256 remains `58b08667bbd46a9cf96c47dccc34438f299c0b921dd056d6e685dd77cf4c44c6`.
 - Both `local_library_config/paper-tags.json` and its backup remain ignored, untracked, unstaged, uncommitted, and absent from the public package.
+
+## Second Fix Loop
+
+### Status and head
+
+- The remaining migration cleanup identity race was fixed test-first.
+- Fix implementation commit/head before this report-only commit: `d0a7ecae51d10134fd90db1b0bda3b4db28688ed` (`fix: verify migration temp identity`).
+- Changed files: `exporter/paper-library/paper-tag-migration.test.mjs` and `exporter/scripts/migrate-paper-tags-v3.mjs`.
+
+### RED/GREEN evidence
+
+- RED command: `node --test --test-name-pattern='preserves a foreign file that replaces its temp' exporter/paper-library/paper-tag-migration.test.mjs`
+- RED result: exit 1; 0 passed, 1 failed because boolean-only cleanup unlinked the replacement and the final read returned `ENOENT`.
+- GREEN command: `node --test exporter/paper-library/paper-tag-migration.test.mjs`
+- GREEN result: exit 0; 8 passed, 0 failed.
+- The migration now records the just-created temporary file's `dev` and `ino` with `lstat`. Failure cleanup calls `unlink` only when a fresh `lstat` confirms the same identity; absent, replaced, or otherwise unverifiable paths are left untouched.
+- Existing invalid-input, pre-existing-temp, ordinary rename-failure, and post-rename reporter-failure semantics remain covered and green. Pre-rename failures still emit the fixed stderr exactly once with no stdout.
+
+### Final verification
+
+- Focused Task 2 suite: 214 passed, 0 failed.
+- Full exporter/desktop suite: 384 passed, 0 failed.
+- Package tests: 32 passed, 0 failed; GitHub package audit passed with 73 candidates.
+- `node --check` passed for the migration CLI and migration test module.
+- No configured build, generated-index inspection, service change, or live browser acceptance was performed.
+
+### Privacy boundary
+
+- The real catalog remained unchanged at SHA-256 `ad980b7fe101b8b65c6db6e8bdeb4690464e06711176a8264dd9d8346398d423`.
+- The retained backup remained unchanged at SHA-256 `58b08667bbd46a9cf96c47dccc34438f299c0b921dd056d6e685dd77cf4c44c6`.
+- Both private paths remain ignored, untracked, unstaged, uncommitted, and absent from the public package.
