@@ -64,6 +64,14 @@ function validateRecovery(details) {
     return { kind: "manual_note", reason_code: details.reason_code }
   }
 
+  if (
+    hasExactKeys(details, MANUAL_RECOVERY_KEYS)
+    && details.kind === "manual_archive"
+    && details.reason_code === "ARCHIVE_TRANSACTION_AMBIGUOUS"
+  ) {
+    return { kind: "manual_archive", reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS" }
+  }
+
   return null
 }
 

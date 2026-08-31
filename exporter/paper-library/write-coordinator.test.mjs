@@ -27,6 +27,10 @@ function manualRecovery(reason_code = "ROLLBACK_FAILED") {
   return { kind: "manual_note", reason_code }
 }
 
+function manualArchiveRecovery() {
+  return { kind: "manual_archive", reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS" }
+}
+
 test("busy writes return an already-rejected promise and never queue a second operation", async () => {
   const coordinator = createWriteCoordinator()
   const first = deferred()
@@ -64,7 +68,7 @@ test("the lock releases after operations resolve, synchronously throw, or asynch
   assert.deepEqual(coordinator.getState(), { busy: false, recovery: null })
 })
 
-test("markRecovery accepts only exact detached candidate and manual recovery records", async () => {
+test("markRecovery accepts only exact detached candidate, manual-note, and manual-archive recovery records", async () => {
   const coordinator = createWriteCoordinator()
   const candidate = candidateRecovery()
   await coordinator.markRecovery(candidate)
@@ -74,6 +78,10 @@ test("markRecovery accepts only exact detached candidate and manual recovery rec
   const second = createWriteCoordinator()
   await second.markRecovery(manualRecovery("BUILD_OUTPUT_INVALID"))
   assert.deepEqual(second.getState().recovery, manualRecovery("BUILD_OUTPUT_INVALID"))
+
+  const third = createWriteCoordinator()
+  await third.markRecovery(manualArchiveRecovery())
+  assert.deepEqual(third.getState().recovery, manualArchiveRecovery())
 })
 
 test("recovery details reject malformed, path-bearing, inherited, symbol, and extra fields", async () => {
@@ -86,6 +94,7 @@ test("recovery details reject malformed, path-bearing, inherited, symbol, and ex
     { ...candidateRecovery(), extra: true },
     { ...candidateRecovery(), paper_id: "/Users/example/private-paper" },
     { ...manualRecovery(), reason_code: "ARCHIVE_REBUILD_FAILED" },
+    { ...manualArchiveRecovery(), reason_code: "ROLLBACK_FAILED" },
     Object.assign(Object.create(candidateRecovery()), { kind: "candidate_archive" }),
     nonEnumerableExtra,
   ]
@@ -148,6 +157,16 @@ test("manual-note recovery cannot run or clear through the candidate archive rou
   await assert.rejects(coordinator.runRecovery(async () => "should not run"), { code: "RECOVERY_REQUIRED" })
   await assert.rejects(coordinator.clearRecovery("manual_note"), { code: "RECOVERY_CLEAR_FORBIDDEN" })
   assert.deepEqual(coordinator.getState(), { busy: false, recovery: manualRecovery() })
+})
+
+test("an ambiguous archive transaction blocks all writes and cannot use or clear candidate recovery", async () => {
+  const coordinator = createWriteCoordinator()
+  await coordinator.markRecovery(manualArchiveRecovery())
+
+  await assert.rejects(coordinator.run(async () => "blocked"), { code: "RECOVERY_REQUIRED" })
+  await assert.rejects(coordinator.runRecovery(async () => "blocked"), { code: "RECOVERY_REQUIRED" })
+  await assert.rejects(coordinator.clearRecovery("candidate_archive"), { code: "RECOVERY_CLEAR_FORBIDDEN" })
+  assert.deepEqual(coordinator.getState(), { busy: false, recovery: manualArchiveRecovery() })
 })
 
 test("state snapshots cannot mutate the coordinator's busy or recovery state", async () => {

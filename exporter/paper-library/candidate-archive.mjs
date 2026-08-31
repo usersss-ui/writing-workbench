@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   open,
+  readdir,
   realpath,
 } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -11,8 +12,9 @@ import { ARCHIVE_COMMIT_FILE, serializeArchiveCommit, serializeArchiveMetadata }
 import { isValidPaperId } from "./overrides.mjs"
 
 const SOURCE_ID = /^[a-z][a-z0-9_-]*$/u
-const OPENALEX_IDENTITY = /^openalex:W\d+$/u
-const OPENALEX_RESOLVER = /^https:\/\/(?:openalex\.org\/|api\.openalex\.org\/works\/)(W\d+)\/?$/iu
+const OPENALEX_ID = /^W[1-9]\d*$/u
+const OPENALEX_IDENTITY = /^openalex:W[1-9]\d*$/u
+const OPENALEX_RESOLVER = /^https:\/\/(?:openalex\.org\/|api\.openalex\.org\/works\/)(W[1-9]\d*)\/?$/iu
 const DOI = /^10\.\d{4,9}\/[\-._;()/:a-z0-9]+$/u
 const REQUEST_KEYS = Object.freeze(["version", "confirmation", "archive_source_id", "paper_id", "candidate"])
 const CANDIDATE_KEYS = Object.freeze([
@@ -34,9 +36,22 @@ const DEFAULT_FILE_SYSTEM = Object.freeze({
   lstat,
   mkdir,
   open,
+  readdir,
   realpath,
   noFollowFlag: constants.O_NOFOLLOW,
 })
+
+export class CandidateArchiveError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.name = "CandidateArchiveError"
+    this.code = code
+  }
+}
+
+function archiveError(code, message) {
+  return new CandidateArchiveError(code, message)
+}
 
 function isPlainObject(value) {
   return value !== null
@@ -103,6 +118,9 @@ export function validateArchiveRequest(raw) {
   }
   const candidateData = exactOwnData(data.candidate, CANDIDATE_KEYS)
   if (!candidateData) throw new TypeError("候选归档请求格式无效")
+  if (typeof candidateData.paperId !== "string" || !OPENALEX_ID.test(candidateData.paperId)) {
+    throw new TypeError("候选 OpenAlex 身份格式无效")
+  }
   if (candidateData.stage !== "confirmed_for_archive") throw new TypeError("候选论文尚未确认进入待归档区")
   serializeArchiveMetadata({
     paperId: data.paper_id,
@@ -171,15 +189,15 @@ function assertNoDuplicate({ existingPapers, existingArchiveIdentities, request 
   const identities = validateExistingArchiveIdentities(existingArchiveIdentities)
   const requestedDoi = normalizeDoi(request.candidate.doi)
   const requestedIdentity = `openalex:${request.candidate.paperId}`
-  if (identities.has(requestedIdentity)) throw new Error("相同归档来源身份已存在，未执行归档")
+  if (identities.has(requestedIdentity)) throw archiveError("ARCHIVE_CONFLICT", "相同归档来源身份已存在，未执行归档")
 
   for (const paper of papers) {
     const existing = paperFields(paper)
-    if (existing.paperId === request.paper_id) throw new Error("论文 ID 已存在，未执行归档")
+    if (existing.paperId === request.paper_id) throw archiveError("ARCHIVE_CONFLICT", "论文 ID 已存在，未执行归档")
     const existingDoi = normalizeDoi(existing.doiOrUrl)
-    if (requestedDoi && existingDoi === requestedDoi) throw new Error("相同 DOI 已存在，未执行归档")
+    if (requestedDoi && existingDoi === requestedDoi) throw archiveError("ARCHIVE_CONFLICT", "相同 DOI 已存在，未执行归档")
     if (normalizeOpenAlexIdentity(existing.doiOrUrl) === requestedIdentity) {
-      throw new Error("相同归档来源身份已存在，未执行归档")
+      throw archiveError("ARCHIVE_CONFLICT", "相同归档来源身份已存在，未执行归档")
     }
   }
 }
@@ -398,7 +416,7 @@ async function writeArchiveCommitMarker({
       io,
     })
     await proveMetadataAndParent()
-    return
+    return Object.freeze({ identity: markerIdentity, size: markerSize, hash: markerHash })
   } catch (error) {
     if (["commit_io", "post_validation"].includes(phase) && markerIdentity) {
       let reconciliationHandle = handle
@@ -428,7 +446,7 @@ async function writeArchiveCommitMarker({
           io,
         })
         await proveMetadataAndParent()
-        return
+        return Object.freeze({ identity: markerIdentity, size: markerSize, hash: markerHash })
       } catch {
         if (reconciliationHandle) {
           try { await reconciliationHandle.close() } catch { /* recovery remains blocked */ }
@@ -444,6 +462,149 @@ async function writeArchiveCommitMarker({
   }
 }
 
+const ARCHIVE_PACKAGE_ENTRIES = Object.freeze([ARCHIVE_COMMIT_FILE, "metadata.yaml"].sort())
+
+async function captureArchiveRecoveryProof({
+  request,
+  rootAnchor,
+  packagePath,
+  packageIdentity,
+  metadataPath,
+  metadataIdentity,
+  metadataSize,
+  metadataHash,
+  markerPath,
+  markerProof,
+  io,
+}) {
+  await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+  const entries = (await io.readdir(packagePath)).sort((left, right) => left.localeCompare(right))
+  if (
+    entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
+    || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
+  ) throw archiveError("ARCHIVE_TRANSACTION_AMBIGUOUS", "归档资料包内容无法确认")
+  await verifyExpectedFile({
+    path: metadataPath,
+    expectedIdentity: metadataIdentity,
+    expectedSize: metadataSize,
+    expectedHash: metadataHash,
+    io,
+  })
+  await verifyExpectedFile({
+    path: markerPath,
+    expectedIdentity: markerProof.identity,
+    expectedSize: markerProof.size,
+    expectedHash: markerProof.hash,
+    io,
+  })
+  await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+  return Object.freeze({
+    version: 1,
+    archive_source_id: request.archive_source_id,
+    paper_id: request.paper_id,
+    openalex_id: request.candidate.paperId,
+    source_root: rootAnchor.path,
+    source_root_identity: rootAnchor.identity,
+    package_path: packagePath,
+    package_identity: packageIdentity,
+    entries: ARCHIVE_PACKAGE_ENTRIES,
+    metadata: Object.freeze({
+      path: metadataPath,
+      identity: metadataIdentity,
+      size: metadataSize,
+      hash: metadataHash,
+    }),
+    commit: Object.freeze({
+      path: markerPath,
+      identity: markerProof.identity,
+      size: markerProof.size,
+      hash: markerProof.hash,
+    }),
+  })
+}
+
+function archiveResult(request, recoveryProof) {
+  const result = {
+    status: "created",
+    paper_id: request.paper_id,
+    folder_name: request.paper_id,
+  }
+  Object.defineProperty(result, "recoveryProof", { value: recoveryProof })
+  return Object.freeze(result)
+}
+
+function proofMatchesRequest(proof, request) {
+  return proof?.version === 1
+    && request?.confirmation === "retry_archive_rebuild"
+    && request.archive_source_id === proof.archive_source_id
+    && request.paper_id === proof.paper_id
+    && request.openalex_id === proof.openalex_id
+    && typeof proof.source_root === "string"
+    && typeof proof.package_path === "string"
+    && typeof proof.source_root_identity === "string"
+    && typeof proof.package_identity === "string"
+    && Array.isArray(proof.entries)
+    && proof.entries.length === ARCHIVE_PACKAGE_ENTRIES.length
+    && proof.entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
+}
+
+export async function verifyArchiveRecoveryProof({ proof, request, fileSystem = {} } = {}) {
+  const io = { ...DEFAULT_FILE_SYSTEM, ...fileSystem }
+  try {
+    if (!proofMatchesRequest(proof, request)) throw new Error("invalid proof")
+    for (const method of ["lstat", "open", "readdir", "realpath"]) {
+      if (typeof io[method] !== "function") throw new Error("invalid filesystem")
+    }
+    if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw new Error("invalid filesystem")
+    const rootInfo = await io.lstat(proof.source_root, { bigint: true })
+    const canonicalRoot = await io.realpath(proof.source_root)
+    if (
+      rootInfo.isSymbolicLink()
+      || !rootInfo.isDirectory()
+      || identityFingerprint(rootInfo) !== proof.source_root_identity
+      || canonicalRoot !== proof.source_root
+      || join(proof.source_root, proof.paper_id) !== proof.package_path
+    ) throw new Error("changed root")
+    const packageInfo = await io.lstat(proof.package_path, { bigint: true })
+    const canonicalPackage = await io.realpath(proof.package_path)
+    if (
+      packageInfo.isSymbolicLink()
+      || !packageInfo.isDirectory()
+      || identityFingerprint(packageInfo) !== proof.package_identity
+      || canonicalPackage !== proof.package_path
+      || !isInside(proof.source_root, canonicalPackage)
+    ) throw new Error("changed package")
+    const entries = (await io.readdir(proof.package_path)).sort((left, right) => left.localeCompare(right))
+    if (
+      entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
+      || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
+    ) throw new Error("changed entries")
+    for (const file of [proof.metadata, proof.commit]) {
+      if (
+        !file
+        || typeof file.path !== "string"
+        || typeof file.identity !== "string"
+        || !Number.isInteger(file.size)
+        || !/^[a-f0-9]{64}$/u.test(file.hash)
+      ) throw new Error("invalid file proof")
+      await verifyExpectedFile({
+        path: file.path,
+        expectedIdentity: file.identity,
+        expectedSize: file.size,
+        expectedHash: file.hash,
+        io,
+      })
+    }
+    const packageAfter = await io.lstat(proof.package_path, { bigint: true })
+    if (identityFingerprint(packageAfter) !== proof.package_identity || !packageAfter.isDirectory()) {
+      throw new Error("changed package")
+    }
+    return true
+  } catch {
+    throw archiveError("ARCHIVE_CONFLICT", "归档恢复证明不匹配")
+  }
+}
+
 export async function archiveCandidateMetadata({
   sourceRoot,
   sourceId,
@@ -455,12 +616,12 @@ export async function archiveCandidateMetadata({
 } = {}) {
   const request = validateArchiveRequest(rawRequest)
   if (typeof sourceId !== "string" || !SOURCE_ID.test(sourceId) || request.archive_source_id !== sourceId) {
-    throw new Error("归档请求来源与配置来源不匹配")
+    throw archiveError("ARCHIVE_CONFLICT", "归档请求来源与配置来源不匹配")
   }
   assertNoDuplicate({ existingPapers, existingArchiveIdentities, request })
 
   const io = { ...DEFAULT_FILE_SYSTEM, ...fileSystem }
-  for (const method of ["lstat", "mkdir", "open", "realpath"]) {
+  for (const method of ["lstat", "mkdir", "open", "readdir", "realpath"]) {
     if (typeof io[method] !== "function") throw new TypeError(`归档文件系统缺少 ${method}`)
   }
   if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw new Error("当前平台不支持归档安全写入")
@@ -496,15 +657,16 @@ export async function archiveCandidateMetadata({
   let handle = null
   let mutated = false
   let phase = "precommit"
+  let recoveryProof = null
 
   try {
     await assertRootAnchor(rootAnchor, io)
-    if (await lstatIfPresent(packagePath, io)) throw new Error("目标论文目录已存在，拒绝覆盖")
+    if (await lstatIfPresent(packagePath, io)) throw archiveError("ARCHIVE_CONFLICT", "目标论文目录已存在，拒绝覆盖")
     await assertRootAnchor(rootAnchor, io)
     try {
       await io.mkdir(packagePath, { recursive: false, mode: 0o700 })
     } catch (error) {
-      if (error?.code === "EEXIST") throw new Error("目标论文目录已存在，拒绝覆盖")
+      if (error?.code === "EEXIST") throw archiveError("ARCHIVE_CONFLICT", "目标论文目录已存在，拒绝覆盖")
       throw new Error("无法创建归档目标目录")
     }
     mutated = true
@@ -561,7 +723,7 @@ export async function archiveCandidateMetadata({
       io,
     })
     await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
-    await writeArchiveCommitMarker({
+    const markerProof = await writeArchiveCommitMarker({
       markerPath,
       markerBytes,
       packagePath,
@@ -571,6 +733,19 @@ export async function archiveCandidateMetadata({
       metadataIdentity,
       metadataSize: expectedSize,
       metadataHash: expectedHash,
+      io,
+    })
+    recoveryProof = await captureArchiveRecoveryProof({
+      request,
+      rootAnchor,
+      packagePath,
+      packageIdentity,
+      metadataPath,
+      metadataIdentity,
+      metadataSize: expectedSize,
+      metadataHash: expectedHash,
+      markerPath,
+      markerProof,
       io,
     })
   } catch (error) {
@@ -623,7 +798,7 @@ export async function archiveCandidateMetadata({
           io,
         })
         await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
-        await writeArchiveCommitMarker({
+        const markerProof = await writeArchiveCommitMarker({
           markerPath,
           markerBytes,
           packagePath,
@@ -635,7 +810,20 @@ export async function archiveCandidateMetadata({
           metadataHash: expectedHash,
           io,
         })
-        return Object.freeze({ status: "created", paper_id: request.paper_id, folder_name: request.paper_id })
+        const proof = await captureArchiveRecoveryProof({
+          request,
+          rootAnchor,
+          packagePath,
+          packageIdentity,
+          metadataPath,
+          metadataIdentity,
+          metadataSize: expectedSize,
+          metadataHash: expectedHash,
+          markerPath,
+          markerProof,
+          io,
+        })
+        return archiveResult(request, proof)
       } catch {
         if (reconciliationHandle) {
           try { await reconciliationHandle.close() } catch { /* recovery remains blocked */ }
@@ -647,12 +835,12 @@ export async function archiveCandidateMetadata({
       try { await handle.close() } catch { /* recovery result below remains authoritative */ }
       handle = null
     }
-    if (!mutated && error?.message === "目标论文目录已存在，拒绝覆盖") throw error
-    if (mutated) throw new Error("归档写入失败且恢复受阻，清理未完成；请人工检查，未声称已清理")
-    throw new Error("归档写入失败，未保留不完整资料包")
+    if (!mutated && error instanceof CandidateArchiveError) throw error
+    if (mutated) throw archiveError("ARCHIVE_TRANSACTION_AMBIGUOUS", "归档写入失败且恢复受阻，清理未完成；请人工检查，未声称已清理")
+    throw archiveError("ARCHIVE_WRITE_FAILED", "归档写入失败，未保留不完整资料包")
   } finally {
     try { await rootAnchor.handle.close() } catch { /* transaction result remains authoritative */ }
   }
 
-  return Object.freeze({ status: "created", paper_id: request.paper_id, folder_name: request.paper_id })
+  return archiveResult(request, recoveryProof)
 }

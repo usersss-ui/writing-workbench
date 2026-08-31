@@ -19,6 +19,7 @@ import { archiveMetadataSha256, parseArchiveCommit, parseArchiveMetadata } from 
 import {
   archiveCandidateMetadata,
   validateArchiveRequest,
+  verifyArchiveRecoveryProof,
 } from "./candidate-archive.mjs"
 
 const CANDIDATE = Object.freeze({
@@ -70,6 +71,7 @@ test("validates the exact archive request without invoking accessors", () => {
     { ...request(), confirmation: "yes" },
     { ...request(), version: 2 },
     { ...request(), candidate: { ...request().candidate, stage: "pending_screening" } },
+    { ...request(), candidate: { ...request().candidate, paperId: "W0" } },
   ]) assert.throws(() => validateArchiveRequest(invalid), /归档|确认|来源|候选|格式/u)
 
   let getterCalls = 0
@@ -135,6 +137,37 @@ test("creates one metadata-only package through an exclusive final-file commit w
     archive_identity: "openalex:W4387886124",
     archived_at: "2026-08-30T04:05:06.000Z",
   })
+})
+
+test("returns a non-enumerable process-private proof bound to the committed directory and both exact files", async () => {
+  const sourceRoot = await realpath(await mkdtemp(join(tmpdir(), "paper-archive-proof-root-")))
+  const outcome = await archiveCandidateMetadata({
+    sourceRoot,
+    sourceId: "main_papers",
+    existingPapers: [],
+    request: request(),
+    now: () => new Date("2026-08-30T04:05:06.000Z"),
+  })
+
+  assert.deepEqual(outcome, { status: "created", paper_id: "Wang23-DIO", folder_name: "Wang23-DIO" })
+  assert.deepEqual(Object.keys(outcome), ["status", "paper_id", "folder_name"])
+  const descriptor = Object.getOwnPropertyDescriptor(outcome, "recoveryProof")
+  assert.equal(descriptor?.enumerable, false)
+  assert.equal(descriptor?.writable, false)
+  assert.equal(descriptor?.configurable, false)
+  assert.equal(descriptor?.value.archive_source_id, "main_papers")
+  assert.equal(descriptor?.value.paper_id, "Wang23-DIO")
+  assert.equal(descriptor?.value.openalex_id, "W4387886124")
+  assert.deepEqual(descriptor?.value.entries, [".metadata.commit", "metadata.yaml"])
+  assert.equal(await verifyArchiveRecoveryProof({
+    proof: descriptor.value,
+    request: {
+      confirmation: "retry_archive_rebuild",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+  }), true)
 })
 
 test("rejects local ID, normalized DOI, OpenAlex URL, and composite identity duplicates before mutation", async () => {
@@ -567,7 +600,7 @@ test("never reports created when the package is moved behind a symlink during th
   assert.equal(parseArchiveMetadata(await readFile(join(displacedPath, "metadata.yaml"), "utf8")).metadata.paper_id, "Wang23-DIO")
 })
 
-test("post-close validation failure requires recovery without deleting the published inode", async () => {
+test("post-close validation failure is a typed ambiguous transaction without deleting the published inode", async () => {
   const sourceRoot = await realpath(await mkdtemp(join(tmpdir(), "paper-archive-postcheck-root-")))
   const metadataPath = join(await realpath(sourceRoot), "Wang23-DIO/metadata.yaml")
   let published = false
@@ -604,7 +637,7 @@ test("post-close validation failure requires recovery without deleting the publi
         return info
       },
     },
-  }), /恢复|阻塞|清理未完成/u)
+  }), (error) => error?.code === "ARCHIVE_TRANSACTION_AMBIGUOUS" && /恢复|阻塞|清理未完成/u.test(error.message))
 
   assert.equal(published, true)
   assert.equal(invalidated, true)
