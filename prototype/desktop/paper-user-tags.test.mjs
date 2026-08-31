@@ -1,0 +1,182 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+
+import {
+  USER_TAG_STORAGE_KEY,
+  createUserTagStore,
+} from "./paper-user-tags.mjs"
+
+function fakeStorage(initial = new Map()) {
+  const data = initial
+  return {
+    getItem: (key) => data.has(key) ? data.get(key) : null,
+    setItem: (key, value) => data.set(key, String(value)),
+    removeItem: (key) => data.delete(key),
+    raw: (key) => data.get(key),
+  }
+}
+
+test("stores personal tags under an isolated key with NFKC normalization and first-spelling dedupe", () => {
+  const storage = fakeStorage(new Map([[
+    "research-console.paper-library.v1",
+    JSON.stringify({ version: 1, shelf: {}, personalReading: {}, selectedPaperId: null }),
+  ]]))
+  const store = createUserTagStore(storage)
+
+  assert.deepEqual(store.add("Zhao24-DFL", "  Ｂａｓｅｌｉｎｅ  "), {
+    added: true,
+    label: "Baseline",
+    state: { version: 1, papers: { "Zhao24-DFL": ["Baseline"] } },
+  })
+  assert.deepEqual(store.add("Zhao24-DFL", "baseline"), {
+    added: false,
+    label: "Baseline",
+    state: { version: 1, papers: { "Zhao24-DFL": ["Baseline"] } },
+  })
+  assert.equal(JSON.parse(storage.raw(USER_TAG_STORAGE_KEY)).papers["Zhao24-DFL"][0], "Baseline")
+  assert.match(storage.raw("research-console.paper-library.v1"), /selectedPaperId/u)
+})
+
+test("adds, lists, removes, clears, and clones personal tag state", () => {
+  const storage = fakeStorage()
+  const store = createUserTagStore(storage)
+  store.add("Paper-01", "必读")
+  store.add("Paper-01", "可作基线")
+  const tags = store.tagsFor("Paper-01")
+  tags.push("泄漏")
+  const snapshot = store.read()
+  snapshot.papers["Paper-01"].push("泄漏")
+
+  assert.deepEqual(store.tagsFor("Paper-01"), ["必读", "可作基线"])
+  assert.deepEqual(store.remove("Paper-01", "必读"), {
+    removed: true,
+    state: { version: 1, papers: { "Paper-01": ["可作基线"] } },
+  })
+  assert.deepEqual(store.remove("Paper-01", "不存在"), {
+    removed: false,
+    state: { version: 1, papers: { "Paper-01": ["可作基线"] } },
+  })
+  assert.deepEqual(store.clear(), { version: 1, papers: {} })
+  assert.equal(storage.raw(USER_TAG_STORAGE_KEY), undefined)
+})
+
+test("rejects invalid paper IDs and labels without changing prior state", () => {
+  const store = createUserTagStore(fakeStorage())
+  store.add("Paper-01", "保留")
+  const before = store.read()
+  for (const [paperId, label, expected] of [
+    ["bad", "标签", /论文 ID 格式无效/u],
+    ["../escape", "标签", /论文 ID 格式无效/u],
+    ["Paper-01", "", /标签不能为空/u],
+    ["Paper-01", "a/b", /路径分隔符/u],
+    ["Paper-01", "a\\b", /路径分隔符/u],
+    ["Paper-01", "换行\n标签", /控制字符或换行/u],
+    ["Paper-01", "a".repeat(25), /24 个 Unicode 码点/u],
+  ]) assert.throws(() => store.add(paperId, label), expected)
+  assert.deepEqual(store.read(), before)
+})
+
+test("counts Unicode code points and enforces per-paper and whole-library assignment limits", () => {
+  const perPaper = createUserTagStore(fakeStorage())
+  perPaper.add("Paper-01", "😀".repeat(24))
+  for (let index = 1; index < 20; index += 1) perPaper.add("Paper-01", `标签${index}`)
+  assert.throws(() => perPaper.add("Paper-01", "第21个"), /每篇论文最多 20 个/u)
+
+  const papers = {}
+  for (let paper = 0; paper < 25; paper += 1) {
+    papers[`Paper-${paper + 1}`] = Array.from({ length: 20 }, (_, tag) => `T${paper}-${tag}`)
+  }
+  const storage = fakeStorage(new Map([[USER_TAG_STORAGE_KEY, JSON.stringify({ version: 1, papers })]]))
+  const wholeLibrary = createUserTagStore(storage)
+  assert.throws(() => wholeLibrary.add("Paper-26", "overflow"), /整个论文库最多 500 个/u)
+})
+
+test("resets malformed persisted data and remains usable when storage throws", () => {
+  for (const raw of [
+    "{",
+    JSON.stringify({ version: 2, papers: {} }),
+    JSON.stringify({ version: 1, papers: [], extra: true }),
+    JSON.stringify({ version: 1, papers: { "../escape": ["标签"] } }),
+    JSON.stringify({ version: 1, papers: { "Paper-01": ["重复", "重复"] } }),
+    JSON.stringify({ version: 1, papers: { "Paper-01": ["a/b"] } }),
+  ]) {
+    const store = createUserTagStore(fakeStorage(new Map([[USER_TAG_STORAGE_KEY, raw]])))
+    assert.deepEqual(store.read(), { version: 1, papers: {} })
+  }
+
+  const denied = {
+    getItem() { throw new Error("denied") },
+    setItem() { throw new Error("quota") },
+    removeItem() { throw new Error("denied") },
+  }
+  const store = createUserTagStore(denied)
+  store.add("Paper-01", "离线可用")
+  assert.deepEqual(store.tagsFor("Paper-01"), ["离线可用"])
+  assert.deepEqual(store.clear(), { version: 1, papers: {} })
+})
+
+test("exports only the strict personal-tag document", () => {
+  const store = createUserTagStore(fakeStorage())
+  store.add("Paper-01", "必读")
+  assert.deepEqual(JSON.parse(store.exportJson()), {
+    schema: "research-console.paper-user-tags",
+    version: 1,
+    papers: { "Paper-01": ["必读"] },
+  })
+  assert.doesNotMatch(store.exportJson(), /relative_path|facets|authors|notes/u)
+})
+
+test("merge import dedupes, skips valid unknown papers, and reports exact counts", () => {
+  const storage = fakeStorage()
+  const store = createUserTagStore(storage)
+  store.add("Paper-01", "必读")
+  const result = store.importJson(JSON.stringify({
+    schema: "research-console.paper-user-tags",
+    version: 1,
+    papers: {
+      "Paper-01": ["必读", "可作基线", "可作基线"],
+      "Paper-Unknown": ["未知论文标签"],
+    },
+  }), { mode: "merge", knownPaperIds: new Set(["Paper-01", "Paper-02"]) })
+
+  assert.deepEqual(result, {
+    state: { version: 1, papers: { "Paper-01": ["必读", "可作基线"] } },
+    addedCount: 1,
+    duplicateCount: 2,
+    unmatchedPaperCount: 1,
+    unmatchedPaperIds: ["Paper-Unknown"],
+  })
+  assert.deepEqual(JSON.parse(storage.raw(USER_TAG_STORAGE_KEY)).papers["Paper-01"], ["必读", "可作基线"])
+})
+
+test("any import structure or label error rejects the whole document without persisting", () => {
+  const invalidDocuments = [
+    { schema: "wrong", version: 1, papers: {} },
+    { schema: "research-console.paper-user-tags", version: 2, papers: {} },
+    { schema: "research-console.paper-user-tags", version: 1, papers: {}, extra: true },
+    { schema: "research-console.paper-user-tags", version: 1, papers: [] },
+    { schema: "research-console.paper-user-tags", version: 1, papers: { bad: ["标签"] } },
+    { schema: "research-console.paper-user-tags", version: 1, papers: { "Paper-01": "标签" } },
+    { schema: "research-console.paper-user-tags", version: 1, papers: { "Paper-01": ["a/b"] } },
+  ]
+  for (const document of invalidDocuments) {
+    const storage = fakeStorage()
+    const store = createUserTagStore(storage)
+    store.add("Paper-01", "保留")
+    const before = storage.raw(USER_TAG_STORAGE_KEY)
+    assert.throws(
+      () => store.importJson(JSON.stringify(document), { mode: "merge", knownPaperIds: ["Paper-01"] }),
+      /个人标签导入文件/u,
+    )
+    assert.equal(storage.raw(USER_TAG_STORAGE_KEY), before)
+    assert.deepEqual(store.tagsFor("Paper-01"), ["保留"])
+  }
+  assert.throws(
+    () => createUserTagStore(fakeStorage()).importJson("{", { mode: "merge", knownPaperIds: [] }),
+    /个人标签导入文件不是有效 JSON/u,
+  )
+  assert.throws(
+    () => createUserTagStore(fakeStorage()).importJson("{}", { mode: "replace", knownPaperIds: [] }),
+    /只支持 merge/u,
+  )
+})
