@@ -49,6 +49,8 @@
     "prototype/desktop/paper-library-storage.test.mjs",
     "prototype/desktop/paper-math-renderer.mjs",
     "prototype/desktop/paper-math-renderer.test.mjs",
+    "prototype/desktop/paper-user-tags.mjs",
+    "prototype/desktop/paper-user-tags.test.mjs",
     "prototype/desktop/papers-data.mjs",
     "prototype/desktop/styles.css",
     "prototype/desktop/vendor/katex/LICENSE",

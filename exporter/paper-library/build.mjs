@@ -70,6 +70,7 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "paper-math-renderer.mjs",
   "paper-library-model.mjs",
   "paper-library-storage.mjs",
+  "paper-user-tags.mjs",
 ])
 const KATEX_VENDOR_ROOT = "vendor/katex"
 const KATEX_REQUIRED_FILES = Object.freeze(["katex.mjs", "katex.min.css", "LICENSE"])

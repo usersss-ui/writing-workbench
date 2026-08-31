@@ -61,6 +61,8 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   "prototype/desktop/paper-library-storage.test.mjs",
   "prototype/desktop/paper-math-renderer.mjs",
   "prototype/desktop/paper-math-renderer.test.mjs",
+  "prototype/desktop/paper-user-tags.mjs",
+  "prototype/desktop/paper-user-tags.test.mjs",
   "prototype/desktop/papers-data.mjs",
   "prototype/desktop/styles.css",
   "prototype/desktop/vendor/katex/LICENSE",
@@ -149,6 +151,7 @@ const GENERATED_ASSET_SOURCE = new Map([
   ["local_library_output/desktop/assets/paper-math-renderer.mjs", "prototype/desktop/paper-math-renderer.mjs"],
   ["local_library_output/desktop/assets/paper-library-model.mjs", "prototype/desktop/paper-library-model.mjs"],
   ["local_library_output/desktop/assets/paper-library-storage.mjs", "prototype/desktop/paper-library-storage.mjs"],
+  ["local_library_output/desktop/assets/paper-user-tags.mjs", "prototype/desktop/paper-user-tags.mjs"],
   ["local_library_output/desktop/assets/vendor/katex/katex.min.css", "prototype/desktop/vendor/katex/katex.min.css"],
   ["local_library_output/desktop/assets/vendor/katex/katex.mjs", "prototype/desktop/vendor/katex/katex.mjs"],
 ])

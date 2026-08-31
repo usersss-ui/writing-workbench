@@ -34,6 +34,7 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "paper-math-renderer.mjs",
   "paper-library-model.mjs",
   "paper-library-storage.mjs",
+  "paper-user-tags.mjs",
 ])
 
 const ONE_PIXEL_PNG = Buffer.from(
@@ -223,6 +224,10 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
       `approved:${asset}`,
     )
   }
+  assert.deepEqual(
+    await readFile(join(fixture.repoRoot, "local_library_output/desktop/assets/paper-user-tags.mjs")),
+    await readFile(join(fixture.templateRoot, "paper-user-tags.mjs")),
+  )
   assert.equal(
     await readFile(join(fixture.repoRoot, "local_library_output/desktop/assets/vendor/katex/katex.mjs"), "utf8"),
     "export default { render() {} }",
