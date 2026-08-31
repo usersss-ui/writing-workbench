@@ -843,6 +843,20 @@ test("library template is Chinese, accessible, and safe to ship as a static page
   assert.equal(html.includes(`${["fi", "le"].join("")}:`), false)
 })
 
+test("template exposes one private JSON import input without adding a formal facet control", () => {
+  assert.equal(countMatches(html, /id="library-user-tags-import"/gu), 1)
+  assert.match(html, /id="library-user-tags-import"[^>]*type="file"[^>]*accept="\.json,application\/json"[^>]*hidden/u)
+  assert.doesNotMatch(html, /data-filter-axis="userTags"|data-facet-path="user_tags"/u)
+})
+
+test("personal tag controls have desktop containment and visible focus styles", () => {
+  assert.match(styles, /\.library-page \.library-user-tags\s*\{[^}]*min-width:\s*0/u)
+  assert.match(styles, /\.library-page \.library-user-tag-list\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/u)
+  assert.match(styles, /\.library-page \.library-user-tag-form\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/u)
+  assert.match(styles, /\.library-page \.library-user-tags button:focus-visible[^}]*outline/u)
+  assert.match(styles, /@media \(max-width:\s*1320px\)[\s\S]*?\.library-page \.library-user-tag-form/u)
+})
+
 test("renders Chinese note-status group headings with counts and preserves row actions", async () => {
   const { renderPaperRows } = await import("./library.mjs")
   const { document, results } = createRenderDocument()
@@ -1190,6 +1204,61 @@ test("facet panel mapping follows schema order and keeps record type outside aca
   assert.equal(nextOpenFacetPanel(null, "research"), "research")
   assert.equal(nextOpenFacetPanel("research", "constraints"), "constraints")
   assert.equal(nextOpenFacetPanel("constraints", "constraints"), null)
+})
+
+test("downloadUserTagJson downloads exact JSON and revokes its object URL", async () => {
+  const { downloadUserTagJson } = await import("./library.mjs")
+  const clicks = []
+  const revoked = []
+  class FakeBlob {
+    constructor(parts, options) { this.parts = parts; this.type = options.type }
+  }
+  const document = {
+    defaultView: {
+      Blob: FakeBlob,
+      URL: {
+        createObjectURL(blob) {
+          assert.deepEqual(blob.parts, ['{"schema":"research-console.paper-user-tags"}'])
+          assert.equal(blob.type, "application/json")
+          return "blob:paper-user-tags"
+        },
+        revokeObjectURL: (url) => revoked.push(url),
+      },
+    },
+    createElement(tagName) {
+      assert.equal(tagName, "a")
+      return { click() { clicks.push([this.href, this.download]) } }
+    },
+  }
+
+  downloadUserTagJson({ document, json: '{"schema":"research-console.paper-user-tags"}' })
+  assert.deepEqual(clicks, [["blob:paper-user-tags", "paper-user-tags.json"]])
+  assert.deepEqual(revoked, ["blob:paper-user-tags"])
+})
+
+test("controller wires personal tags through a separate store and merge-only file import", () => {
+  assert.match(librarySource, /const userTagStore = createUserTagStore\(storage\)/u)
+  assert.match(librarySource, /userTagStore\.add\(paperId,\s*input\.value\)/u)
+  assert.match(librarySource, /userTagStore\.remove\(paperId,\s*action\.dataset\.userTagLabel\)/u)
+  assert.match(librarySource, /userTagStore\.importJson\(text,\s*\{\s*mode:\s*"merge",\s*knownPaperIds:/u)
+  assert.match(librarySource, /userTagStore\.exportJson\(\)/u)
+  assert.match(librarySource, /const userTagState = userTagStore\.read\(\)/u)
+  assert.doesNotMatch(librarySource, /store\.(?:add|remove|importJson|exportJson)\(/u)
+})
+
+test("desktop view and facet counts honor personal-tag query through separate state", async () => {
+  const { buildDesktopLibraryViewState, buildFacetPanelModel } = await import("./library.mjs")
+  const paper = normalizedPaper({ paper_id: "Paper-01" })
+  const userTagState = { version: 1, papers: { "Paper-01": ["基线候选"] } }
+  const view = buildDesktopLibraryViewState({
+    papers: [paper], filters: { query: "基线候选" }, facetSchema: validFacetSchema(), userTagState,
+  })
+  assert.equal(view.resultCount, 1)
+  const panel = buildFacetPanelModel({
+    panel: "research", facetSchema: validFacetSchema(), papers: [paper],
+    filters: { query: "基线候选", facets: {} }, workspaceState: {}, userTagState,
+  })
+  assert.ok(panel.groups.some((group) => group.options.some((option) => option.count === 1)))
 })
 
 test("facet option counts ignore the current path and keep every other active condition", async () => {

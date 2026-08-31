@@ -9,6 +9,7 @@ import {
   translateState,
 } from "./paper-library-model.mjs"
 import { createWorkspaceStore } from "./paper-library-storage.mjs"
+import { createUserTagStore } from "./paper-user-tags.mjs"
 import {
   mountSafeControlledPreview,
   mountSafeSourceOcrPreview,
@@ -938,18 +939,20 @@ export function nextOpenFacetPanel(current, requested) {
   return current === requested ? null : requested
 }
 
-function optionCount({ papers, filters, workspaceState, facetSchema, path, value }) {
+function optionCount({ papers, filters, workspaceState, userTagState, facetSchema, path, value }) {
   const facets = { ...(filters?.facets ?? {}) }
   delete facets[path]
   facets[path] = [value]
-  return filterLibrary(papers, { ...filters, facets, facetSchema }, workspaceState).length
+  return filterLibrary(papers, { ...filters, facets, facetSchema }, workspaceState, userTagState).length
 }
 
-function recordTypeCount({ papers, filters, workspaceState, facetSchema, value }) {
-  return filterLibrary(papers, { ...filters, recordTypes: [value], facetSchema }, workspaceState).length
+function recordTypeCount({ papers, filters, workspaceState, userTagState, facetSchema, value }) {
+  return filterLibrary(papers, { ...filters, recordTypes: [value], facetSchema }, workspaceState, userTagState).length
 }
 
-export function buildFacetPanelModel({ panel, facetSchema, papers = [], filters = {}, workspaceState = {} } = {}) {
+export function buildFacetPanelModel({
+  panel, facetSchema, papers = [], filters = {}, workspaceState = {}, userTagState = {},
+} = {}) {
   const groups = (facetSchema?.groups ?? [])
     .filter((group) => group.panel === panel)
     .map((group) => ({
@@ -957,13 +960,13 @@ export function buildFacetPanelModel({ panel, facetSchema, papers = [], filters 
       label: group.label,
       options: group.values.map((value) => {
         const selected = Array.isArray(filters?.facets?.[group.path]) && filters.facets[group.path].includes(value)
-        const count = optionCount({ papers, filters, workspaceState, facetSchema, path: group.path, value })
+        const count = optionCount({ papers, filters, workspaceState, userTagState, facetSchema, path: group.path, value })
         return { value, count, selected, disabled: count === 0 && !selected }
       }),
     }))
   const recordTypes = panel === "more" ? RECORD_TYPES.map((value) => {
     const selected = Array.isArray(filters?.recordTypes) && filters.recordTypes.includes(value)
-    const count = recordTypeCount({ papers, filters, workspaceState, facetSchema, value })
+    const count = recordTypeCount({ papers, filters, workspaceState, userTagState, facetSchema, value })
     return { value, count, selected, disabled: count === 0 && !selected }
   }) : []
   return { panel, groups, recordTypes }
@@ -1017,13 +1020,13 @@ export function renderFacetPanel({ document, mount, model }) {
   mount.replaceChildren(fragment)
 }
 
-function selectedChipModels({ filters, facetSchema, papers = [], workspaceState = {} }) {
+function selectedChipModels({ filters, facetSchema, papers = [], workspaceState = {}, userTagState = {} }) {
   const chips = []
   for (const group of facetSchema?.groups ?? []) {
     for (const value of filters?.facets?.[group.path] ?? []) {
       chips.push({
         kind: "facet", path: group.path, value, label: group.label,
-        count: optionCount({ papers, filters, workspaceState, facetSchema, path: group.path, value }),
+        count: optionCount({ papers, filters, workspaceState, userTagState, facetSchema, path: group.path, value }),
       })
     }
   }
@@ -1031,16 +1034,18 @@ function selectedChipModels({ filters, facetSchema, papers = [], workspaceState 
     if (!filters?.recordTypes?.includes(value)) continue
     chips.push({
       kind: "recordType", path: "", value, label: "记录类型",
-      count: recordTypeCount({ papers, filters, workspaceState, facetSchema, value }),
+      count: recordTypeCount({ papers, filters, workspaceState, userTagState, facetSchema, value }),
     })
   }
   return chips
 }
 
-export function renderSelectedFacetChips({ document, mount, filters = {}, facetSchema, papers = [], workspaceState = {} }) {
+export function renderSelectedFacetChips({
+  document, mount, filters = {}, facetSchema, papers = [], workspaceState = {}, userTagState = {},
+}) {
   if (!mount) return
   const fragment = document.createDocumentFragment()
-  const chips = selectedChipModels({ filters, facetSchema, papers, workspaceState })
+  const chips = selectedChipModels({ filters, facetSchema, papers, workspaceState, userTagState })
   if (chips.length === 0) {
     const empty = document.createElement("p")
     empty.textContent = "尚未选择学术条件"
@@ -1174,8 +1179,28 @@ function replaceSourceOptions(document, select, control, documents, selectedInde
   if (control) control.hidden = documents.length <= 1
 }
 
+export function downloadUserTagJson({ document, json, fileName = "paper-user-tags.json" }) {
+  const BlobImpl = document?.defaultView?.Blob
+  const URLImpl = document?.defaultView?.URL
+  if (typeof json !== "string" || typeof BlobImpl !== "function"
+      || typeof URLImpl?.createObjectURL !== "function" || typeof URLImpl?.revokeObjectURL !== "function") {
+    throw new Error("当前浏览器不支持标签导出")
+  }
+  const url = URLImpl.createObjectURL(new BlobImpl([json], { type: "application/json" }))
+  try {
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = fileName
+    anchor.click()
+  } finally {
+    URLImpl.revokeObjectURL(url)
+  }
+}
+
 export function createLibraryController({ document, storage, fetchImpl = globalThis.fetch }) {
   const store = createWorkspaceStore(storage)
+  const userTagStore = createUserTagStore(storage)
+  let userTagNotice = ""
   let papers = []
   let facetSchema = null
   let warningCount = null
@@ -1212,6 +1237,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       selectedFacets: document.querySelector("[data-selected-facets]"),
       sort: document.getElementById("library-sort"),
       reset: document.getElementById("library-reset"),
+      userTagImport: document.getElementById("library-user-tags-import"),
       results: document.getElementById("library-results"),
       count: document.getElementById("library-count"),
       coverage: document.getElementById("library-coverage-summary"),
@@ -1479,14 +1505,22 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     }
   }
 
-  function renderReaderState(ui, paper, workspaceState) {
+  function renderReaderState(ui, paper, workspaceState, userTagState) {
     for (const tab of ui.readerTabs?.querySelectorAll('[role="tab"]') ?? []) {
       const selected = tab.dataset.readerTab === activeReaderTab
       tab.setAttribute("aria-selected", String(selected))
       tab.tabIndex = selected ? 0 : -1
     }
     for (const panel of ui.readerPanels) panel.hidden = panel.dataset.readerPanel !== activeReaderTab
-    if (ui.readerOverview) ui.readerOverview.replaceChildren(renderReaderOverview({ document, paper, facetSchema }))
+    if (ui.readerOverview) {
+      ui.readerOverview.replaceChildren(renderReaderOverview({
+        document,
+        paper,
+        facetSchema,
+        userTags: userTagState.papers[paper.paper_id] ?? [],
+        userTagNotice,
+      }))
+    }
     if (ui.readerWriting) ui.readerWriting.replaceChildren(renderReaderWriting({ document, paper, workspaceState }))
 
     const previewModels = Object.fromEntries(CONTROLLED_PREVIEW_KEYS.map((kind) => [
@@ -1567,7 +1601,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     updateReaderToc()
   }
 
-  function renderCurrentInspector(mount, paper, workspaceState) {
+  function renderCurrentInspector(mount, paper, workspaceState, userTagState) {
     if (!mount) return
     if (!paper) {
       const empty = document.createElement("div")
@@ -1580,13 +1614,23 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       mount.replaceChildren(empty)
       return
     }
-    mount.replaceChildren(renderInspector({ document, paper, workspaceState, facetSchema }))
+    mount.replaceChildren(renderInspector({
+      document,
+      paper,
+      workspaceState,
+      facetSchema,
+      userTags: userTagState.papers[paper.paper_id] ?? [],
+      userTagNotice,
+    }))
   }
 
   function render() {
     const ui = elements()
     const workspaceState = store.read()
-    const view = buildDesktopLibraryViewState({ papers, filters, facetSchema, sortMode, workspaceState })
+    const userTagState = userTagStore.read()
+    const view = buildDesktopLibraryViewState({
+      papers, filters, facetSchema, sortMode, workspaceState, userTagState,
+    })
     const listSelectedPaper = view.selectedPaper
     const selectedPaperId = chooseDisplayedPaperId({
       selectedPaper: listSelectedPaper,
@@ -1616,11 +1660,15 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
         renderFacetPanel({
           document,
           mount: ui.facetPanel,
-          model: buildFacetPanelModel({ panel: openFacetPanel, facetSchema, papers, filters, workspaceState }),
+          model: buildFacetPanelModel({
+            panel: openFacetPanel, facetSchema, papers, filters, workspaceState, userTagState,
+          }),
         })
       } else ui.facetPanel.replaceChildren()
     }
-    renderSelectedFacetChips({ document, mount: ui.selectedFacets, filters, facetSchema, papers, workspaceState })
+    renderSelectedFacetChips({
+      document, mount: ui.selectedFacets, filters, facetSchema, papers, workspaceState, userTagState,
+    })
     if (ui.count) {
       ui.count.textContent = loadState === "error"
         ? "论文库不可用"
@@ -1647,12 +1695,12 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     if (detailOpen && activePaper) {
       if (ui.inspector) ui.inspector.hidden = true
       if (ui.inspectorTitle) ui.inspectorTitle.textContent = "本页目录"
-      renderReaderState(ui, activePaper, workspaceState)
+      renderReaderState(ui, activePaper, workspaceState, userTagState)
     } else {
       closeAllPreviews()
       if (ui.inspector) ui.inspector.hidden = false
       if (ui.inspectorTitle) ui.inspectorTitle.textContent = "论文检查器"
-      renderCurrentInspector(ui.inspector, listSelectedPaper, workspaceState)
+      renderCurrentInspector(ui.inspector, listSelectedPaper, workspaceState, userTagState)
     }
     return activePaper
   }
@@ -1679,8 +1727,84 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     }
   }
 
+  function personalTagPaperId() {
+    return detailOpen ? detailPaperId : activePaperId
+  }
+
+  function focusUserTagInput(root) {
+    root?.querySelector?.("[data-user-tag-input]")?.focus()
+  }
+
+  function mutateUserTag(action, root) {
+    const paperId = personalTagPaperId()
+    if (!paperById(papers, paperId)) return
+    try {
+      if (action.dataset.action === "remove-user-tag") {
+        const result = userTagStore.remove(paperId, action.dataset.userTagLabel)
+        userTagNotice = result.removed ? `已移除标签“${action.dataset.userTagLabel}”` : "标签未发生变化"
+      } else if (action.dataset.action === "export-user-tags") {
+        downloadUserTagJson({ document, json: userTagStore.exportJson() })
+        userTagNotice = "个人标签 JSON 已导出"
+      } else if (action.dataset.action === "import-user-tags") {
+        elements().userTagImport?.click()
+        return
+      } else return
+    } catch (error) {
+      userTagNotice = error instanceof Error ? error.message : "个人标签操作失败"
+    }
+    render()
+    if (action.dataset.action === "remove-user-tag") focusUserTagInput(root)
+  }
+
+  function bindUserTagEditor(root) {
+    root?.addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-user-tag-form]")
+      if (!form || !root.contains(form)) return
+      event.preventDefault()
+      const input = form.querySelector("[data-user-tag-input]")
+      const paperId = personalTagPaperId()
+      if (!input || !paperById(papers, paperId)) return
+      try {
+        const result = userTagStore.add(paperId, input.value)
+        userTagNotice = result.added ? `已添加标签“${result.label}”` : `标签“${result.label}”已存在`
+      } catch (error) {
+        userTagNotice = error instanceof Error ? error.message : "个人标签操作失败"
+      }
+      render()
+      focusUserTagInput(detailOpen ? elements().detail : elements().inspectorRoot)
+    })
+    root?.addEventListener("click", (event) => {
+      const action = event.target.closest('[data-action="remove-user-tag"], [data-action="export-user-tags"], [data-action="import-user-tags"]')
+      if (action && root.contains(action)) mutateUserTag(action, root)
+    })
+  }
+
   function bindEvents() {
     const ui = elements()
+    bindUserTagEditor(ui.inspectorRoot)
+    bindUserTagEditor(ui.detail)
+    ui.userTagImport?.addEventListener("change", async () => {
+      const file = ui.userTagImport.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const result = userTagStore.importJson(text, {
+          mode: "merge",
+          knownPaperIds: new Set(papers.map((paper) => paper.paper_id)),
+        })
+        userTagNotice = [
+          `新增 ${result.addedCount} 个标签`,
+          `跳过 ${result.duplicateCount} 个重复标签`,
+          `未匹配 ${result.unmatchedPaperCount} 篇论文`,
+        ].join("；")
+      } catch (error) {
+        userTagNotice = error instanceof Error ? error.message : "个人标签导入失败"
+      } finally {
+        ui.userTagImport.value = ""
+      }
+      render()
+      focusUserTagInput(detailOpen ? elements().detail : elements().inspectorRoot)
+    })
     ui.search?.addEventListener("input", () => {
       filters = readCheckedFilters(
         ui.filterForm, ui.search.value, filters.shelfRoles ?? [], filters.facets, filters.recordTypes,

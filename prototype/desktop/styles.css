@@ -701,6 +701,24 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
 .library-page .library-status-reproduction::before { content: "仿"; color: var(--amber); }
 .library-page .library-inspector-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .library-page .library-inspector-section h3 { margin: 0 0 9px; font-size: 11px; }
+.library-page .library-user-tags { min-width: 0; display: grid; gap: 9px; }
+.library-page .library-user-tags > h3 { margin: 0; }
+.library-page .library-user-tags-empty,
+.library-page .library-user-tag-notice { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.library-page .library-user-tag-notice:empty { display: none; }
+.library-page .library-user-tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.library-page .library-user-tag-list li { min-width: 0; display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 7px; border: 1px solid #cfe0f5; border-radius: 999px; background: #f2f7ff; color: var(--blue-deep); }
+.library-page .library-user-tag-list li > span { min-width: 0; overflow-wrap: anywhere; }
+.library-page .library-user-tag-list button,
+.library-page .library-user-tag-backup button { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.library-page .library-user-tag-list button { padding: 0 2px; color: #5e7390; }
+.library-page .library-user-tag-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.library-page .library-user-tag-form input { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--ink); }
+.library-page .library-user-tag-form button,
+.library-page .library-user-tag-backup button { min-height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 9px; background: #fff; color: var(--ink-soft); }
+.library-page .library-user-tag-backup { display: flex; flex-wrap: wrap; gap: 7px; }
+.library-page .library-user-tags button:focus-visible,
+.library-page .library-user-tags input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .library-page .library-research-profile { display: grid; gap: 7px; }
 .library-page .library-research-profile > h3 { margin-bottom: 2px; }
 .library-page .library-profile-group { display: grid; gap: 4px; }
@@ -1554,6 +1572,8 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
 .toast--visible { opacity: 1; transform: translate(-50%, 0); }
 
 @media (max-width: 1320px) {
+  .library-page .library-user-tag-form { grid-template-columns: minmax(0, 1fr); }
+  .library-page .library-user-tag-form button { justify-self: start; }
   .library-page .library-shell { grid-template-columns: 224px minmax(650px, 1fr) 276px; }
   .library-page .library-main { padding-inline: 18px; }
   .library-page .library-shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
