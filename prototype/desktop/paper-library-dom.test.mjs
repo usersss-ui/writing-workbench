@@ -367,11 +367,11 @@ function finalLocalCapabilities(overrides = {}) {
   return {
     api_version: 1,
     note_import: true,
-    source_path: false,
+    source_path: true,
     candidate_archive: false,
     archive_rebuild: false,
-    discovery: false,
-    agent_task_center: false,
+    discovery: true,
+    agent_task_center: true,
     archive_source_id: null,
     categories,
     recovery: {
@@ -2229,6 +2229,13 @@ test("final capability validator rejects contradictions and all local errors ret
   }
   const invalid = [
     { ...base, candidate_archive: true },
+    {
+      ...base,
+      note_import: false,
+      source_path: false,
+      discovery: false,
+      agent_task_center: false,
+    },
     { ...base, categories: [...categories].reverse() },
     { ...base, extra: true },
     { ...base, recovery: { ...base.recovery, required: true, kind: "manual_note", reason_code: "ROLLBACK_FAILED", paper_id: "Paper-01" } },
@@ -2237,6 +2244,41 @@ test("final capability validator rejects contradictions and all local errors ret
     await assert.rejects(
       () => loadLocalLibraryCapabilities(async () => ({ ok: true, status: 200, json: async () => payload })),
       /响应格式无效/u,
+    )
+  }
+
+  const recoveryStates = [
+    {
+      ...base,
+      note_import: false,
+      archive_rebuild: true,
+      archive_source_id: "main_papers",
+      recovery: {
+        required: true,
+        kind: "candidate_archive",
+        reason_code: "ARCHIVE_REBUILD_FAILED",
+        archive_source_id: "main_papers",
+        paper_id: "Paper-01",
+        openalex_id: "W123",
+      },
+    },
+    {
+      ...base,
+      note_import: false,
+      recovery: {
+        required: true,
+        kind: "manual_note",
+        reason_code: "ROLLBACK_FAILED",
+        archive_source_id: null,
+        paper_id: null,
+        openalex_id: null,
+      },
+    },
+  ]
+  for (const payload of recoveryStates) {
+    assert.deepEqual(
+      await loadLocalLibraryCapabilities(async () => ({ ok: true, status: 200, json: async () => payload })),
+      payload,
     )
   }
 
@@ -2268,6 +2310,24 @@ test("final capability validator rejects contradictions and all local errors ret
   assert.equal(Object.hasOwn(caught, "body"), false)
 })
 
+test("note import normalizes a fullwidth requested filename before sending and accepts its versioned basename", async () => {
+  const { importLocalMarkdownNote } = await import("./library.mjs")
+  const fullwidth = "Ｐａｐｅｒ－０１＿论文精读．ｍｄ"
+  const normalized = "Paper-01_论文精读.md"
+  let requestBody = null
+  const result = await importLocalMarkdownNote({
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body)
+      return localJsonResponse(importedNote({ actual_file_name: "Paper-01_论文精读_v2.md" }))
+    },
+    inspectionId: "inspection-1",
+    requestedFileName: fullwidth,
+  })
+
+  assert.equal(requestBody.requested_file_name, normalized)
+  assert.equal(result.actual_file_name, "Paper-01_论文精读_v2.md")
+})
+
 test("file decoding uses fatal UTF-8 before inspection", async () => {
   const { decodeUtf8MarkdownFile } = await import("./library.mjs")
   const valid = { name: "note.md", arrayBuffer: async () => new TextEncoder().encode("# 中文").buffer }
@@ -2278,6 +2338,46 @@ test("file decoding uses fatal UTF-8 before inspection", async () => {
     () => decodeUtf8MarkdownFile({ name: "note.txt", arrayBuffer: async () => new ArrayBuffer() }),
     /Markdown/u,
   )
+})
+
+test("controller keeps static index browsing usable and local writes disabled without capabilities", async (t) => {
+  const { createLibraryController } = await import("./library.mjs")
+  for (const capabilityMode of ["request-failed", "endpoint-missing"]) {
+    await t.test(capabilityMode, async () => {
+      const ui = createNoteImportControllerDocument()
+      const calls = []
+      const controller = createLibraryController({
+        document: ui.document,
+        storage: memoryStorage(),
+        fetchImpl: async (url) => {
+          calls.push(url)
+          if (url === "/api/v1/capabilities") {
+            if (capabilityMode === "request-failed") throw new Error("local API unavailable")
+            return localJsonResponse(
+              { error: { code: "NOT_FOUND", message: "本地能力接口不存在" } },
+              { ok: false, status: 404 },
+            )
+          }
+          if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+          throw new Error(`unexpected ${url}`)
+        },
+      })
+
+      assert.deepEqual(await controller.start(), { ok: true, paperCount: 1 })
+      assert.match(ui.count.textContent, /显示 1 篇，共 1 篇/u)
+      assert.equal(ui.error.hidden, true)
+      assert.ok(ui.results.querySelector('[data-action="open-detail"]'))
+      ui.results.querySelector('[data-action="open-detail"]').click()
+      assert.equal(ui.detail.hidden, false)
+      assert.equal(ui.addNote.disabled, true)
+      assert.equal(ui.noteImportHelp.hidden, false)
+      assert.equal(ui.document.getElementById("library-inspector").querySelector('[data-action="copy-private-path"]').disabled, true)
+      assert.deepEqual([...calls].sort(), [
+        "../../local_library_data/paper-index.json",
+        "/api/v1/capabilities",
+      ].sort())
+    })
+  }
 })
 
 test("successful import refetches only when URL and filename identify one preview", async () => {
@@ -2311,11 +2411,16 @@ test("successful import refetches only when URL and filename identify one previe
 test("note dialog focus and cancel stay inside an open paper detail", async () => {
   const { createLibraryController } = await import("./library.mjs")
   const ui = createNoteImportControllerDocument()
+  let inspectSignal = null
   const controller = createLibraryController({
     document: ui.document,
     storage: memoryStorage(),
-    fetchImpl: async (url) => {
+    fetchImpl: async (url, options = {}) => {
       if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url === "/api/v1/notes/inspect") {
+        inspectSignal = options.signal
+        return new Promise(() => {})
+      }
       return localJsonResponse(v3Index())
     },
   })
@@ -2327,12 +2432,17 @@ test("note dialog focus and cancel stay inside an open paper detail", async () =
   assert.equal(ui.noteDialog.open, true)
   assert.equal(ui.notePaperId.textContent, "Paper-01")
   assert.equal(ui.document.activeElement, ui.noteCategory)
+  ui.noteFile.files = [markdownFile("local.md", "# 本地笔记")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  assert.equal(inspectSignal?.aborted, false)
 
   const cancel = ui.noteDialog.dispatch("cancel")
   assert.equal(cancel.defaultPrevented, false)
   assert.equal(ui.noteDialog.open, false)
   assert.equal(ui.detail.hidden, false)
   assert.equal(ui.document.activeElement, ui.addNote)
+  assert.equal(inspectSignal?.aborted, true)
 })
 
 test("stale note inspection cannot replace newer warning or blocking checks", async () => {
@@ -2346,7 +2456,11 @@ test("stale note inspection cannot replace newer warning or blocking checks", as
       if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
       if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
       if (url === "/api/v1/notes/inspect") {
-        return new Promise((resolve) => inspectionRequests.push({ body: JSON.parse(options.body), resolve }))
+        return new Promise((resolve) => inspectionRequests.push({
+          body: JSON.parse(options.body),
+          resolve,
+          signal: options.signal,
+        }))
       }
       throw new Error(`unexpected ${url}`)
     },
@@ -2364,6 +2478,7 @@ test("stale note inspection cannot replace newer warning or blocking checks", as
   ui.noteCategory.dispatch("change")
   await settleControllerEvents()
   assert.equal(inspectionRequests.length, 2)
+  assert.equal(inspectionRequests[0].signal?.aborted, true)
   inspectionRequests[1].resolve(localJsonResponse(noteInspection({
     inspection_id: "inspection-new",
     suggested_file_name: "Paper-01_仿真描述.md",

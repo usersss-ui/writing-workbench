@@ -9,13 +9,18 @@ import {
   createInspectionStore,
   importInspectedNote,
 } from "./note-import.mjs"
+import { ARTIFACT_KEYS } from "./artifacts.mjs"
+import { createEmptyFacets, serializeFacetSchema } from "./facet-schema.mjs"
+import { METADATA_PROVENANCE_FIELDS } from "./overrides.mjs"
+import { CONTROLLED_PREVIEW_DOCUMENT_CATEGORIES } from "./status.mjs"
 
 function hash(bytes) {
   return createHash("sha256").update(bytes).digest("hex")
 }
 
-async function makeFixture() {
+async function makeFixture(t) {
   const lexicalRoot = await fsPromises.mkdtemp(join(tmpdir(), "note-import-"))
+  t?.after(() => fsPromises.rm(lexicalRoot, { recursive: true, force: true }))
   const repoRoot = await fsPromises.realpath(lexicalRoot)
   const sourceRoot = join(repoRoot, "source")
   const unitDirectory = join(sourceRoot, "Topic", "Paper")
@@ -50,22 +55,70 @@ function previewUrl(character = "a") {
   return `../../local_library_data/notes/paper-01/note/${character.repeat(64)}.html`
 }
 
-async function writeIndex(repoRoot, labels) {
+async function writeIndex(repoRoot, labels, transform = (value) => value) {
   const documents = labels.map((label) => ({
     label,
     url: previewUrl(label.includes("_v3") ? "c" : label.includes("_v2") ? "b" : "a"),
     size_bytes: 10,
     is_default: false,
   }))
+  const artifacts = Object.fromEntries(ARTIFACT_KEYS.map((key) => [key, []]))
+  const artifactAvailability = Object.fromEntries(ARTIFACT_KEYS.map((key) => [key, false]))
+  const controlledPreviewDocuments = Object.fromEntries(
+    CONTROLLED_PREVIEW_DOCUMENT_CATEGORIES.map((category) => [category, category === "note" ? documents : []]),
+  )
+  const paper = {
+    paper_id: "Paper-01",
+    slug: "paper-01",
+    source_id: "main",
+    relative_path: "Topic/Paper",
+    identity_source: "override",
+    unit_type: "article",
+    parent_paper_id: null,
+    title_original: "Paper title",
+    title_zh: "",
+    title_en: "Paper title",
+    authors: ["Author"],
+    publication_year: 2024,
+    version_date: null,
+    year: 2024,
+    venue: "Journal",
+    doi_or_url: "",
+    metadata_provenance: Object.fromEntries([...METADATA_PROVENANCE_FIELDS].map((field) => [field, "default"])),
+    record_type: "外部论文",
+    facets: createEmptyFacets(),
+    facet_states: {},
+    source_terms: [],
+    contribution_role: "unclassified",
+    p02_relevance: null,
+    artifacts,
+    artifact_availability: artifactAvailability,
+    source_status: "not_checked",
+    evidence_status: "none",
+    reproduction_status: "none",
+    writing_material_count: 0,
+    preferred_note: null,
+    note_preview_url: null,
+    warnings: [],
+    note_status: labels.length > 0 ? "notes_ready" : "metadata_only",
+    controlled_previews: { note: null, derivation: null, simulation: null, code_compare: null },
+    controlled_preview_documents: controlledPreviewDocuments,
+    source_documents: { pdf: [], ocr: [] },
+  }
   await fsPromises.mkdir(join(repoRoot, "local_library_data"), { recursive: true })
-  await fsPromises.writeFile(join(repoRoot, "local_library_data/paper-index.json"), JSON.stringify({
+  const index = transform({
     version: 3,
-    papers: [{ paper_id: "Paper-01", controlled_preview_documents: { note: documents } }],
-  }))
+    facet_schema: serializeFacetSchema(),
+    warning_count: 0,
+    papers: [paper],
+  })
+  await fsPromises.writeFile(join(repoRoot, "local_library_data/paper-index.json"), JSON.stringify(index))
 }
 
 async function successfulRebuild(fixture) {
-  const labels = (await fsPromises.readdir(fixture.unitDirectory)).filter((name) => name.endsWith(".md")).sort()
+  const labels = (await fsPromises.readdir(fixture.unitDirectory))
+    .filter((name) => name.endsWith(".md"))
+    .sort((left, right) => left.localeCompare(right))
   await writeIndex(fixture.repoRoot, labels)
   return { paperCount: 1 }
 }
@@ -91,8 +144,8 @@ test("inspection records clone snapshots, expire after ten minutes, and are cons
   assert.equal(store.size(), 0)
 })
 
-test("exclusive version naming creates v2 then v3 without changing the existing note", async () => {
-  const fixture = await makeFixture()
+test("exclusive version naming creates v2 then v3 without changing the existing note", async (t) => {
+  const fixture = await makeFixture(t)
   const requested = "Paper-01_论文精读.md"
   const existing = Buffer.from("# existing")
   await fsPromises.writeFile(join(fixture.unitDirectory, requested), existing)
@@ -125,8 +178,8 @@ test("exclusive version naming creates v2 then v3 without changing the existing 
   assert.equal((await fsPromises.readFile(join(fixture.unitDirectory, first.actual_file_name))).toString(), "# imported")
 })
 
-test("current scan identity, path, and snapshot hash changes fail before any write", async () => {
-  const fixture = await makeFixture()
+test("current scan identity, path, and snapshot hash changes fail before any write", async (t) => {
+  const fixture = await makeFixture(t)
   const snapshot = noteSnapshot(fixture)
   const contexts = [
     { ...fixture.context, papersById: new Map() },
@@ -155,8 +208,8 @@ test("current scan identity, path, and snapshot hash changes fail before any wri
   assert.deepEqual(await fsPromises.readdir(fixture.unitDirectory), [])
 })
 
-test("rejects source, unit, or target symlinks and uses exclusive no-follow creation flags", async () => {
-  const sourceFixture = await makeFixture()
+test("rejects source, unit, or target symlinks and uses exclusive no-follow creation flags", async (t) => {
+  const sourceFixture = await makeFixture(t)
   const sourceLink = join(sourceFixture.repoRoot, "source-link")
   await fsPromises.symlink(sourceFixture.sourceRoot, sourceLink)
   const sourceContext = {
@@ -172,7 +225,7 @@ test("rejects source, unit, or target symlinks and uses exclusive no-follow crea
     rebuild: async () => { throw new Error("must not rebuild") },
   }), { code: "UNSAFE_TARGET" })
 
-  const unitFixture = await makeFixture()
+  const unitFixture = await makeFixture(t)
   const unitLink = join(unitFixture.sourceRoot, "unit-link")
   await fsPromises.symlink(unitFixture.unitDirectory, unitLink)
   const unitContext = { ...unitFixture.context, unitDirectoryByPaperId: new Map([["Paper-01", unitLink]]) }
@@ -185,7 +238,7 @@ test("rejects source, unit, or target symlinks and uses exclusive no-follow crea
     rebuild: async () => { throw new Error("must not rebuild") },
   }), { code: "UNSAFE_TARGET" })
 
-  const targetFixture = await makeFixture()
+  const targetFixture = await makeFixture(t)
   const target = join(targetFixture.unitDirectory, "Paper-01_论文精读.md")
   await fsPromises.symlink(join(targetFixture.unitDirectory, "missing.md"), target)
   await assert.rejects(() => importInspectedNote({
@@ -197,7 +250,7 @@ test("rejects source, unit, or target symlinks and uses exclusive no-follow crea
     rebuild: async () => { throw new Error("must not rebuild") },
   }), { code: "UNSAFE_TARGET" })
 
-  const flagsFixture = await makeFixture()
+  const flagsFixture = await makeFixture(t)
   const calls = []
   const injectedFs = {
     ...fsPromises,
@@ -218,8 +271,45 @@ test("rejects source, unit, or target symlinks and uses exclusive no-follow crea
   assert.equal(creation.mode, 0o600)
 })
 
-test("build failure removes an unchanged new note and preserves old generated output", async () => {
-  const fixture = await makeFixture()
+test("a unit directory replaced before O_CREAT is rejected without writing outside the source root", async (t) => {
+  const fixture = await makeFixture(t)
+  const outside = await fsPromises.mkdtemp(join(tmpdir(), "note-import-outside-"))
+  t.after(() => fsPromises.rm(outside, { recursive: true, force: true }))
+  const originalUnit = `${fixture.unitDirectory}.verified`
+  let hookCalled = false
+  let targetCreateCount = 0
+  const injectedFs = {
+    ...fsPromises,
+    constants,
+    beforeCreate: async () => {
+      hookCalled = true
+      await fsPromises.rename(fixture.unitDirectory, originalUnit)
+      await fsPromises.symlink(outside, fixture.unitDirectory)
+    },
+    open: async (path, flags, mode) => {
+      if ((flags & constants.O_CREAT) === constants.O_CREAT) targetCreateCount += 1
+      return fsPromises.open(path, flags, mode)
+    },
+  }
+
+  await assert.rejects(() => importInspectedNote({
+    repoRoot: fixture.repoRoot,
+    snapshot: noteSnapshot(fixture),
+    requestedFileName: "Paper-01_论文精读.md",
+    conflictPolicy: "version",
+    loadContext: async () => fixture.context,
+    rebuild: async () => { throw new Error("must not rebuild") },
+    fs: injectedFs,
+  }), { code: "UNSAFE_TARGET" })
+
+  assert.equal(hookCalled, true)
+  assert.equal(targetCreateCount, 0)
+  assert.deepEqual(await fsPromises.readdir(outside), [])
+  assert.deepEqual(await fsPromises.readdir(originalUnit), [])
+})
+
+test("build failure removes an unchanged new note and preserves old generated output", async (t) => {
+  const fixture = await makeFixture(t)
   await fsPromises.mkdir(join(fixture.repoRoot, "local_library_data"), { recursive: true })
   await fsPromises.writeFile(join(fixture.repoRoot, "local_library_data/sentinel.txt"), "old-data")
 
@@ -236,8 +326,110 @@ test("build failure removes an unchanged new note and preserves old generated ou
   assert.deepEqual(await fsPromises.readdir(fixture.unitDirectory), [])
 })
 
-test("changed created-file fingerprint prevents rollback and returns a fixed recovery code", async () => {
-  const fixture = await makeFixture()
+test("write failure with failed cleanup returns fixed recovery code and leaves the created file", async (t) => {
+  const fixture = await makeFixture(t)
+  const target = join(fixture.unitDirectory, "Paper-01_论文精读.md")
+  const injectedFs = {
+    ...fsPromises,
+    constants,
+    open: async (path, flags, mode) => {
+      const handle = await fsPromises.open(path, flags, mode)
+      if ((flags & constants.O_WRONLY) !== constants.O_WRONLY) return handle
+      return {
+        stat: (...args) => handle.stat(...args),
+        writeFile: async (bytes) => {
+          await handle.writeFile(Buffer.from(bytes).subarray(0, 4))
+          throw Object.assign(new Error("private write failure"), { code: "EIO" })
+        },
+        sync: (...args) => handle.sync(...args),
+        close: (...args) => handle.close(...args),
+      }
+    },
+    unlink: async () => { throw Object.assign(new Error("private unlink failure"), { code: "EACCES" }) },
+  }
+
+  let caught
+  try {
+    await importInspectedNote({
+      repoRoot: fixture.repoRoot,
+      snapshot: noteSnapshot(fixture),
+      requestedFileName: "Paper-01_论文精读.md",
+      conflictPolicy: "version",
+      loadContext: async () => fixture.context,
+      rebuild: async () => { throw new Error("must not rebuild") },
+      fs: injectedFs,
+    })
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(caught.code, "ROLLBACK_FAILED")
+  assert.equal(caught.message, "自动回滚失败")
+  assert.equal(caught.message.includes(fixture.repoRoot), false)
+  assert.equal((await fsPromises.readFile(target)).length > 0, true)
+})
+
+test("initial fingerprint failure removes the safely identified created file", async (t) => {
+  const fixture = await makeFixture(t)
+  let failReadOpen = true
+  const injectedFs = {
+    ...fsPromises,
+    constants,
+    open: async (path, flags, mode) => {
+      const isReadOnly = String(path).endsWith(".md") && (flags & (constants.O_WRONLY | constants.O_RDWR)) === 0
+      if (isReadOnly && failReadOpen) {
+        failReadOpen = false
+        throw Object.assign(new Error("private fingerprint failure"), { code: "EIO" })
+      }
+      return fsPromises.open(path, flags, mode)
+    },
+  }
+
+  await assert.rejects(() => importInspectedNote({
+    repoRoot: fixture.repoRoot,
+    snapshot: noteSnapshot(fixture),
+    requestedFileName: "Paper-01_论文精读.md",
+    conflictPolicy: "version",
+    loadContext: async () => fixture.context,
+    rebuild: async () => { throw new Error("must not rebuild") },
+    fs: injectedFs,
+  }), { code: "WRITE_FAILED" })
+
+  assert.deepEqual(await fsPromises.readdir(fixture.unitDirectory), [])
+})
+
+test("initial fingerprint failure with failed cleanup returns fixed recovery code", async (t) => {
+  const fixture = await makeFixture(t)
+  let failReadOpen = true
+  const injectedFs = {
+    ...fsPromises,
+    constants,
+    open: async (path, flags, mode) => {
+      const isReadOnly = String(path).endsWith(".md") && (flags & (constants.O_WRONLY | constants.O_RDWR)) === 0
+      if (isReadOnly && failReadOpen) {
+        failReadOpen = false
+        throw Object.assign(new Error("private fingerprint failure"), { code: "EIO" })
+      }
+      return fsPromises.open(path, flags, mode)
+    },
+    unlink: async () => { throw Object.assign(new Error("private unlink failure"), { code: "EACCES" }) },
+  }
+
+  await assert.rejects(() => importInspectedNote({
+    repoRoot: fixture.repoRoot,
+    snapshot: noteSnapshot(fixture),
+    requestedFileName: "Paper-01_论文精读.md",
+    conflictPolicy: "version",
+    loadContext: async () => fixture.context,
+    rebuild: async () => { throw new Error("must not rebuild") },
+    fs: injectedFs,
+  }), { code: "ROLLBACK_FAILED" })
+
+  assert.deepEqual(await fsPromises.readdir(fixture.unitDirectory), ["Paper-01_论文精读.md"])
+})
+
+test("changed created-file fingerprint prevents rollback and returns a fixed recovery code", async (t) => {
+  const fixture = await makeFixture(t)
   const target = join(fixture.unitDirectory, "Paper-01_论文精读.md")
   let error
   try {
@@ -261,21 +453,55 @@ test("changed created-file fingerprint prevents rollback and returns a fixed rec
   assert.equal(await fsPromises.readFile(target, "utf8"), "externally changed")
 })
 
-test("successful build with missing or duplicate reconciliation keeps the new note and blocks completion", async () => {
-  const fixture = await makeFixture()
-  await assert.rejects(() => importInspectedNote({
-    repoRoot: fixture.repoRoot,
-    snapshot: noteSnapshot(fixture),
-    requestedFileName: "Paper-01_论文精读.md",
-    conflictPolicy: "version",
-    loadContext: async () => fixture.context,
-    rebuild: async () => writeIndex(fixture.repoRoot, []),
-  }), { code: "BUILD_OUTPUT_INVALID" })
-  assert.equal((await fsPromises.readFile(join(fixture.unitDirectory, "Paper-01_论文精读.md"))).length > 0, true)
+test("successful build with missing or duplicate reconciliation keeps the new note and blocks completion", async (t) => {
+  for (const mode of ["missing", "duplicate"]) {
+    const fixture = await makeFixture(t)
+    await assert.rejects(() => importInspectedNote({
+      repoRoot: fixture.repoRoot,
+      snapshot: noteSnapshot(fixture),
+      requestedFileName: "Paper-01_论文精读.md",
+      conflictPolicy: "version",
+      loadContext: async () => fixture.context,
+      rebuild: async () => writeIndex(
+        fixture.repoRoot,
+        mode === "duplicate" ? ["Paper-01_论文精读.md", "Paper-01_论文精读.md"] : [],
+      ),
+    }), { code: "BUILD_OUTPUT_INVALID" })
+    assert.equal((await fsPromises.readFile(join(fixture.unitDirectory, "Paper-01_论文精读.md"))).length > 0, true)
+  }
 })
 
-test("successful import reconciles one preview and hashes the exact generated index bytes", async () => {
-  const fixture = await makeFixture()
+test("reconciliation rejects every malformed full generated index boundary", async (t) => {
+  const cases = [
+    ["wrong version", (index) => ({ ...index, version: 2 })],
+    ["extra private root field", (index) => ({ ...index, private_path: "/private/source" })],
+    ["duplicate paper ids", (index) => ({ ...index, papers: [index.papers[0], structuredClone(index.papers[0])] })],
+    ["extra private paper field", (index) => ({
+      ...index,
+      papers: [{ ...index.papers[0], private_path: "/private/source/Paper" }],
+    })],
+  ]
+  for (const [label, transform] of cases) {
+    await t.test(label, async (subtest) => {
+      const fixture = await makeFixture(subtest)
+      await assert.rejects(() => importInspectedNote({
+        repoRoot: fixture.repoRoot,
+        snapshot: noteSnapshot(fixture),
+        requestedFileName: "Paper-01_论文精读.md",
+        conflictPolicy: "version",
+        loadContext: async () => fixture.context,
+        rebuild: async () => writeIndex(fixture.repoRoot, ["Paper-01_论文精读.md"], transform),
+      }), { code: "BUILD_OUTPUT_INVALID" })
+      assert.equal(
+        (await fsPromises.readFile(join(fixture.unitDirectory, "Paper-01_论文精读.md"))).toString(),
+        "# imported note",
+      )
+    })
+  }
+})
+
+test("successful import reconciles one preview and hashes the exact generated index bytes", async (t) => {
+  const fixture = await makeFixture(t)
   const result = await importInspectedNote({
     repoRoot: fixture.repoRoot,
     snapshot: noteSnapshot(fixture),

@@ -349,6 +349,26 @@ test("public index exposes only the aggregate count of audit warning arrays", as
   assert.equal(indexText.includes("unclassified.bin"), false)
 })
 
+test("shared built-index validator accepts only the complete v3 public boundary", async () => {
+  const fixture = await makeFixture()
+  await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
+  fixture.overrides.papers["main_papers::Paper A"] = { paper_id: "PaperA-01" }
+  await buildPrivateLibrary(fixture)
+  const index = await readJson(join(fixture.repoRoot, "local_library_data/paper-index.json"))
+  const buildModule = await import("./build.mjs")
+
+  assert.equal(typeof buildModule.validateBuiltPaperIndex, "function")
+  assert.equal(buildModule.validateBuiltPaperIndex(index, { privateRoots: [fixture.sourceRoot] }), index)
+  for (const candidate of [
+    { ...index, version: 2 },
+    { ...index, private_path: fixture.sourceRoot },
+    { ...index, papers: [index.papers[0], structuredClone(index.papers[0])] },
+    { ...index, papers: [{ ...index.papers[0], private_path: fixture.sourceRoot }] },
+  ]) {
+    assert.throws(() => buildModule.validateBuiltPaperIndex(candidate, { privateRoots: [fixture.sourceRoot] }))
+  }
+})
+
 test("missing approved desktop asset fails before swapping either generated directory", async () => {
   const fixture = await makeFixture()
   await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
@@ -911,6 +931,32 @@ test("generated-directory transaction restores both old sentinels when the secon
   assert.equal(await exists(join(fixture.repoRoot, `.local_library_output.previous-${process.pid}`)), false)
   assert.equal(await exists(join(fixture.repoRoot, `.local_library_data.next-${process.pid}`)), false)
   assert.equal(await exists(join(fixture.repoRoot, `.local_library_output.next-${process.pid}`)), false)
+})
+
+test("post-publish previous cleanup failure keeps the committed generated directories successful", async () => {
+  const fixture = await makeFixture()
+  await put(fixture.repoRoot, "local_library_data/sentinel.txt", "old-data")
+  await put(fixture.repoRoot, "local_library_output/sentinel.txt", "old-output")
+  const removePath = async (candidate, options) => {
+    if (candidate.includes(`.previous-${process.pid}`)) {
+      throw Object.assign(new Error("injected previous cleanup failure"), { code: "EACCES" })
+    }
+    return rm(candidate, options)
+  }
+
+  await guardedReplaceGeneratedDirectories({
+    repoRoot: fixture.repoRoot,
+    specifications: [
+      { basename: "local_library_data", populate: (stage) => put(stage, "sentinel.txt", "new-data") },
+      { basename: "local_library_output", populate: (stage) => put(stage, "sentinel.txt", "new-output") },
+    ],
+    removePath,
+  })
+
+  assert.equal(await readFile(join(fixture.repoRoot, "local_library_data/sentinel.txt"), "utf8"), "new-data")
+  assert.equal(await readFile(join(fixture.repoRoot, "local_library_output/sentinel.txt"), "utf8"), "new-output")
+  assert.equal(await readFile(join(fixture.repoRoot, `.local_library_data.previous-${process.pid}/sentinel.txt`), "utf8"), "old-data")
+  assert.equal(await readFile(join(fixture.repoRoot, `.local_library_output.previous-${process.pid}/sentinel.txt`), "utf8"), "old-output")
 })
 
 test("a pre-existing previous directory fails closed without deleting it", async () => {

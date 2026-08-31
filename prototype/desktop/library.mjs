@@ -684,16 +684,23 @@ function validApiText(value, { maxLength = 240 } = {}) {
     && !containsPrivateLocator(value)
 }
 
+function normalizeLocalFileName(value) {
+  if (typeof value !== "string") return null
+  const normalized = value.normalize("NFKC")
+  return normalized.length > 0
+    && normalized.length <= 1024
+    && normalized === normalized.trim()
+    && /\.md$/iu.test(normalized)
+    && !normalized.includes("/")
+    && !normalized.includes("\\")
+    && !normalized.includes("..")
+    && !/[\u0000-\u001f\u007f]/u.test(normalized)
+    ? normalized
+    : null
+}
+
 function validLocalFileName(value) {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 1024
-    && value === value.trim()
-    && /\.md$/iu.test(value)
-    && !value.includes("/")
-    && !value.includes("\\")
-    && !value.includes("..")
-    && !/[\u0000-\u001f\u007f]/u.test(value)
+  return normalizeLocalFileName(value) === value
 }
 
 function validInspectionId(value) {
@@ -737,6 +744,28 @@ function validRecovery(value, root) {
   return false
 }
 
+function validCapabilityMatrix(value) {
+  if (value.source_path !== true || value.discovery !== true || value.agent_task_center !== true) return false
+  if (value.recovery.required === false) {
+    const hasArchive = value.archive_source_id !== null
+    return value.note_import === true
+      && value.candidate_archive === hasArchive
+      && value.archive_rebuild === hasArchive
+  }
+  if (value.recovery.kind === "candidate_archive") {
+    return value.note_import === false
+      && value.candidate_archive === false
+      && value.archive_rebuild === true
+      && value.archive_source_id !== null
+  }
+  if (value.recovery.kind === "manual_note") {
+    return value.note_import === false
+      && value.candidate_archive === false
+      && value.archive_rebuild === false
+  }
+  return false
+}
+
 function validateCapabilitiesResponse(value) {
   if (!exactStringKeys(value, LOCAL_CAPABILITY_ROOT_FIELDS) || value.api_version !== 1) {
     throw new Error("本地服务响应格式无效")
@@ -760,7 +789,7 @@ function validateCapabilitiesResponse(value) {
       throw new Error("本地服务响应格式无效")
     }
   }
-  if (!validRecovery(value.recovery, value) || containsPrivateLocatorDeep(value)) {
+  if (!validRecovery(value.recovery, value) || !validCapabilityMatrix(value) || containsPrivateLocatorDeep(value)) {
     throw new Error("本地服务响应格式无效")
   }
   return structuredClone(value)
@@ -852,7 +881,7 @@ async function parseLocalJsonResponse(response, validator) {
   return validator(payload)
 }
 
-function requestLocalJson(fetchImpl, url, body, validator) {
+function requestLocalJson(fetchImpl, url, body, validator, { signal } = {}) {
   if (typeof fetchImpl !== "function") return Promise.reject(new Error("本地服务不可用"))
   return Promise.resolve(fetchImpl(url, {
     method: "POST",
@@ -860,6 +889,7 @@ function requestLocalJson(fetchImpl, url, body, validator) {
     body: JSON.stringify(body),
     cache: "no-store",
     credentials: "same-origin",
+    signal,
   })).then((response) => parseLocalJsonResponse(response, validator))
 }
 
@@ -872,21 +902,23 @@ export async function loadLocalLibraryCapabilities(fetchImpl = globalThis.fetch)
   return parseLocalJsonResponse(response, validateCapabilitiesResponse)
 }
 
-export function inspectLocalMarkdownNote({ fetchImpl = globalThis.fetch, paperId, category, originalFileName, markdown }) {
+export function inspectLocalMarkdownNote({ fetchImpl = globalThis.fetch, paperId, category, originalFileName, markdown, signal }) {
   return requestLocalJson(fetchImpl, "/api/v1/notes/inspect", {
     paper_id: paperId,
     category,
     original_file_name: originalFileName,
     markdown,
-  }, (value) => validateInspectionResponse(value, { paperId, category }))
+  }, (value) => validateInspectionResponse(value, { paperId, category }), { signal })
 }
 
 export function importLocalMarkdownNote({ fetchImpl = globalThis.fetch, inspectionId, requestedFileName }) {
+  const normalizedFileName = normalizeLocalFileName(requestedFileName)
+  if (normalizedFileName === null) return Promise.reject(new Error("笔记文件名无效"))
   return requestLocalJson(fetchImpl, "/api/v1/notes/import", {
     inspection_id: inspectionId,
-    requested_file_name: requestedFileName,
+    requested_file_name: normalizedFileName,
     conflict_policy: "version",
-  }, (value) => validateImportResponse(value, { requestedFileName }))
+  }, (value) => validateImportResponse(value, { requestedFileName: normalizedFileName }))
 }
 
 export function loadPrivateSourcePath({ fetchImpl = globalThis.fetch, paperId }) {
@@ -1516,6 +1548,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   let noteImportBusy = false
   let noteInspection = null
   let noteInspectGeneration = 0
+  let noteInspectAbortController = null
   let pendingImportedResult = null
   let indexRefreshFailed = false
   const indexLoader = createRetryableLoader(() => loadPaperIndex(fetchImpl))
@@ -2055,8 +2088,13 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     if (ui.noteImportSubmit) {
       ui.noteImportSubmit.disabled = noteImportBusy
         || noteInspection?.checks?.can_import !== true
-        || !validLocalFileName(ui.noteImportFileName?.value)
+        || normalizeLocalFileName(ui.noteImportFileName?.value) === null
     }
+  }
+
+  function abortNoteInspection() {
+    noteInspectAbortController?.abort()
+    noteInspectAbortController = null
   }
 
   function setNoteImportBusy(busy) {
@@ -2073,6 +2111,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       || !ui.noteImportDialog
       || typeof ui.noteImportDialog.showModal !== "function"
     ) return false
+    abortNoteInspection()
     noteImportBusy = false
     noteInspection = null
     noteInspectGeneration += 1
@@ -2096,6 +2135,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   }
 
   async function inspectSelectedNoteFile() {
+    abortNoteInspection()
     const ui = elements()
     const paperId = detailPaperId
     const category = ui.noteImportCategory?.value
@@ -2115,6 +2155,9 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       || !file
     ) return false
 
+    const AbortControllerImpl = document.defaultView?.AbortController ?? globalThis.AbortController
+    const requestController = typeof AbortControllerImpl === "function" ? new AbortControllerImpl() : null
+    noteInspectAbortController = requestController
     let markdown = null
     try {
       markdown = await decodeUtf8MarkdownFile(file)
@@ -2124,6 +2167,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
         category,
         originalFileName,
         markdown,
+        signal: requestController?.signal,
       })
       const currentUi = elements()
       const currentFileName = currentUi.noteImportFile?.files?.[0]?.name ?? ""
@@ -2146,6 +2190,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       return true
     } catch (error) {
       if (generation !== noteInspectGeneration) return false
+      if (error?.name === "AbortError") return false
       noteInspection = null
       const currentUi = elements()
       if (currentUi.noteImportChecks) currentUi.noteImportChecks.replaceChildren()
@@ -2156,6 +2201,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       syncNoteImportControls()
       return false
     } finally {
+      if (noteInspectAbortController === requestController) noteInspectAbortController = null
       markdown = null
     }
   }
@@ -2203,7 +2249,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       noteImportBusy
       || !ui.noteImportDialog?.open
       || noteInspection?.checks?.can_import !== true
-      || !validLocalFileName(ui.noteImportFileName?.value)
+      || normalizeLocalFileName(ui.noteImportFileName?.value) === null
       || !paperById(papers, detailPaperId)
     ) return false
     const inspection = noteInspection
@@ -2313,6 +2359,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       if (noteImportBusy) event.preventDefault()
     })
     ui.noteImportDialog?.addEventListener("close", () => {
+      abortNoteInspection()
       noteImportBusy = false
       noteInspection = null
       noteInspectGeneration += 1

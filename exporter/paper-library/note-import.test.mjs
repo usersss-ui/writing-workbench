@@ -94,6 +94,20 @@ test("blocks unclosed first-line frontmatter but treats absent metadata as passi
   assert.equal(absent.publicResult.checks.can_import, true)
 })
 
+test("blocks frontmatter whose closing delimiter is beyond the parser window", async () => {
+  const markdown = [
+    "---",
+    "paper_id: Other-01",
+    `ignored_padding: ${"x".repeat(8_192)}`,
+    "---",
+    "# note",
+  ].join("\n")
+  const result = await inspect({ markdown })
+
+  assert.equal(result.publicResult.checks.blocking_codes.includes("FRONTMATTER_TOO_LARGE"), true)
+  assert.equal(result.publicResult.checks.can_import, false)
+})
+
 test("normalizes metadata but warns when the ordered author list differs", async () => {
   const result = await inspect({
     markdown: "---\npaper_id: Zhao24-DFL\ntitle: canonical   TITLE\nauthors: [Other Author, A. Author]\nyear: 2024\n---\n# note",

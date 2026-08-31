@@ -34,7 +34,7 @@ import {
   validateControlledPreviewDocuments,
   validateGeneratedPaper,
 } from "./status.mjs"
-import { serializeFacetSchema } from "./facet-schema.mjs"
+import { hasExactJsonObjectKeys, serializeFacetSchema } from "./facet-schema.mjs"
 import { METADATA_PROVENANCE_FIELDS } from "./overrides.mjs"
 import { applyPaperTagCatalog } from "./tag-catalog.mjs"
 
@@ -167,11 +167,11 @@ async function assertAbsentGeneratedPath(options, message) {
   return candidate
 }
 
-async function removeGuardedDirectory(options) {
+async function removeGuardedDirectory(options, removePath = rm) {
   const candidate = assertGeneratedPath(options)
   if (!await pathExistsNoFollow(candidate)) return
   assertGeneratedPath(options)
-  await rm(candidate, { recursive: true, force: false })
+  await removePath(candidate, { recursive: true, force: false })
 }
 
 function canonicalRepositoryRoot(repoRoot) {
@@ -219,16 +219,16 @@ async function preflightGeneratedSpecification(repoRoot, prepared) {
   )
 }
 
-async function cleanupStages(repoRoot, preparedItems) {
+async function cleanupStages(repoRoot, preparedItems, removePath) {
   for (const item of preparedItems) {
-    await removeGuardedDirectory({ repoRoot, candidate: item.stage, targetBasename: item.basename, kind: "stage" })
+    await removeGuardedDirectory({ repoRoot, candidate: item.stage, targetBasename: item.basename, kind: "stage" }, removePath)
   }
 }
 
-async function rollbackSwaps(repoRoot, preparedItems, renamePath) {
+async function rollbackSwaps(repoRoot, preparedItems, renamePath, removePath) {
   for (const item of [...preparedItems].reverse()) {
     if (item.targetHasNew) {
-      await removeGuardedDirectory({ repoRoot, candidate: item.target, targetBasename: item.basename, kind: "target" })
+      await removeGuardedDirectory({ repoRoot, candidate: item.target, targetBasename: item.basename, kind: "target" }, removePath)
       item.targetHasNew = false
     }
     if (item.previousMoved) {
@@ -243,7 +243,7 @@ async function rollbackSwaps(repoRoot, preparedItems, renamePath) {
   }
 }
 
-export async function guardedReplaceGeneratedDirectories({ repoRoot, specifications, renamePath = rename }) {
+export async function guardedReplaceGeneratedDirectories({ repoRoot, specifications, renamePath = rename, removePath = rm }) {
   const canonicalRoot = canonicalRepositoryRoot(repoRoot)
   if (!Array.isArray(specifications) || specifications.length === 0) throw new Error("生成目录规格不能为空")
   const preparedItems = specifications.map((specification) => prepareSpecification(canonicalRoot, specification))
@@ -260,7 +260,7 @@ export async function guardedReplaceGeneratedDirectories({ repoRoot, specificati
       assertGeneratedPath({ repoRoot: canonicalRoot, candidate: item.stage, targetBasename: item.basename, kind: "stage" })
     }
   } catch {
-    try { await cleanupStages(canonicalRoot, staged) } catch { /* fail closed without deleting unverified paths */ }
+    try { await cleanupStages(canonicalRoot, staged, removePath) } catch { /* fail closed without deleting unverified paths */ }
     throw new Error("生成目录暂存失败")
   }
 
@@ -285,16 +285,24 @@ export async function guardedReplaceGeneratedDirectories({ repoRoot, specificati
     }
   } catch {
     let rollbackComplete = true
-    try { await rollbackSwaps(canonicalRoot, preparedItems, renamePath) } catch { rollbackComplete = false }
-    try { await cleanupStages(canonicalRoot, preparedItems) } catch { rollbackComplete = false }
+    try { await rollbackSwaps(canonicalRoot, preparedItems, renamePath, removePath) } catch { rollbackComplete = false }
+    try { await cleanupStages(canonicalRoot, preparedItems, removePath) } catch { rollbackComplete = false }
     if (!rollbackComplete) throw new Error("生成目录切换失败且回滚未完成")
     throw new Error("生成目录切换失败；已回滚现有生成目录")
   }
 
   for (const item of preparedItems) {
     if (item.previousMoved) {
-      await removeGuardedDirectory({ repoRoot: canonicalRoot, candidate: item.previous, targetBasename: item.basename, kind: "previous" })
-      item.previousMoved = false
+      try {
+        await removeGuardedDirectory(
+          { repoRoot: canonicalRoot, candidate: item.previous, targetBasename: item.basename, kind: "previous" },
+          removePath,
+        )
+        item.previousMoved = false
+      } catch {
+        // Both new directories are already published. A stale backup is recoverable
+        // housekeeping, not a failed build that should roll back a newly imported note.
+      }
     }
   }
 }
@@ -514,6 +522,68 @@ function validateBuiltSourceDocuments(value) {
       ) invalid()
     }
   }
+  return value
+}
+
+function validateBuiltControlledPreviews({ slug, notePreviewUrl, value }) {
+  const invalid = () => { throw new Error("论文预览索引无效") }
+  const fileNames = {
+    note: "preferred.html",
+    derivation: "derivation.html",
+    simulation: "simulation.html",
+    code_compare: "code_compare.html",
+  }
+  if (!hasExactJsonObjectKeys(value, Object.keys(fileNames))) invalid()
+  for (const [category, fileName] of Object.entries(fileNames)) {
+    const preview = value[category]
+    if (preview !== null && preview !== `../../local_library_data/notes/${slug}/${fileName}`) invalid()
+  }
+  if (value.note !== notePreviewUrl) invalid()
+  return value
+}
+
+export function validateBuiltPaperIndex(value, { privateRoots = [] } = {}) {
+  const invalid = () => { throw new Error("公开论文索引无效") }
+  if (
+    !hasExactJsonObjectKeys(value, ["facet_schema", "papers", "version", "warning_count"])
+    || value.version !== 3
+    || !Number.isInteger(value.warning_count)
+    || value.warning_count < 0
+    || !Array.isArray(value.papers)
+    || JSON.stringify(value.facet_schema) !== JSON.stringify(serializeFacetSchema())
+    || !Array.isArray(privateRoots)
+  ) invalid()
+
+  const paperIds = new Set()
+  for (const paper of value.papers) {
+    if (!isPlainRecord(paper)) invalid()
+    const hasExtras = ["controlled_previews", "controlled_preview_documents", "source_documents"]
+      .every((field) => Object.hasOwn(paper, field))
+    if (!hasExtras) invalid()
+    const {
+      controlled_previews: controlledPreviews,
+      controlled_preview_documents: controlledPreviewDocuments,
+      source_documents: sourceDocuments,
+      ...generatedPaper
+    } = paper
+    if (!hasExactJsonObjectKeys(paper, [
+      ...Object.keys(generatedPaper),
+      "controlled_previews",
+      "controlled_preview_documents",
+      "source_documents",
+    ])) invalid()
+    validateGeneratedPaper(generatedPaper)
+    validateBuiltControlledPreviews({
+      slug: generatedPaper.slug,
+      notePreviewUrl: generatedPaper.note_preview_url,
+      value: controlledPreviews,
+    })
+    validateControlledPreviewDocuments({ slug: generatedPaper.slug, documents: controlledPreviewDocuments })
+    validateBuiltSourceDocuments(sourceDocuments)
+    if (paperIds.has(generatedPaper.paper_id)) invalid()
+    paperIds.add(generatedPaper.paper_id)
+  }
+  assertPublicIndexPrivacy(value, privateRoots)
   return value
 }
 
@@ -1044,11 +1114,11 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
       sourceDocumentsByPaperId.get(paper.paper_id),
     )),
   }
-  assertPublicIndexPrivacy(index, [
+  validateBuiltPaperIndex(index, { privateRoots: [
     canonicalRoot,
     ...config.sources.map((source) => source.path),
     ...audit.sources.map((source) => source.root_path),
-  ])
+  ] })
   const indexJson = prettyJson(index)
   const auditJson = prettyJson(audit)
   const generatedCatalog = serializeCatalogs(catalogs)

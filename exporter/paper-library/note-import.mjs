@@ -11,7 +11,7 @@ import {
   sep,
   win32,
 } from "node:path"
-import { inspectControlledImageReferences } from "./build.mjs"
+import { inspectControlledImageReferences, validateBuiltPaperIndex } from "./build.mjs"
 import { parsePaperFrontmatter } from "./frontmatter.mjs"
 
 export const NOTE_IMPORT_MAX_BYTES = 1024 * 1024
@@ -76,10 +76,12 @@ function normalizeMetadata(value) {
 
 function frontmatterState(markdown) {
   const lines = markdown.split(/\r?\n/u)
-  if (lines[0] !== "---") return { closed: true, data: {} }
+  if (lines[0] !== "---") return { closed: true, tooLarge: false, data: {} }
   const closing = lines.slice(1).findIndex((line) => line === "---")
-  if (closing === -1) return { closed: false, data: {} }
-  return { closed: true, data: parsePaperFrontmatter(markdown).data }
+  if (closing === -1) return { closed: false, tooLarge: false, data: {} }
+  const completeBlock = lines.slice(0, closing + 2).join("\n")
+  if (completeBlock.length > 8_192) return { closed: true, tooLarge: true, data: {} }
+  return { closed: true, tooLarge: false, data: parsePaperFrontmatter(completeBlock).data }
 }
 
 function withoutCode(markdown) {
@@ -165,7 +167,8 @@ export async function inspectMarkdownNote({
 
   const frontmatter = frontmatterState(markdown)
   check(items, frontmatter.closed, "FRONTMATTER_CLOSED", "FRONTMATTER_UNCLOSED", "blocking", "Frontmatter 已闭合或未使用", "Frontmatter 未闭合")
-  const metadata = frontmatter.closed ? frontmatter.data : {}
+  check(items, !frontmatter.tooLarge, "FRONTMATTER_SIZE_VALID", "FRONTMATTER_TOO_LARGE", "blocking", "Frontmatter 大小有效", "Frontmatter 超过可安全解析范围")
+  const metadata = frontmatter.closed && !frontmatter.tooLarge ? frontmatter.data : {}
   const idMatches = metadata.paper_id === undefined || metadata.paper_id === paper.paper_id
   check(items, idMatches, "PAPER_ID_MATCH", "PAPER_ID_MISMATCH", "blocking", "论文编号匹配或未填写", "Frontmatter 论文编号不匹配")
 
@@ -274,6 +277,7 @@ export function createInspectionStore({
 
 function importFs(fs) {
   return {
+    beforeCreate: fs?.beforeCreate,
     constants: fs?.constants ?? nodeFsConstants,
     lstat: fs?.lstat ?? nodeFsPromises.lstat,
     open: fs?.open ?? nodeFsPromises.open,
@@ -309,12 +313,14 @@ async function verifyDirectory(fs, directory) {
     throw unsafeTarget()
   }
   if (lexical.isSymbolicLink() || !lexical.isDirectory() || canonical !== resolve(directory)) throw unsafeTarget()
-  return canonical
+  return { canonical, lexical }
 }
 
 async function verifyTargetHierarchy(fs, sourceRoot, unitDirectory) {
-  const canonicalSource = await verifyDirectory(fs, sourceRoot)
-  const canonicalUnit = await verifyDirectory(fs, unitDirectory)
+  const source = await verifyDirectory(fs, sourceRoot)
+  const unit = await verifyDirectory(fs, unitDirectory)
+  const canonicalSource = source.canonical
+  const canonicalUnit = unit.canonical
   if (!insideDirectory(canonicalSource, canonicalUnit)) throw unsafeTarget()
   const segments = relative(canonicalSource, canonicalUnit).split(sep)
   let current = canonicalSource
@@ -324,7 +330,43 @@ async function verifyTargetHierarchy(fs, sourceRoot, unitDirectory) {
     try { info = await fs.lstat(current) } catch { throw unsafeTarget() }
     if (info.isSymbolicLink() || !info.isDirectory()) throw unsafeTarget()
   }
-  return canonicalUnit
+  let handle
+  try {
+    const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | (fs.constants.O_DIRECTORY ?? 0)
+    handle = await fs.open(canonicalUnit, directoryFlags)
+    const opened = await handle.stat()
+    if (
+      !opened.isDirectory()
+      || opened.dev !== unit.lexical.dev
+      || opened.ino !== unit.lexical.ino
+    ) throw unsafeTarget()
+    return { path: canonicalUnit, handle, dev: opened.dev, ino: opened.ino }
+  } catch (error) {
+    if (handle) {
+      try { await handle.close() } catch {}
+    }
+    if (error?.code === "UNSAFE_TARGET") throw error
+    throw unsafeTarget()
+  }
+}
+
+async function assertDirectoryAnchor(fs, anchor) {
+  try {
+    const lexical = await fs.lstat(anchor.path)
+    if (
+      lexical.isSymbolicLink()
+      || !lexical.isDirectory()
+      || lexical.dev !== anchor.dev
+      || lexical.ino !== anchor.ino
+      || await fs.realpath(anchor.path) !== anchor.path
+    ) throw unsafeTarget()
+    const opened = await anchor.handle.stat()
+    if (!opened.isDirectory() || opened.dev !== anchor.dev || opened.ino !== anchor.ino) throw unsafeTarget()
+    return anchor
+  } catch (error) {
+    if (error?.code === "UNSAFE_TARGET") throw error
+    throw unsafeTarget()
+  }
 }
 
 function fingerprintMatches(left, right) {
@@ -334,12 +376,14 @@ function fingerprintMatches(left, right) {
     && left.sha256 === right.sha256
 }
 
-async function fingerprintFile(fs, path) {
+async function fingerprintFile(fs, anchor, path) {
   let lexical
   let handle
   try {
+    await assertDirectoryAnchor(fs, anchor)
     lexical = await fs.lstat(path)
     if (lexical.isSymbolicLink() || !lexical.isFile()) throw unsafeTarget()
+    await assertDirectoryAnchor(fs, anchor)
     handle = await fs.open(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
     const opened = await handle.stat()
     if (!opened.isFile() || opened.dev !== lexical.dev || opened.ino !== lexical.ino || opened.size !== lexical.size) {
@@ -347,6 +391,7 @@ async function fingerprintFile(fs, path) {
     }
     const bytes = await handle.readFile()
     if (bytes.byteLength !== opened.size) throw unsafeTarget()
+    await assertDirectoryAnchor(fs, anchor)
     return {
       dev: opened.dev,
       ino: opened.ino,
@@ -364,19 +409,25 @@ function versionedFileName(requestedFileName, version) {
 }
 
 async function createExclusiveNote(fs, unitDirectory, requestedFileName, bytes) {
+  const anchor = unitDirectory
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW
   for (let version = 1; version < 100_000; version += 1) {
     const fileName = version === 1 ? requestedFileName : versionedFileName(requestedFileName, version)
-    const path = join(unitDirectory, fileName)
+    const path = join(anchor.path, fileName)
     let handle
+    let identity = null
     try {
+      await assertDirectoryAnchor(fs, anchor)
       handle = await fs.open(path, flags, 0o600)
     } catch (error) {
       if (error?.code !== "EEXIST") {
+        if (error?.code === "UNSAFE_TARGET") throw error
         throw new NoteImportError("WRITE_FAILED", "无法新建笔记", { fileName })
       }
       try {
+        await assertDirectoryAnchor(fs, anchor)
         const existing = await fs.lstat(path)
+        await assertDirectoryAnchor(fs, anchor)
         if (existing.isSymbolicLink()) throw unsafeTarget()
       } catch (inspectionError) {
         if (inspectionError?.code === "UNSAFE_TARGET") throw inspectionError
@@ -386,20 +437,67 @@ async function createExclusiveNote(fs, unitDirectory, requestedFileName, bytes) 
     }
 
     try {
+      const opened = await handle.stat()
+      if (!opened.isFile()) throw unsafeTarget()
+      identity = { dev: opened.dev, ino: opened.ino }
+      await assertDirectoryAnchor(fs, anchor)
       await handle.writeFile(bytes)
       await handle.sync()
+      const written = await handle.stat()
+      if (
+        !written.isFile()
+        || written.dev !== identity.dev
+        || written.ino !== identity.ino
+        || written.size !== bytes.byteLength
+      ) throw unsafeTarget()
+      await assertDirectoryAnchor(fs, anchor)
       await handle.close()
       handle = null
-      return { fileName, path }
-    } catch {
+      return { fileName, path, identity }
+    } catch (error) {
       if (handle) {
         try { await handle.close() } catch {}
       }
-      try { await fs.unlink(path) } catch {}
+      try {
+        await removeCreatedNote(fs, anchor, { fileName, path, identity })
+      } catch {
+        throw rollbackFailure(fileName)
+      }
+      if (error?.code === "UNSAFE_TARGET") throw error
       throw new NoteImportError("WRITE_FAILED", "无法新建笔记", { fileName })
     }
   }
   throw new NoteImportError("WRITE_FAILED", "无法新建笔记")
+}
+
+function rollbackFailure(fileName) {
+  return new NoteImportError("ROLLBACK_FAILED", "自动回滚失败", { fileName })
+}
+
+async function removeCreatedNote(fs, anchor, created) {
+  if (!created?.identity) throw rollbackFailure(created?.fileName)
+  try {
+    await assertDirectoryAnchor(fs, anchor)
+    const lexical = await fs.lstat(created.path)
+    if (
+      lexical.isSymbolicLink()
+      || !lexical.isFile()
+      || lexical.dev !== created.identity.dev
+      || lexical.ino !== created.identity.ino
+    ) throw rollbackFailure(created.fileName)
+    await assertDirectoryAnchor(fs, anchor)
+    await fs.unlink(created.path)
+    await assertDirectoryAnchor(fs, anchor)
+    try {
+      await fs.lstat(created.path)
+    } catch (error) {
+      if (error?.code === "ENOENT") return
+      throw error
+    }
+  } catch {
+    throw rollbackFailure(created.fileName)
+  }
+  throw rollbackFailure(created.fileName)
 }
 
 function buildOutputError() {
@@ -452,47 +550,69 @@ export async function importInspectedNote({
 
   const matchingSources = (context.config?.sources ?? []).filter((source) => source.source_id === snapshot.source_id)
   if (matchingSources.length !== 1) throw mappingChanged()
-  const canonicalUnit = await verifyTargetHierarchy(fs, matchingSources[0].path, currentUnitDirectory)
-  if (canonicalUnit !== snapshot.unit_real_path) throw mappingChanged()
-
-  const created = await createExclusiveNote(fs, canonicalUnit, actualRequestedFileName, snapshotBytes)
-  const createdFingerprint = await fingerprintFile(fs, created.path)
+  const anchor = await verifyTargetHierarchy(fs, matchingSources[0].path, currentUnitDirectory)
+  if (anchor.path !== snapshot.unit_real_path) {
+    try { await anchor.handle.close() } catch {}
+    throw mappingChanged()
+  }
 
   try {
-    await rebuild({ repoRoot, context })
-  } catch {
-    try {
-      const currentFingerprint = await fingerprintFile(fs, created.path)
-      if (!fingerprintMatches(createdFingerprint, currentFingerprint)) throw new Error("fingerprint changed")
-      await fs.unlink(created.path)
-    } catch {
-      throw new NoteImportError("ROLLBACK_FAILED", "自动回滚失败", { fileName: created.fileName })
+    if (typeof fs.beforeCreate === "function") {
+      try { await fs.beforeCreate() } catch { throw unsafeTarget() }
     }
-    throw new NoteImportError("BUILD_FAILED", "论文库重建失败", { fileName: created.fileName })
-  }
+    await assertDirectoryAnchor(fs, anchor)
+    const created = await createExclusiveNote(fs, anchor, actualRequestedFileName, snapshotBytes)
+    let createdFingerprint
+    try {
+      createdFingerprint = await fingerprintFile(fs, anchor, created.path)
+      if (
+        createdFingerprint.dev !== created.identity.dev
+        || createdFingerprint.ino !== created.identity.ino
+      ) throw unsafeTarget()
+    } catch {
+      try { await removeCreatedNote(fs, anchor, created) } catch { throw rollbackFailure(created.fileName) }
+      throw new NoteImportError("WRITE_FAILED", "无法确认新增笔记", { fileName: created.fileName })
+    }
 
-  let indexBytes
-  let index
-  try {
-    indexBytes = await fs.readFile(join(repoRoot, "local_library_data/paper-index.json"))
-    index = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(indexBytes))
-  } catch {
-    throw buildOutputError()
-  }
-  const generatedPaper = Array.isArray(index?.papers)
-    ? index.papers.find((paper) => paper?.paper_id === snapshot.paper_id)
-    : null
-  const documents = generatedPaper?.controlled_preview_documents?.[snapshot.category]
-  const matches = Array.isArray(documents)
-    ? documents.filter((document) => document?.label === created.fileName && validateGeneratedPreview(document?.url))
-    : []
-  if (matches.length !== 1) throw buildOutputError()
+    try {
+      await rebuild({ repoRoot, context })
+    } catch {
+      try {
+        const currentFingerprint = await fingerprintFile(fs, anchor, created.path)
+        if (!fingerprintMatches(createdFingerprint, currentFingerprint)) throw rollbackFailure(created.fileName)
+        await removeCreatedNote(fs, anchor, created)
+      } catch {
+        throw rollbackFailure(created.fileName)
+      }
+      throw new NoteImportError("BUILD_FAILED", "论文库重建失败", { fileName: created.fileName })
+    }
 
-  return {
-    paper_id: snapshot.paper_id,
-    actual_file_name: created.fileName,
-    target_tab: snapshot.target_tab,
-    new_preview_url: matches[0].url,
-    index_version: createHash("sha256").update(indexBytes).digest("hex"),
+    let indexBytes
+    let index
+    try {
+      indexBytes = await fs.readFile(join(repoRoot, "local_library_data/paper-index.json"))
+      index = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(indexBytes))
+      validateBuiltPaperIndex(index, {
+        privateRoots: [repoRoot, ...(context.config?.sources ?? []).map((source) => source.path)],
+      })
+    } catch {
+      throw buildOutputError()
+    }
+    const generatedPaper = index.papers.find((paper) => paper.paper_id === snapshot.paper_id)
+    const documents = generatedPaper?.controlled_preview_documents?.[snapshot.category]
+    const matches = Array.isArray(documents)
+      ? documents.filter((document) => document?.label === created.fileName && validateGeneratedPreview(document?.url))
+      : []
+    if (matches.length !== 1) throw buildOutputError()
+
+    return {
+      paper_id: snapshot.paper_id,
+      actual_file_name: created.fileName,
+      target_tab: snapshot.target_tab,
+      new_preview_url: matches[0].url,
+      index_version: createHash("sha256").update(indexBytes).digest("hex"),
+    }
+  } finally {
+    try { await anchor.handle.close() } catch {}
   }
 }
