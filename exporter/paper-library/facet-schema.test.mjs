@@ -29,7 +29,31 @@ test("facet states reject unknown paths, unknown states, and non-objects", () =>
   assert.throws(() => validateFacetStates(facets, { results: "waiting" }), /facet_states 状态无效/u)
   const hidden = {}
   Object.defineProperty(hidden, "private", { value: "unrecorded", enumerable: false })
-  assert.throws(() => validateFacetStates(facets, hidden), /facet_states 路径无效/u)
+  assert.throws(() => validateFacetStates(facets, hidden), /facet_states/u)
+})
+
+test("facet states require an ordinary JSON object with enumerable data properties", () => {
+  const facets = createEmptyFacets()
+  const inherited = Object.create({ results: "pending_verification" })
+  const nullPrototype = Object.assign(Object.create(null), { results: "pending_verification" })
+  const hidden = {}
+  Object.defineProperty(hidden, "results", { value: "pending_verification", enumerable: false })
+  const symbol = { results: "pending_verification" }
+  symbol[Symbol("private")] = "unrecorded"
+  let accessorReads = 0
+  const accessor = {}
+  Object.defineProperty(accessor, "results", {
+    enumerable: true,
+    get() {
+      accessorReads += 1
+      return "pending_verification"
+    },
+  })
+
+  for (const candidate of [inherited, nullPrototype, hidden, symbol, accessor]) {
+    assert.throws(() => validateFacetStates(facets, candidate), /facet_states/u)
+  }
+  assert.equal(accessorReads, 0)
 })
 
 test("a populated facet cannot also carry an empty-value state", () => {

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 
-import { createEmptyFacets, validateFacetStates, validatePaperFacets } from "./facet-schema.mjs"
+import { createEmptyFacets, isOrdinaryJsonObject, validateFacetStates, validatePaperFacets } from "./facet-schema.mjs"
 
 const PAPER_ID = /^[A-Za-z][A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/u
 const RECORD_FIELDS = new Set(["record_type", "facets", "facet_states", "source_terms"])
@@ -13,7 +13,7 @@ const UNIT_TYPE_RECORD_TYPES = Object.freeze({
 })
 
 function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  return isOrdinaryJsonObject(value)
 }
 
 function validateText(field, value) {

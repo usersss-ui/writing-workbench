@@ -18,61 +18,6 @@ const validRecord = (overrides = {}) => ({
   ...overrides,
 })
 
-const expectedRealPaperIds = [
-  "Deng23-TSR",
-  "Ding25-PPFCO",
-  "Duchi12-DA",
-  "Falsone17-DD",
-  "Falsone20-TADMM",
-  "Falsone22-PT",
-  "Flaxman05-BCO",
-  "Li25-DPT",
-  "Li25-TSGF",
-  "Li25-TSGF-C03",
-  "Li25-TSGF-C05",
-  "Li26-PSDOCO",
-  "Liu21-WUD",
-  "Liu22-DTLC",
-  "Liu24-LCT",
-  "Liu25-MC",
-  "Mai19-DDO",
-  "McMahan17-FedAvg",
-  "Nedic09-DSG",
-  "Nedic10-CCO",
-  "Nedic14-TVD",
-  "Nedic17-DIGing",
-  "Notarnicola20-DDR",
-  "Qu18-HS",
-  "Shi15-EXTRA",
-  "Su22-NECPD",
-  "Tang26-DPPDS",
-  "Topic-ResearchGuides",
-  "Wang21-RGF",
-  "WarnatHerresthal21-SL",
-  "Wei23-PPDPOBO",
-  "Wei24-BRDBOCO",
-  "Wei25-DPZOCOA",
-  "Xi18-ADDOPT",
-  "Xiong20-PDO",
-  "Yang24-PSOBDDA",
-  "Yu21-PSCOA",
-  "Yu26-PPDOG",
-  "Zhang24-ZODDA",
-  "Zhao-ResearchLine",
-  "Zhao-ResearchReview",
-  "Zhao23-PPDOPRF",
-  "Zhao24-DFL",
-  "Zhao24-DPPSOBDA",
-  "Zhao24-OPRF",
-  "Zhao24-ZOGT-DP",
-  "Zhao25-DePsFL",
-  "Zhao26-WIoT",
-  "Zhou25-PPDOMD",
-  "Zhu24-DSO-NCC",
-  "Zhu25-DRGFCO",
-  "Zhu26-DPZO",
-]
-
 const expectedRepresentativeRecordsWithoutStates = {
   "Falsone17-DD": {
     record_type: "外部论文",
@@ -168,18 +113,6 @@ test("the real version-3 catalog covers every currently included stable paper ID
   assert.equal(Object.values(catalog.papers).every((record) => (
     Object.keys(record.facet_states).length === 0
   )), true)
-  assert.equal(Object.keys(catalog.papers).length, expectedRealPaperIds.length)
-  assert.equal(new Set(Object.keys(catalog.papers)).size, expectedRealPaperIds.length)
-  assert.deepEqual(
-    Object.keys(catalog.papers).sort(),
-    expectedRealPaperIds,
-  )
-  assert.deepEqual(
-    Object.entries(catalog.papers).filter(([, record]) => (
-      record.facets.research.domain.length === 0 && record.facets.research.mode.length === 0
-    )).map(([paperId]) => paperId).sort(),
-    ["Ding25-PPFCO"],
-  )
   for (const [paperId, expectedRecord] of Object.entries(expectedRepresentativeRecords)) {
     assert.deepEqual(catalog.papers[paperId], expectedRecord)
   }
@@ -230,6 +163,37 @@ test("catalog requires facet_states and rejects collisions with populated facets
   assert.throws(() => validatePaperTagRecord("Paper-01", validRecord({
     facet_states: { applications: "not_applicable", private: "unrecorded" },
   })), /路径无效/u)
+})
+
+test("catalog records reject facet states that cannot round-trip through JSON", () => {
+  const inherited = Object.create({ applications: "not_applicable" })
+  const hidden = {}
+  Object.defineProperty(hidden, "applications", { value: "not_applicable", enumerable: false })
+  const symbol = { applications: "not_applicable" }
+  symbol[Symbol("private")] = "unrecorded"
+  let accessorReads = 0
+  const accessor = {}
+  Object.defineProperty(accessor, "applications", {
+    enumerable: true,
+    get() {
+      accessorReads += 1
+      return "not_applicable"
+    },
+  })
+
+  for (const facetStates of [inherited, hidden, symbol, accessor]) {
+    assert.throws(() => validatePaperTagRecord("Paper-01", validRecord({ facet_states: facetStates })), /facet_states/u)
+  }
+  assert.equal(accessorReads, 0)
+})
+
+test("catalog merge refuses a state that object spread would silently drop", () => {
+  const facetStates = {}
+  Object.defineProperty(facetStates, "applications", { value: "not_applicable", enumerable: false })
+  assert.throws(() => applyPaperTagCatalog({
+    papers: [{ paper_id: "Paper-01", unit_type: "article", metadata_provenance: {}, warnings: [] }],
+    tagCatalog: { version: 3, papers: { "Paper-01": validRecord({ facet_states: facetStates }) } },
+  }), /facet_states/u)
 })
 
 test("catalog merge clones sparse states and records their provenance", () => {

@@ -144,10 +144,14 @@ const READER_STATUS_LABELS = Object.freeze({
 })
 
 function isPlainObject(value) {
-  return value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Object.getPrototypeOf(value) === Object.prototype
+  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    return false
+  }
+  return Reflect.ownKeys(value).every((key) => {
+    if (typeof key !== "string") return false
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor?.enumerable === true && Object.hasOwn(descriptor, "value")
+  })
 }
 
 function validPaperId(paperId) {
@@ -258,7 +262,7 @@ function containsPrivateLocatorDeep(value) {
 
 function exactStringKeys(value, expected) {
   if (!isPlainObject(value)) return false
-  const keys = Object.keys(value).sort()
+  const keys = Reflect.ownKeys(value).sort()
   const required = [...expected].sort()
   return keys.length === required.length && keys.every((key, index) => key === required[index])
 }
@@ -836,7 +840,7 @@ export async function loadPaperIndex(fetchImpl = globalThis.fetch) {
   }
   const paperIds = payload.papers.map((paper) => paper.paper_id)
   if (new Set(paperIds).size !== paperIds.length) throw new Error("论文库索引格式无效")
-  const warningCount = Number.isInteger(payload.warning_count) && payload.warning_count >= 0 ? payload.warning_count : 0
+  const warningCount = Number.isInteger(payload.warning_count) && payload.warning_count >= 0 ? payload.warning_count : null
   return {
     version: payload.version,
     facet_schema: payload.facet_schema,

@@ -1,6 +1,12 @@
 import { basename, extname } from "node:path/posix"
 import { ARTIFACT_KEYS, createEmptyArtifacts } from "./artifacts.mjs"
-import { createEmptyFacets, validateFacetStates, validatePaperFacets } from "./facet-schema.mjs"
+import {
+  createEmptyFacets,
+  hasExactJsonObjectKeys,
+  isOrdinaryJsonObject,
+  validateFacetStates,
+  validatePaperFacets,
+} from "./facet-schema.mjs"
 import { normalizeRelativePath } from "./ids.mjs"
 import { PAPER_RECORD_TYPES } from "./tag-catalog.mjs"
 import {
@@ -107,13 +113,11 @@ export function mergePaperRecord({ adapted = {}, explicit = {}, catalog = {}, ov
 }
 
 function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
+  return isOrdinaryJsonObject(value)
 }
 
 function hasExactKeys(value, expectedKeys) {
-  const actual = Object.keys(value).sort()
-  const expected = [...expectedKeys].sort()
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+  return hasExactJsonObjectKeys(value, expectedKeys)
 }
 
 function assertString(field, value) {

@@ -34,6 +34,24 @@ const facetStateValueSet = new Set(FACET_STATE_VALUES)
 const rootKeys = Object.freeze(["research", "objective", "constraints", "oracle", "methods", "network", "privacy_robustness", "results", "applications"])
 const leafPaths = new Map(FACET_GROUPS.map(({ path, values }) => [path, new Set(values)]))
 
+export function isOrdinaryJsonObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    return false
+  }
+  return Reflect.ownKeys(value).every((key) => {
+    if (typeof key !== "string") return false
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor?.enumerable === true && Object.hasOwn(descriptor, "value")
+  })
+}
+
+export function hasExactJsonObjectKeys(value, expectedKeys) {
+  if (!isOrdinaryJsonObject(value)) return false
+  const actual = Reflect.ownKeys(value).sort()
+  const expected = [...expectedKeys].sort()
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+}
+
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
@@ -54,7 +72,7 @@ function setAtPath(object, path, value) {
 
 export function validateFacetStates(facets, facetStates) {
   validatePaperFacets(facets)
-  if (!isRecord(facetStates)) throw new TypeError("facet_states 必须是对象")
+  if (!isOrdinaryJsonObject(facetStates)) throw new TypeError("facet_states 必须是对象")
   for (const path of Reflect.ownKeys(facetStates)) {
     if (typeof path !== "string" || !FACET_PATHS.includes(path)) {
       throw new TypeError("facet_states 路径无效")

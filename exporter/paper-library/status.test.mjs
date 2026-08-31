@@ -205,6 +205,28 @@ test("generated paper validates sparse facet states against its facet values", (
   }), /不能覆盖已有分面值/u)
 })
 
+test("generated records reject non-JSON facet state object shapes", () => {
+  const inherited = Object.create({ applications: "not_applicable" })
+  const hidden = {}
+  Object.defineProperty(hidden, "applications", { value: "not_applicable", enumerable: false })
+  const symbol = { applications: "not_applicable" }
+  symbol[Symbol("private")] = "unrecorded"
+  let accessorReads = 0
+  const accessor = {}
+  Object.defineProperty(accessor, "applications", {
+    enumerable: true,
+    get() {
+      accessorReads += 1
+      return "not_applicable"
+    },
+  })
+
+  for (const facetStates of [inherited, hidden, symbol, accessor]) {
+    assert.throws(() => validateGeneratedPaper(validPaper({ facet_states: facetStates })), /facet_states/u)
+  }
+  assert.equal(accessorReads, 0)
+})
+
 test("facet state participates in merge defaults and metadata provenance", () => {
   const paper = mergePaperRecord({ catalog: { facet_states: { results: "pending_verification" } } })
   assert.deepEqual(paper.facet_states, { results: "pending_verification" })

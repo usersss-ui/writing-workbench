@@ -241,6 +241,7 @@ function createControllerDocument() {
   const search = new MemoryNode("input")
   const reset = new MemoryNode("button")
   const count = new MemoryNode("h2")
+  const warning = new MemoryNode("p")
   const panel = new MemoryNode("section")
   const selected = new MemoryNode("div")
   panel.dataset.facetPanel = ""
@@ -258,6 +259,7 @@ function createControllerDocument() {
     ["library-filters", form],
     ["library-reset", reset],
     ["library-count", count],
+    ["library-warning-summary", warning],
   ])
   const documentListeners = new Map()
   const document = {
@@ -297,8 +299,8 @@ function createControllerDocument() {
       documentListeners.set(type, listeners)
     },
   }
-  for (const node of [form, search, reset, count, panel, selected, document.body, ...triggers]) node.ownerDocument = document
-  return { document, form, search, reset, count, panel, selected, triggers }
+  for (const node of [form, search, reset, count, warning, panel, selected, document.body, ...triggers]) node.ownerDocument = document
+  return { document, form, search, reset, count, warning, panel, selected, triggers }
 }
 
 function normalizedPaper(overrides = {}) {
@@ -1224,7 +1226,7 @@ test("desktop view state passes schema labels and source-term labels through que
   assert.deepEqual(sourceView.rows[0].hits, [{ field: "原文术语", snippet: "Tracking-ADMM" }])
 })
 
-test("loadPaperIndex accepts only a version-2 schema-driven index and keeps warning uncertainty explicit", async () => {
+test("loadPaperIndex accepts approved version pairs and keeps warning uncertainty explicit", async () => {
   const { loadPaperIndex } = await import("./library.mjs")
   const payload = { ...v2Index(), warning_count: 3 }
   const loaded = await loadPaperIndex(async (url, options) => {
@@ -1242,7 +1244,7 @@ test("loadPaperIndex accepts only a version-2 schema-driven index and keeps warn
       ok: true,
       json: async () => ({ ...v2Index([]), warning_count: warningCount }),
     }))
-    assert.equal(uncertain.warning_count, 0)
+    assert.equal(uncertain.warning_count, null)
   }
 })
 
@@ -1283,6 +1285,50 @@ test("loadPaperIndex enforces version pairs and facet-state consistency", async 
   ]
   invalid[4].papers[0].facets.results = ["线性收敛"]
   for (const payload of invalid) {
+    await assert.rejects(
+      () => loadPaperIndex(async () => ({ ok: true, json: async () => payload })),
+      /论文库索引格式无效/u,
+    )
+  }
+})
+
+test("loadPaperIndex rejects facet states that are not ordinary JSON data objects", async () => {
+  const { loadPaperIndex } = await import("./library.mjs")
+  const inherited = Object.create({ applications: "not_applicable" })
+  const hidden = {}
+  Object.defineProperty(hidden, "applications", { value: "not_applicable", enumerable: false })
+  const symbol = { applications: "not_applicable" }
+  symbol[Symbol("private")] = "unrecorded"
+  let accessorReads = 0
+  const accessor = {}
+  Object.defineProperty(accessor, "applications", {
+    enumerable: true,
+    get() {
+      accessorReads += 1
+      return "not_applicable"
+    },
+  })
+
+  for (const facetStates of [inherited, hidden, symbol, accessor]) {
+    await assert.rejects(
+      () => loadPaperIndex(async () => ({
+        ok: true,
+        json: async () => v3Index([normalizedPaper({ facet_states: facetStates })]),
+      })),
+      /论文库索引格式无效/u,
+    )
+  }
+  assert.equal(accessorReads, 0)
+})
+
+test("loadPaperIndex rejects non-enumerable and symbol extras on strict records", async () => {
+  const { loadPaperIndex } = await import("./library.mjs")
+  const hidden = v3Index()
+  Object.defineProperty(hidden, "private", { value: true, enumerable: false })
+  const symbol = v3Index()
+  symbol[Symbol("private")] = true
+
+  for (const payload of [hidden, symbol]) {
     await assert.rejects(
       () => loadPaperIndex(async () => ({ ok: true, json: async () => payload })),
       /论文库索引格式无效/u,
@@ -1932,6 +1978,27 @@ test("creating the controller is import-safe and does not fetch before explicit 
 
   assert.equal(typeof controller.start, "function")
   assert.equal(fetchCount, 0)
+})
+
+test("controller renders unknown warning counts as user-visible uncertainty", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createControllerDocument()
+  const values = new Map()
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ ...v3Index(), warning_count: "unknown" }),
+    }),
+  })
+
+  assert.deepEqual(await controller.start(), { ok: true, paperCount: 1 })
+  assert.equal(ui.warning.textContent, "扫描警告数量未提供")
 })
 
 test("controller drives all five facet entries, selections, chip removal, record type, and reset", async () => {
