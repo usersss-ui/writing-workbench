@@ -2,6 +2,342 @@ import { normalizeRelativePath } from "./ids.mjs"
 
 const SAFE_LANGUAGE = /^[a-z0-9][a-z0-9_-]{0,31}$/
 const IMAGE_EXTENSION = /\.(?:gif|jpe?g|png|webp)$/iu
+const PRIVATE_PATH_PLACEHOLDER = "【本机路径已隐藏】"
+const PRIVATE_LOCATOR_START_RE = /(?:vscode:\/\/file(?:\/{1,3}|\/[a-z]:[\\/])|~\/|\$(?:HOME|USERPROFILE)[\\/]|\$\{(?:HOME|USERPROFILE)\}[\\/]|%(?:HOME|USERPROFILE)%[\\/]|(?<![A-Za-z0-9_])[a-z]%3a(?:%2f|%5c)|file:(?:\/{1,3}|[a-z]:[\\/])|file%3a(?:(?:%2f){1,3}|[a-z]%3a(?:%2f|%5c))|(?<![A-Za-z0-9_])[a-z]:[\\/]|\\\\[A-Za-z0-9._-]+[\\/][^\\/\s`"'<>|,;!?，。；！？：、]+|(?<![A-Za-z0-9_\/%])\/+(?:Applications|Library|Network|System|Users|Volumes|bin|data|dev|etc|home|media|mnt|opt|private|proc|root|run|sbin|srv|tmp|usr|var|workspace)(?=\/)|(?<![A-Za-z0-9_\/%])%2f(?:Applications|Library|Network|System|Users|Volumes|bin|data|dev|etc|home|media|mnt|opt|private|proc|root|run|sbin|srv|tmp|usr|var|workspace)(?=%2f))/giu
+const BARE_PRIVATE_LOCATOR_TERMINATOR_RE = /[`"<>|,;!?，。；！？：、]/u
+const PATH_EXTENSION_RE = /\.[\p{L}\p{N}]{1,16}\.?$/u
+const PATH_EXTENSION_TOKEN_RE = /\.[\p{L}\p{N}]{1,16}/gu
+const WORD_CHARACTER_RE = /[\p{L}\p{N}]/u
+const PROSE_AFTER_PATH_RE = /^\s+(?:after|against|and|are|before|for|from|in|is|or|that|then|the|to|was|were|where|which|with)\b/iu
+const BRACKET_PAIRS = new Map([["(", ")"], ["[", "]"], ["{", "}"]])
+const CLOSING_BRACKETS = new Set(BRACKET_PAIRS.values())
+
+function findPrivateLocator(value, fromIndex = 0) {
+  PRIVATE_LOCATOR_START_RE.lastIndex = fromIndex
+  for (let match = PRIVATE_LOCATOR_START_RE.exec(value); match; match = PRIVATE_LOCATOR_START_RE.exec(value)) {
+    if (!isInsidePublicHttpPath(value, match.index)) return match
+  }
+  return null
+}
+
+function hasBalancedUrlDelimiters(value) {
+  const brackets = []
+  for (const character of value) {
+    if (BRACKET_PAIRS.has(character)) brackets.push(BRACKET_PAIRS.get(character))
+    else if (CLOSING_BRACKETS.has(character)) {
+      if (brackets.at(-1) !== character) return false
+      brackets.pop()
+    }
+  }
+  return brackets.length === 0
+}
+
+function isInsidePublicHttpPath(value, locatorIndex) {
+  const prefix = value.slice(0, locatorIndex)
+  let schemeIndex = -1
+  for (const match of prefix.matchAll(/https?:\/\//giu)) schemeIndex = match.index
+  if (schemeIndex < 0) return false
+
+  const candidate = prefix.slice(schemeIndex)
+  if (/[\s`"'<>|，。；！？：、]/u.test(candidate)) return false
+  if (/[?#]/u.test(candidate) || /[,;]$/u.test(candidate)) return false
+  if (!hasBalancedUrlDelimiters(candidate)) return false
+  try {
+    const parsed = new URL(candidate)
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && Boolean(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
+function hasPlausiblePathExtension(value) {
+  const finalSegment = String(value).split(/[\\/]/u).at(-1) ?? ""
+  return PATH_EXTENSION_RE.test(finalSegment)
+}
+
+function separatorLengthAt(value, index) {
+  if (value[index] === "/" || value[index] === "\\") return 1
+  return /^%(?:2f|5c)/iu.test(value.slice(index, index + 3)) ? 3 : 0
+}
+
+function isStrongContinuationBoundary(value, index) {
+  const character = value[index]
+  if (!character || /[\n\r!?。；！？]/u.test(character)) return true
+  return character === "." && (!value[index + 1] || /\s/u.test(value[index + 1]))
+}
+
+function hasLetterExtensionAhead(value, fromIndex, requireSeparator) {
+  const searchEnd = Math.min(value.length, fromIndex + 256)
+  let sawSeparator = !requireSeparator
+  let sawPrefixContent = false
+  let sawInternalPrefixWhitespace = false
+  for (let index = fromIndex; index < searchEnd; index += 1) {
+    if (isStrongContinuationBoundary(value, index)) return false
+    const separatorLength = separatorLengthAt(value, index)
+    if (separatorLength > 0) {
+      if (requireSeparator && sawInternalPrefixWhitespace) return false
+      sawSeparator = true
+      index += separatorLength - 1
+      continue
+    }
+    if (!sawSeparator) {
+      if (/\s/u.test(value[index])) {
+        if (sawPrefixContent) sawInternalPrefixWhitespace = true
+      } else {
+        sawPrefixContent = true
+      }
+    }
+    if (!sawSeparator || value[index] !== ".") continue
+    const extension = /^[\p{L}][\p{L}\p{N}]{0,15}/u.exec(value.slice(index + 1))?.[0] ?? null
+    if (extension && extensionBoundary(value[index + extension.length + 1])) return true
+  }
+  return false
+}
+
+function isShortAcademicRatio(value, separatorIndex, tail) {
+  let leftStart = separatorIndex
+  while (leftStart > 0 && /[A-Za-z]/u.test(value[leftStart - 1])) leftStart -= 1
+  const left = value.slice(leftStart, separatorIndex)
+  return /^[A-Za-z]{1,3}$/u.test(left) && /^[A-Za-z]{1,3}$/u.test(tail)
+}
+
+function hasTightPathTailAhead(value, fromIndex) {
+  const searchEnd = Math.min(value.length, fromIndex + 256)
+  let lastSeparatorIndex = -1
+  let lastSeparatorEnd = -1
+
+  for (let index = fromIndex; index <= searchEnd; index += 1) {
+    if (index < searchEnd) {
+      const separatorLength = separatorLengthAt(value, index)
+      if (separatorLength > 0) {
+        lastSeparatorIndex = index
+        lastSeparatorEnd = index + separatorLength
+        index += separatorLength - 1
+        continue
+      }
+    }
+
+    const atCheckpoint = index === searchEnd || /[,;，；：、]/u.test(value[index] ?? "") || isStrongContinuationBoundary(value, index)
+    if (!atCheckpoint) continue
+
+    if (lastSeparatorEnd >= fromIndex) {
+      const tail = value.slice(lastSeparatorEnd, index)
+      if (
+        tail
+        && !/\s/u.test(tail)
+        && !isShortAcademicRatio(value, lastSeparatorIndex, tail)
+      ) return true
+    }
+    if (isStrongContinuationBoundary(value, index)) return false
+  }
+  return false
+}
+
+function shouldContinueAfterWhitespace(value, locatorStart, whitespaceIndex) {
+  const prefixHasExtension = hasPlausiblePathExtension(value.slice(locatorStart, whitespaceIndex))
+  const continuationStart = whitespaceIndex + 1
+  return hasLetterExtensionAhead(value, continuationStart, prefixHasExtension)
+    || (!prefixHasExtension && hasTightPathTailAhead(value, continuationStart))
+}
+
+function shouldContinueAfterPunctuation(value, locatorStart, punctuationIndex) {
+  const prefixHasExtension = hasPlausiblePathExtension(value.slice(locatorStart, punctuationIndex))
+  const continuationStart = punctuationIndex + 1
+  return hasLetterExtensionAhead(value, continuationStart, true)
+    || (!prefixHasExtension && hasTightPathTailAhead(value, continuationStart))
+}
+
+function collectDelimitedRanges(value) {
+  const ranges = []
+
+  for (let index = 0; index < value.length;) {
+    if (value[index] !== "`") {
+      index += 1
+      continue
+    }
+    let markerLength = 1
+    while (value[index + markerLength] === "`") markerLength += 1
+    const marker = "`".repeat(markerLength)
+    const closingIndex = value.indexOf(marker, index + markerLength)
+    if (closingIndex < 0) break
+    ranges.push({ start: index + markerLength, end: closingIndex })
+    index = closingIndex + markerLength
+  }
+
+  for (let searchFrom = 0; searchFrom < value.length;) {
+    const markerIndex = value.indexOf("](", searchFrom)
+    if (markerIndex < 0) break
+    const contentStart = markerIndex + 2
+    let depth = 1
+    let contentEnd = contentStart
+    for (; contentEnd < value.length; contentEnd += 1) {
+      if (value[contentEnd] === "\\") {
+        contentEnd += 1
+        continue
+      }
+      if (value[contentEnd] === "(") depth += 1
+      if (value[contentEnd] === ")") depth -= 1
+      if (depth === 0) break
+    }
+    if (depth !== 0) break
+    ranges.push({ start: contentStart, end: contentEnd })
+    searchFrom = contentEnd + 1
+  }
+
+  for (const [openingQuote, closingQuote] of [["\"", "\""], ["'", "'"], ["“", "”"], ["‘", "’"]]) {
+    let openingIndex = -1
+    for (let index = 0; index < value.length; index += 1) {
+      if (escapedAt(value, index)) continue
+      const expectedQuote = openingIndex < 0 ? openingQuote : closingQuote
+      if (value[index] !== expectedQuote) continue
+      if (expectedQuote === "'") {
+        const adjacentCharacter = openingIndex < 0 ? value[index - 1] : value[index + 1]
+        if (WORD_CHARACTER_RE.test(adjacentCharacter ?? "")) continue
+      }
+      if (openingIndex < 0) {
+        openingIndex = index
+        continue
+      }
+      ranges.push({ start: openingIndex + 1, end: index })
+      openingIndex = -1
+    }
+  }
+
+  return ranges
+}
+
+function containingDelimitedRange(ranges, index) {
+  return ranges
+    .filter((range) => range.start <= index && index < range.end)
+    .sort((left, right) => (left.end - left.start) - (right.end - right.start))[0] ?? null
+}
+
+function extensionBoundary(character) {
+  return !character || /[\s`"'<>|,;!?，。；！？：、)\]}]/u.test(character)
+}
+
+function findDelimitedCodeBoundary(value, fromIndex, rangeEnd) {
+  const brackets = []
+  for (let index = fromIndex; index < rangeEnd; index += 1) {
+    const character = value[index]
+    if (BRACKET_PAIRS.has(character)) {
+      brackets.push(BRACKET_PAIRS.get(character))
+      continue
+    }
+    if (CLOSING_BRACKETS.has(character)) {
+      if (brackets.at(-1) !== character) return index
+      brackets.pop()
+      continue
+    }
+    if ((character === ";" || character === "`" || character === "\"" || character === "'") && brackets.length === 0) return index
+  }
+  return rangeEnd
+}
+
+function pathSeparatorAheadBeforeCodeBoundary(value, fromIndex, rangeEnd) {
+  for (let index = fromIndex; index < rangeEnd; index += 1) {
+    if (value[index] === "/" || value[index] === "\\") return true
+  }
+  return false
+}
+
+function findDelimitedLocatorEnd(value, locatorStart, fromIndex, range) {
+  const searchEnd = findDelimitedCodeBoundary(value, fromIndex, range.end)
+  let lastExtensionEnd = null
+  PATH_EXTENSION_TOKEN_RE.lastIndex = fromIndex
+  for (let match = PATH_EXTENSION_TOKEN_RE.exec(value); match && match.index < searchEnd; match = PATH_EXTENSION_TOKEN_RE.exec(value)) {
+    const end = match.index + match[0].length
+    if (
+      end <= searchEnd
+      && extensionBoundary(value[end])
+      && !pathSeparatorAheadBeforeCodeBoundary(value, end, searchEnd)
+    ) lastExtensionEnd = end
+  }
+  if (searchEnd === range.end) {
+    if (lastExtensionEnd !== null && PROSE_AFTER_PATH_RE.test(value.slice(lastExtensionEnd, range.end))) {
+      return lastExtensionEnd
+    }
+    return range.end
+  }
+  if (lastExtensionEnd !== null) return lastExtensionEnd
+  if (locatorStart === range.start) return range.end
+  return searchEnd
+}
+
+function findBareLocatorEnd(value, locatorStart, fromIndex) {
+  const brackets = []
+  let punctuationContinuation = false
+  for (let index = fromIndex; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === "/" || character === "\\") punctuationContinuation = false
+    if (/^%(?:2f|5c)/iu.test(value.slice(index, index + 3))) punctuationContinuation = false
+    if (BRACKET_PAIRS.has(character)) {
+      brackets.push(BRACKET_PAIRS.get(character))
+      continue
+    }
+    if (CLOSING_BRACKETS.has(character)) {
+      if (brackets.at(-1) !== character) return index
+      brackets.pop()
+      continue
+    }
+    if (/\s/u.test(character)) {
+      if (brackets.length > 0 || punctuationContinuation || shouldContinueAfterWhitespace(value, locatorStart, index)) continue
+      return index
+    }
+    if (character === "'") {
+      const previous = value[index - 1] ?? ""
+      const next = value[index + 1] ?? ""
+      if (WORD_CHARACTER_RE.test(previous) && WORD_CHARACTER_RE.test(next)) continue
+      return index
+    }
+    if (BARE_PRIVATE_LOCATOR_TERMINATOR_RE.test(character) && brackets.length === 0) {
+      if (
+        /[,;，；：、]/u.test(character)
+        && (punctuationContinuation || shouldContinueAfterPunctuation(value, locatorStart, index))
+      ) {
+        punctuationContinuation = true
+        continue
+      }
+      return index
+    }
+  }
+  return value.length
+}
+
+function redactBarePrivateLocators(value, delimitedRanges = []) {
+  let cursor = 0
+  let output = ""
+  while (cursor < value.length) {
+    const match = findPrivateLocator(value, cursor)
+    if (!match) break
+    const delimitedRange = containingDelimitedRange(delimitedRanges, match.index)
+    const delimitedEnd = delimitedRange
+      ? findDelimitedLocatorEnd(value, match.index, match.index + match[0].length, delimitedRange)
+      : null
+    const end = delimitedEnd ?? findBareLocatorEnd(value, match.index, match.index + match[0].length)
+    output += `${value.slice(cursor, match.index)}${PRIVATE_PATH_PLACEHOLDER}`
+    cursor = end
+  }
+  return `${output}${value.slice(cursor)}`
+}
+
+function redactPrivateLocators(value) {
+  const lines = String(value ?? "").split("\n")
+  let fence = null
+  return lines.map((line) => {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/u)
+    if (fenceMatch) {
+      const marker = fenceMatch[1]
+      if (!fence) fence = { character: marker[0], length: marker.length }
+      else if (marker[0] === fence.character && marker.length >= fence.length) fence = null
+      return redactBarePrivateLocators(line)
+    }
+    const ranges = fence
+      ? [{ start: 0, end: line.length }, ...collectDelimitedRanges(line)]
+      : collectDelimitedRanges(line)
+    return redactBarePrivateLocators(line, ranges)
+  }).join("\n")
+}
 
 export function escapeHtml(value) {
   return String(value)
@@ -266,7 +602,7 @@ function renderMath(value) {
 }
 
 export function renderControlledMarkdown(markdown, options = {}, calloutDepth = 0) {
-  const normalizedLines = String(markdown ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")
+  const normalizedLines = redactPrivateLocators(markdown).replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")
   const lines = stripLeadingFrontmatter(normalizedLines, calloutDepth)
   const output = []
   let paragraph = []

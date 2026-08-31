@@ -512,6 +512,35 @@ test("buildPrivateLibrary emits one safe explicitly approved preferred-note prev
   assert.equal(audit.counts.generated_pages, 4)
 })
 
+test("buildPrivateLibrary redacts private paths from generated Markdown previews", async () => {
+  const fixture = await makeFixture()
+  const privateHomeRoot = ["", "Users", ""].join("/")
+  const privatePath = ["", "Users", "example", "papers", "Paper A", "result.png"].join("/")
+  await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
+  await put(fixture.sourceRoot, "Paper A/reading-note.md", [
+    "# 复现记录",
+    "",
+    `结果目录：\`${privatePath}\`。`,
+  ].join("\n"))
+  fixture.overrides.papers["main_papers::Paper A"] = {
+    paper_id: "PaperA-01",
+    preferred_note: "reading-note.md",
+    preview_note: true,
+  }
+
+  await buildPrivateLibrary(fixture)
+  const preview = await readFile(
+    join(fixture.repoRoot, "local_library_data/notes/papera-01/preferred.html"),
+    "utf8",
+  )
+
+  assert.equal(preview.includes(privatePath), false)
+  assert.equal(preview.includes(privateHomeRoot), false)
+  assert.equal(preview.includes("Paper A"), false)
+  assert.equal(preview.includes("result.png"), false)
+  assert.match(preview, /【本机路径已隐藏】/u)
+})
+
 test("buildPrivateLibrary emits fixed controlled previews for reading, derivation, simulation, and code comparison", async () => {
   const fixture = await makeFixture()
   await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")

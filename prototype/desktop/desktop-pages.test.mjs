@@ -70,6 +70,29 @@ test("论文发现页可从工作台主导航到达，并与论文库双向链�
   assert.match(discoveryHtml, /论文发现/u)
 })
 
+test("所有主工作台页面内嵌 data favicon，不触发未授权的 favicon 路由", async (context) => {
+  const server = createStaticServer()
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  context.after(() => server.close())
+  const address = server.address()
+  const baseUrl = `http://127.0.0.1:${address.port}/prototype/desktop`
+  const pageNames = [
+    "library.template.html",
+    "discovery.template.html",
+    "directions.html",
+    "agent-tasks.html",
+  ]
+
+  for (const pageName of pageNames) {
+    const response = await fetch(`${baseUrl}/${pageName}`)
+    const pageHtml = await response.text()
+    const favicon = pageHtml.match(/<link[^>]*rel=["']icon["'][^>]*href=["']([^"']+)["'][^>]*>/u)?.[1]
+    assert.equal(response.status, 200, pageName)
+    assert.ok(favicon, pageName)
+    assert.equal(new URL(favicon).protocol, "data:", pageName)
+  }
+})
+
 test("研究任务输入页从五个工作台表面可达且方向页公开显式保存状态", async (context) => {
   const server = createStaticServer()
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
