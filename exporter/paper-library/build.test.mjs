@@ -954,23 +954,23 @@ test("CLI main is import-safe, uses fixed relative config paths, and redacts bui
   const fixture = await makeFixture()
   const stdout = []
   const stderr = []
-  const loads = []
-  const tagCatalog = { version: 3, papers: {} }
+  const context = { marker: "loaded-context" }
+  const calls = []
   const code = await runBuildCli({
     repoRoot: fixture.repoRoot,
-    loadConfig: async (path) => { loads.push(path); return fixture.config },
-    loadOverrides: async (path) => { loads.push(path); return fixture.overrides },
-    loadTags: async (path) => { loads.push(path); return tagCatalog },
-    build: async () => ({ paperCount: 3, previewCount: 1, pageCount: 2 }),
+    loadContext: async (input) => { calls.push(["load", input]); return context },
+    rebuild: async (input) => {
+      calls.push(["rebuild", input])
+      return { paperCount: 3, previewCount: 1, pageCount: 2, excludedCount: 0 }
+    },
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
   })
 
   assert.equal(code, 0)
-  assert.deepEqual(loads, [
-    join(fixture.repoRoot, "local_library_config/library.local.json"),
-    join(fixture.repoRoot, "local_library_config/paper-overrides.json"),
-    join(fixture.repoRoot, "local_library_config/paper-tags.json"),
+  assert.deepEqual(calls, [
+    ["load", { repoRoot: fixture.repoRoot }],
+    ["rebuild", { repoRoot: fixture.repoRoot, context }],
   ])
   assert.match(stdout.join("\n"), /论文记录：3/)
   assert.match(stdout.join("\n"), /local_library_data\/paper-index\.json/)
@@ -979,51 +979,14 @@ test("CLI main is import-safe, uses fixed relative config paths, and redacts bui
   const privateName = ["secret", "reading-note.md"].join("/")
   const failed = await runBuildCli({
     repoRoot: fixture.repoRoot,
-    loadConfig: async () => { throw new Error(privateName) },
-    loadOverrides: async () => fixture.overrides,
-    build: async () => { throw new Error("unused") },
+    loadContext: async () => { throw new Error(privateName) },
+    rebuild: async () => { throw new Error("unused") },
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
   })
   assert.equal(failed, 1)
   assert.equal(stderr.at(-1), "私有论文库构建失败。请检查本机配置、覆盖映射和审计边界。")
   assert.equal(stderr.at(-1).includes(privateName), false)
-})
-
-test("CLI loads catalogs before building and reports only aggregate counts", async () => {
-  const fixture = await makeFixture()
-  const catalogPath = join(fixture.repoRoot, "private-catalog.md")
-  const catalog = { version: 1, papers: {}, warnings: [] }
-  const tagCatalog = { version: 3, papers: {} }
-  const config = {
-    version: 1,
-    sources: [{ source_id: "main_papers", path: fixture.sourceRoot, catalog_path: catalogPath }],
-  }
-  const seen = []
-  const stdout = []
-
-  const code = await runBuildCli({
-    repoRoot: fixture.repoRoot,
-    loadConfig: async () => config,
-    loadOverrides: async () => fixture.overrides,
-    loadTags: async () => tagCatalog,
-    loadCatalog: async (path, options) => {
-      seen.push([path, options.sourceId])
-      return catalog
-    },
-    build: async (input) => {
-      assert.equal(input.catalogs.main_papers, catalog)
-      assert.equal(input.tagCatalog, tagCatalog)
-      return { paperCount: 48, previewCount: 29, pageCount: 30, excludedCount: 1 }
-    },
-    stdout: (line) => stdout.push(line),
-    stderr: () => {},
-  })
-
-  assert.equal(code, 0)
-  assert.deepEqual(seen, [[catalogPath, "main_papers"]])
-  assert.match(stdout.join("\n"), /排除记录：1/u)
-  assert.equal(stdout.join("\n").includes(catalogPath), false)
 })
 
 test("build writes the facet schema and strips legacy composite filters", async () => {
