@@ -76,6 +76,21 @@ test("rejects invalid paper IDs and labels without changing prior state", () => 
   assert.deepEqual(store.read(), before)
 })
 
+test("rejects Unicode line and paragraph separators in direct labels", () => {
+  const store = createUserTagStore(fakeStorage())
+  store.add("Paper-01", "保留")
+  const before = store.read()
+
+  for (const separator of ["\u2028", "\u2029"]) {
+    assert.throws(
+      () => store.add("Paper-01", `非法${separator}标签`),
+      /控制字符或换行/u,
+    )
+  }
+
+  assert.deepEqual(store.read(), before)
+})
+
 test("counts Unicode code points and enforces per-paper and whole-library assignment limits", () => {
   const perPaper = createUserTagStore(fakeStorage())
   perPaper.add("Paper-01", "😀".repeat(24))
@@ -179,4 +194,32 @@ test("any import structure or label error rejects the whole document without per
     () => createUserTagStore(fakeStorage()).importJson("{}", { mode: "replace", knownPaperIds: [] }),
     /只支持 merge/u,
   )
+})
+
+test("Unicode line separators reject merge imports atomically", () => {
+  for (const separator of ["\u2028", "\u2029"]) {
+    const storage = fakeStorage()
+    const store = createUserTagStore(storage)
+    store.add("Paper-01", "保留")
+    const beforeState = store.read()
+    const beforeBytes = storage.raw(USER_TAG_STORAGE_KEY)
+    const document = {
+      schema: "research-console.paper-user-tags",
+      version: 1,
+      papers: {
+        "Paper-01": ["可作基线"],
+        "Paper-02": [`非法${separator}标签`],
+      },
+    }
+
+    assert.throws(
+      () => store.importJson(JSON.stringify(document), {
+        mode: "merge",
+        knownPaperIds: ["Paper-01", "Paper-02"],
+      }),
+      /个人标签导入文件包含无效标签/u,
+    )
+    assert.deepEqual(store.read(), beforeState)
+    assert.equal(storage.raw(USER_TAG_STORAGE_KEY), beforeBytes)
+  }
 })
