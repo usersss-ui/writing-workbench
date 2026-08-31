@@ -50,3 +50,35 @@ The implementation commit contains only the 17 Task 7 production, test, template
 
 - This task deliberately stops at a read-only input snapshot page. Connecting any model, executor or research-analysis workflow requires a later separately reviewed task.
 - Browser-local storage can be unavailable or externally corrupted; saves fail closed and the UI reports that no snapshot was stored. The required suite covers durable transaction fallbacks, but real-paper builds and browser visual acceptance remain outside Task 7's bounded test plan.
+
+## Fix round 1 — transaction truthfulness and boundary hardening
+
+- Review fix implementation: `915c944a3171469a2b3a07cca663edea7272ac55` (`fix: harden research snapshot transactions`).
+- Strict-object RED tests first exposed acceptance of custom prototypes, symbol keys, non-enumerable properties and accessors in both direction and task-input snapshots. Both validators now require an ordinary exact-key data object.
+- Credential RED tests first returned `ready` for authorization headers, OAuth-style access/refresh/ID tokens, client secrets, private-key material and URL user information. The fixed allowlist boundary now rejects all of them; test fixtures assemble sensitive patterns from fragments.
+- History RED first showed append order instead of time order. The read-only history view now sorts by `created_at` descending with `snapshot_id` as a deterministic tie-break, without reversing or mutating stored arrays; old snapshot bytes remain unchanged after source refresh.
+- The initial transaction fault-injection group was RED (`0/6`) for pending/current/committed write-then-throw, throw-before retry, guarded reads, root-cache faults, post-write revalidation and rollback failure. A further committed-write plus two failed reads case was RED (`0/1`), as was an unresolved current-write case that had to preserve its recoverable pending record (`0/1`). All became GREEN after independent `.snapshot.*` and `.current` records became the proven authority and root became only a rebuildable cache.
+- A stale non-current pending record can now resume the same snapshot ID. A failed append exposes neither a logical new history entry nor a new current snapshot; a write that actually committed despite throwing is reconciled and reported as success. Root-only data without matching independent snapshot/current records is rejected.
+- The no-executor proof now scans runtime JavaScript as well as HTML. Initialization is behaviorally verified to issue exactly one canonical paper-index request through `loadPaperIndex` from `./library.mjs`, with no model, agent, health or task route.
+
+Final fix-round verification (this supersedes the earlier `60 passed` count):
+
+```text
+node --test prototype/desktop/direction-snapshot.test.mjs prototype/desktop/agent-task-input.test.mjs prototype/desktop/agent-tasks.test.mjs prototype/desktop/desktop-pages.test.mjs exporter/paper-library/build.test.mjs
+73 passed, 0 failed
+
+node --check prototype/desktop/direction-snapshot.mjs
+node --check prototype/desktop/direction-snapshot.test.mjs
+node --check prototype/desktop/agent-task-input.mjs
+node --check prototype/desktop/agent-task-input.test.mjs
+node --check prototype/desktop/agent-tasks.mjs
+node --check prototype/desktop/agent-tasks.test.mjs
+all exit 0
+
+git diff --cached --check
+exit 0, no output
+```
+
+### Known deferred
+
+- The current GitHub package dependency audit remains incomplete until Task 13 performs the explicitly planned manifest/resource union. Task 7 does not modify package manifests and does not claim the current package closure is complete.
