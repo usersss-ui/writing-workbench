@@ -153,6 +153,14 @@ const papers = [
   },
 ]
 
+const userTagState = Object.freeze({
+  version: 1,
+  papers: Object.freeze({
+    "Paper-A": Object.freeze(["必读", "可作基线"]),
+    "Paper-C": Object.freeze(["隐私方向候选"]),
+  }),
+})
+
 function deepFreeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     Object.freeze(value)
@@ -213,6 +221,44 @@ test("searches bibliographic fields, schema-driven facets, and source terms", ()
   for (const [query, expected] of cases) {
     assert.deepEqual(filterLibrary(papers, { query, facetSchema }).map((paper) => paper.paper_id), expected)
   }
+})
+
+test("searches personal tags through a separate state and reports a user-tag hit", () => {
+  assert.deepEqual(matchPaperQuery(papers[0], "可作基线", facetSchema, userTagState.papers["Paper-A"]), {
+    matched: true,
+    hits: [{ field: "我的标签", snippet: "可作基线" }],
+  })
+  assert.deepEqual(
+    filterLibrary(papers, { query: "隐私方向候选", facetSchema }, {}, userTagState).map((paper) => paper.paper_id),
+    ["Paper-C"],
+  )
+  assert.match(searchableText(papers[0], facetSchema, userTagState.papers["Paper-A"]), /可作基线/u)
+})
+
+test("personal tags never become formal facet values or facet filters", () => {
+  const tagged = { ...papers[0], user_tags: ["伪造正式分面"] }
+  assert.deepEqual(facetValues(tagged, "user_tags"), [])
+  assert.deepEqual(
+    filterLibrary([tagged], { facets: { "research.domain": ["可作基线"] } }, {}, userTagState),
+    [],
+  )
+  assert.equal(matchPaperQuery(tagged, "伪造正式分面", facetSchema).matched, false)
+})
+
+test("buildLibraryViewState carries personal-tag hits without mutating either state", () => {
+  const frozenTags = deepFreeze(structuredClone(userTagState))
+  const frozenWorkspace = deepFreeze({ shelf: {}, personalReading: {}, selectedPaperId: "Paper-A" })
+  const view = buildLibraryViewState({
+    papers,
+    filters: { query: "必读" },
+    facetSchema,
+    workspaceState: frozenWorkspace,
+    userTagState: frozenTags,
+  })
+
+  assert.deepEqual(view.rows.map((row) => row.paper.paper_id), ["Paper-A"])
+  assert.deepEqual(view.rows[0].hits, [{ field: "我的标签", snippet: "必读" }])
+  assert.deepEqual(frozenTags, userTagState)
 })
 
 test("searches a real index record's original title when translated titles are absent", () => {

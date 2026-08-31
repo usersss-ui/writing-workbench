@@ -246,11 +246,17 @@ function defaultComparator(shelf) {
   }
 }
 
-export function searchableText(paper, facetSchema) {
+function userTagsForPaper(userTagState, paperId) {
+  const labels = userTagState?.papers?.[paperId]
+  return Array.isArray(labels) ? labels.filter((label) => typeof label === "string") : []
+}
+
+export function searchableText(paper, facetSchema, userTags = []) {
   const values = [
     ...SEARCH_FIELDS.flatMap((field) => fieldValues(paper, field)),
     ...schemaGroups(facetSchema).flatMap((group) => facetValues(paper, group.path)),
     ...(Array.isArray(paper?.source_terms) ? paper.source_terms.filter((value) => typeof value === "string") : []),
+    ...(Array.isArray(userTags) ? userTags.filter((value) => typeof value === "string") : []),
   ]
   return values
     .map(normalizeText)
@@ -258,7 +264,7 @@ export function searchableText(paper, facetSchema) {
     .join(" ")
 }
 
-export function matchPaperQuery(paper, query, facetSchema) {
+export function matchPaperQuery(paper, query, facetSchema, userTags = []) {
   const normalizedQuery = normalizeText(query)
   if (!normalizedQuery) return { matched: true, hits: [] }
 
@@ -272,6 +278,7 @@ export function matchPaperQuery(paper, query, facetSchema) {
     })),
     ...schemaGroups(facetSchema).map((group) => ({ label: group.label, values: facetValues(paper, group.path) })),
     { label: "原文术语", values: Array.isArray(paper?.source_terms) ? paper.source_terms.filter((value) => typeof value === "string") : [] },
+    { label: "我的标签", values: Array.isArray(userTags) ? userTags.filter((value) => typeof value === "string") : [] },
   ]
   for (const field of fields) {
     for (const rawValue of field.values) {
@@ -287,7 +294,7 @@ export function matchPaperQuery(paper, query, facetSchema) {
   return { matched: hits.length > 0, hits }
 }
 
-export function filterLibrary(papers, filters = {}, workspaceState = {}) {
+export function filterLibrary(papers, filters = {}, workspaceState = {}, userTagState = {}) {
   const source = Array.isArray(papers) ? papers : []
   const shelf = workspaceState?.shelf ?? {}
   const personalReading = workspaceState?.personalReading ?? {}
@@ -300,7 +307,8 @@ export function filterLibrary(papers, filters = {}, workspaceState = {}) {
   const shelfRoles = selectedValues(filters, "shelfRoles")
 
   return source.filter((paper) => {
-    if (!matchPaperQuery(paper, filters?.query ?? "", filters?.facetSchema).matched) return false
+    const userTags = userTagsForPaper(userTagState, paper?.paper_id)
+    if (!matchPaperQuery(paper, filters?.query ?? "", filters?.facetSchema, userTags).matched) return false
     if (!matchFacetFilters(paper, facets)) return false
     if (!matchesAxis(recordTypes, [paper?.record_type])) return false
     if (!matchesAxis(personalReadingMarkers, [personalMarkerFor(paper, personalReading)])) return false
@@ -377,7 +385,9 @@ export function translateState(field, value) {
   return STATE_TRANSLATIONS[field]?.[value] ?? "状态待确认"
 }
 
-export function buildLibraryViewState({ papers = [], filters = {}, facetSchema, sortMode = "default", workspaceState = {} } = {}) {
+export function buildLibraryViewState({
+  papers = [], filters = {}, facetSchema, sortMode = "default", workspaceState = {}, userTagState = {},
+} = {}) {
   const allPapers = Array.isArray(papers) ? papers : []
   const shelf = workspaceState?.shelf ?? {}
   const personalReading = workspaceState?.personalReading ?? {}
@@ -385,11 +395,16 @@ export function buildLibraryViewState({ papers = [], filters = {}, facetSchema, 
   const filtersWithSchema = facetSchema === undefined || filters?.facetSchema === facetSchema
     ? filters
     : { ...filters, facetSchema }
-  const filtered = filterLibrary(allPapers, filtersWithSchema, workspaceState)
+  const filtered = filterLibrary(allPapers, filtersWithSchema, workspaceState, userTagState)
   const visible = sortLibrary(filtered, sortMode, shelf)
   const rows = visible.map((paper) => ({
     paper,
-    hits: matchPaperQuery(paper, filters?.query ?? "", queryFacetSchema).hits,
+    hits: matchPaperQuery(
+      paper,
+      filters?.query ?? "",
+      queryFacetSchema,
+      userTagsForPaper(userTagState, paper.paper_id),
+    ).hits,
     personalReadingMarker: personalMarkerFor(paper, personalReading),
     shelfRoles: [...shelfRolesFor(paper, shelf)],
     availabilitySummary: summarizeAvailability(paper),
