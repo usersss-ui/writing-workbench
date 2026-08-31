@@ -525,6 +525,83 @@ test("重试时 raw current 等于 pending snapshot 不会写出自环回退", a
   assert.equal(store.append(pendingSnapshot), true)
 })
 
+test("重试 pending 只采用已提交 raw current 作为回退以避免跨 pending 成环", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const previous = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:57:00.000Z", snapshotNonce: "6666666666666666",
+  })
+  const pendingA = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:58:00.000Z", snapshotNonce: "7777777777777777",
+  })
+  const pendingC = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T11:59:00.000Z", snapshotNonce: "8888888888888888",
+  })
+  const currentKey = `${module.TASK_INPUT_STORAGE_KEY}.current`
+  const pendingAKey = `${module.TASK_INPUT_STORAGE_KEY}.pending.${pendingA.snapshot_id}`
+  const pendingCKey = `${module.TASK_INPUT_STORAGE_KEY}.pending.${pendingC.snapshot_id}`
+  const committedAKey = `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${pendingA.snapshot_id}`
+  const committedCKey = `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${pendingC.snapshot_id}`
+
+  assert.equal(store.append(previous), true)
+  storage.failOnce("setItem", committedAKey, "before")
+  assert.equal(store.append(pendingA), false)
+  storage.failOnce("setItem", committedCKey, "before")
+  assert.equal(store.append(pendingC), false)
+  assert.equal(storage.raw(currentKey), pendingC.snapshot_id)
+  assert.equal(JSON.parse(storage.raw(pendingAKey)).previous_current_id, previous.snapshot_id)
+  assert.equal(JSON.parse(storage.raw(pendingCKey)).previous_current_id, previous.snapshot_id)
+
+  storage.failOnce("setItem", committedAKey, "before")
+  assert.equal(store.append(pendingA), false)
+  assert.equal(store.readCurrent().snapshot_id, previous.snapshot_id)
+  assert.equal(module.createTaskInputSnapshotStore(storage).readCurrent().snapshot_id, previous.snapshot_id)
+  assert.equal(JSON.parse(storage.raw(pendingAKey)).previous_current_id, previous.snapshot_id)
+  assert.equal(JSON.parse(storage.raw(pendingCKey)).previous_current_id, previous.snapshot_id)
+
+  assert.equal(store.append(pendingA), true)
+  assert.equal(store.readCurrent().snapshot_id, pendingA.snapshot_id)
+  assert.equal(store.append(pendingC), true)
+  assert.equal(store.readCurrent().snapshot_id, pendingC.snapshot_id)
+  assert.deepEqual(store.readAll().map((snapshot) => snapshot.snapshot_id), [
+    previous.snapshot_id,
+    pendingA.snapshot_id,
+    pendingC.snapshot_id,
+  ])
+  assert.equal(storage.raw(pendingAKey), undefined)
+  assert.equal(storage.raw(pendingCKey), undefined)
+})
+
+test("raw current 指向未知或损坏 pending 时 append 保持存储不变并 fail closed", async () => {
+  const module = await import("./agent-task-input.mjs")
+
+  for (const scenario of ["unknown", "damaged_pending"]) {
+    const storage = adversarialStorage()
+    const seedStore = module.createTaskInputSnapshotStore(storage)
+    const previous = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T12:00:00.000Z", snapshotNonce: "9999999999999999",
+    })
+    const candidate = module.createTaskInputSnapshot(readyPreview(module), {
+      createdAt: "2026-08-29T12:01:00.000Z", snapshotNonce: "0000000000000000",
+    })
+    const currentKey = `${module.TASK_INPUT_STORAGE_KEY}.current`
+    assert.equal(seedStore.append(previous), true)
+    if (scenario === "unknown") {
+      storage.setItem(currentKey, "UNKNOWN-PENDING-ID")
+    } else {
+      storage.setItem(currentKey, candidate.snapshot_id)
+      storage.setItem(`${module.TASK_INPUT_STORAGE_KEY}.pending.${candidate.snapshot_id}`, "{broken")
+    }
+    const before = new Map(storage.values)
+    const store = module.createTaskInputSnapshotStore(storage)
+
+    assert.equal(store.append(candidate), false, scenario)
+    assert.deepEqual(storage.values, before, scenario)
+    assert.equal(store.readCurrent(), null, scenario)
+  }
+})
+
 test("损坏 root、current 或独立 snapshot 会使完整事务失效并拒绝覆盖", async () => {
   const module = await import("./agent-task-input.mjs")
   const snapshot = module.createTaskInputSnapshot(readyPreview(module), {

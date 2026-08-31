@@ -459,9 +459,12 @@ export function createTaskInputSnapshotStore(storage) {
       if (pendingRecord === false) return false
       const currentRead = getStorageItem(storage, CURRENT_KEY)
       if (!currentRead.known) return false
-      const previousCurrentId = currentRead.value === snapshot.snapshot_id
-        ? inspected.state.current_snapshot_id
-        : currentRead.value ?? inspected.state.current_snapshot_id
+      const rawCurrentIsCommitted = inspected.state.snapshots.some(
+        (item) => item.snapshot_id === currentRead.value,
+      )
+      const previousCurrentId = rawCurrentIsCommitted
+        ? currentRead.value
+        : inspected.state.current_snapshot_id
       if (previousCurrentId === snapshot.snapshot_id) return false
       const refreshedPending = {
         version: 1,
