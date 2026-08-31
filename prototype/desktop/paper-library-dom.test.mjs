@@ -4178,7 +4178,8 @@ test("Task 11 RED2 library candidate recovery keeps browsing available and reloa
   assert.equal(indexReads, 2)
   assert.deepEqual(candidateStore.marked, [candidate.paperId])
   assert.equal(capabilityReads, 2, "successful recovery must re-read capabilities")
-  assert.equal(ui.recoveryBanner.hidden, true, "cleared recovery must remove the stale failure banner")
+  assert.equal(ui.recoveryBanner.hidden, false, "the current session keeps a neutral recovery result")
+  assert.match(ui.recoveryMessage.textContent, /元数据归档完成/u)
   assert.equal(ui.recoveryAction.hidden, true)
   assert.equal(ui.addNote.disabled, false, "normal server capabilities must restore eligible writes")
   const rebuildCall = calls.find(([url]) => url === "/api/v1/archive/rebuild")
@@ -4187,6 +4188,98 @@ test("Task 11 RED2 library candidate recovery keeps browsing available and reloa
     archive_source_id: "main_papers",
     paper_id: "Wang23-DIO",
     openalex_id: candidate.paperId,
+  })
+})
+
+test("Task 11 RED4 library treats exact rebuild 200 as final when index or candidate reconciliation fails", async (t) => {
+  const { createLibraryController } = await import("./library.mjs")
+  const fixedNotice = "恢复已完成，但新索引或本地候选状态尚未核对。"
+  const scenarios = [
+    { name: "fresh index fails", indexFails: true, transition: null },
+    {
+      name: "candidate persistence is rejected",
+      indexFails: false,
+      transition: () => ({ changed: false, persisted: false, reason: "persistence_failed" }),
+    },
+    {
+      name: "candidate persistence throws",
+      indexFails: false,
+      transition: () => { throw new Error("local storage unavailable") },
+    },
+  ]
+
+  for (const scenario of scenarios) await t.test(scenario.name, async () => {
+    const ui = createNoteImportControllerDocument()
+    const candidate = task11Candidate()
+    const candidateStore = task11CandidateStore([candidate], scenario.transition)
+    let capabilityReads = 0
+    let indexReads = 0
+    let rebuildCalls = 0
+    const recoveryCapabilities = finalLocalCapabilities({
+      note_import: false,
+      candidate_archive: false,
+      archive_rebuild: true,
+      archive_source_id: "main_papers",
+      recovery: {
+        required: true,
+        kind: "candidate_archive",
+        reason_code: "ARCHIVE_REBUILD_FAILED",
+        archive_source_id: "main_papers",
+        paper_id: "Wang23-DIO",
+        openalex_id: candidate.paperId,
+      },
+    })
+    const controller = createLibraryController({
+      document: ui.document,
+      storage: memoryStorage(),
+      candidateStore,
+      fetchImpl: async (url) => {
+        if (url === "/api/v1/capabilities") {
+          capabilityReads += 1
+          return localJsonResponse(capabilityReads === 1 ? recoveryCapabilities : finalLocalCapabilities())
+        }
+        if (url === "/api/v1/archive/rebuild") {
+          rebuildCalls += 1
+          return localJsonResponse({
+            status: "recovered",
+            paper_id: "Wang23-DIO",
+            rebuild_status: "complete",
+            paper_count: 1,
+          })
+        }
+        if (url.endsWith("paper-index.json")) {
+          indexReads += 1
+          if (indexReads === 2 && scenario.indexFails) throw new Error("invalid fresh index")
+          return localJsonResponse(indexReads === 1
+            ? v3Index()
+            : v3Index([normalizedPaper({
+                paper_id: "Wang23-DIO",
+                slug: "wang23-dio",
+                doi_or_url: "https://doi.org/10.1109/ACCESS.2023.3327199",
+              })]))
+        }
+        throw new Error(`unexpected ${url}`)
+      },
+    })
+
+    assert.deepEqual(await controller.start(), { ok: true, paperCount: 1 })
+    const oldRebuild = ui.recoveryAction
+    oldRebuild.click()
+    await settleControllerEvents()
+
+    assert.equal(rebuildCalls, 1)
+    assert.equal(capabilityReads, 2, "post-200 verification failure must still refresh capabilities")
+    assert.equal(candidateStore.read().candidates[0].stage, "confirmed_for_archive")
+    assert.equal(ui.recoveryBanner.hidden, false)
+    assert.equal(ui.recoveryMessage.textContent, fixedNotice)
+    assert.equal(ui.recoveryTuple.hidden, true)
+    assert.equal(ui.recoveryAction.hidden, true)
+    assert.doesNotMatch(ui.recoveryBanner.textContent, /恢复未完成|正在重建/u)
+    assert.equal(ui.addNote.disabled, false, "normal capabilities must re-enable eligible writes")
+    assert.match(ui.count.textContent, /显示 1 篇，共 1 篇/u, "last-good browsing remains available")
+    oldRebuild.click()
+    await settleControllerEvents()
+    assert.equal(rebuildCalls, 1, "the consumed recovery tuple must never be retried")
   })
 })
 
@@ -4334,6 +4427,8 @@ test("Task 11 RED2 recovery can finish truthfully when no browser candidate exis
   assert.equal(indexReads, 2)
   assert.deepEqual(candidateStore.marked, [])
   assert.equal(capabilityReads, 2)
-  assert.equal(ui.recoveryBanner.hidden, true)
+  assert.equal(ui.recoveryBanner.hidden, false)
+  assert.match(ui.recoveryMessage.textContent, /未找到本地候选|未更改本地候选/u)
   assert.doesNotMatch(ui.recoveryMessage.textContent, /元数据归档完成/u)
+  assert.equal(ui.recoveryAction.hidden, true)
 })

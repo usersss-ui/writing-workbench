@@ -117,7 +117,7 @@ function task11Candidate(overrides = {}) {
   }
 }
 
-function task11CandidateStore(candidates = [task11Candidate()]) {
+function task11CandidateStore(candidates = [task11Candidate()], transition = null) {
   let state = { version: 1, candidates: structuredClone(candidates) }
   const marked = []
   return {
@@ -126,10 +126,19 @@ function task11CandidateStore(candidates = [task11Candidate()]) {
     reload: () => ({ status: "ready", state: structuredClone(state) }),
     getLoadStatus: () => "ready",
     confirm() { throw new Error("unexpected confirm") },
-    moveToPending() { throw new Error("unexpected move") },
+    moveToPending(paperId) {
+      state = {
+        version: 1,
+        candidates: state.candidates.map((candidate) => (
+          candidate.paperId === paperId ? { ...candidate, stage: "pending_screening" } : candidate
+        )),
+      }
+      return { changed: true, persisted: true, reason: null, state: structuredClone(state) }
+    },
     remove() { throw new Error("unexpected remove") },
     markMetadataArchived(openAlexId) {
       marked.push(openAlexId)
+      if (transition) return transition(openAlexId, structuredClone(state))
       state = {
         version: 1,
         candidates: state.candidates.map((candidate) => (
@@ -348,7 +357,6 @@ test("Task 11 RED2 confirmed card requires an explicit valid local ID and archiv
   const input = findCandidateControl(root, "archivePaperId", "W4387886124")
   const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
   const help = findCandidateControl(root, "archivePaperIdHelp", "W4387886124")
-  const status = findCandidateControl(root, "archiveStatus", "W4387886124")
   assert.ok(input)
   assert.equal(input.value, "", "local ID must never be inferred or prefilled")
   assert.match(findDescendant(root.elements.get("#candidate-queue-list"), (node) => node.tagName === "LABEL")?.textContent ?? "", /本地论文 ID/u)
@@ -369,7 +377,10 @@ test("Task 11 RED2 confirmed card requires an explicit valid local ID and archiv
   assert.match(confirmations[0], /Wang23-DIO/u)
   assert.match(confirmations[0], /main_papers/u)
   assert.match(confirmations[0], /仅归档书目信息，不含 PDF\/OCR\/证据核验/u)
-  assert.match(status.textContent, /元数据归档完成/u)
+  const currentCard = findDescendant(root.elements.get("#candidate-queue-list"), (node) => node.dataset?.queuePaper === "W4387886124")
+  assert.match(currentCard.textContent, /元数据已归档/u)
+  assert.doesNotMatch(currentCard.textContent, /待归档|移回待筛选/u)
+  assert.equal(findDescendant(currentCard, (node) => node.dataset?.archiveCandidate === "W4387886124"), null)
   assert.deepEqual(Object.keys(store.read().candidates[0]).sort(), [
     "abstract", "authors", "citations", "doi", "isOpenAccess", "landingPageUrl", "openAccessUrl",
     "paperId", "source", "stage", "title", "topics", "year",
@@ -401,15 +412,60 @@ test("Task 11 RED2 a 409 keeps the typed local ID and confirmed candidate withou
   await controller.start()
   const input = findCandidateControl(root, "archivePaperId", "W4387886124")
   const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
-  const status = findCandidateControl(root, "archiveStatus", "W4387886124")
+  const oldStatus = findCandidateControl(root, "archiveStatus", "W4387886124")
   input.value = "Wang23-DIO"
   input.dispatch("input")
   await archive.dispatch("click")
-  assert.equal(input.value, "Wang23-DIO")
+  const currentInput = findCandidateControl(root, "archivePaperId", "W4387886124")
+  const currentStatus = findCandidateControl(root, "archiveStatus", "W4387886124")
+  assert.notEqual(currentStatus, oldStatus, "assert the rerendered current tree, not a detached status node")
+  assert.equal(currentInput.value, "Wang23-DIO")
   assert.equal(store.read().candidates[0].stage, "confirmed_for_archive")
   assert.deepEqual(store.marked, [])
-  assert.match(status.textContent, /正在执行|稍后|冲突/u)
-  assert.doesNotMatch(root.elements.get("#candidate-queue-panel").textContent + status.textContent, /Users|alice|private|source_path/iu)
+  assert.match(currentStatus.textContent, /正在执行|稍后|冲突/u)
+  assert.doesNotMatch(root.elements.get("#candidate-queue-panel").textContent, /Users|alice|private|source_path/iu)
+})
+
+test("Task 11 RED4 archive rechecks the live confirmed candidate after asynchronous confirmation", async () => {
+  const root = keywordRoot()
+  const store = task11CandidateStore()
+  let resolveConfirmation
+  let archivePosts = 0
+  const controller = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    prepareAccess() {},
+    searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return task11Response(task11Capabilities())
+      if (url === "/api/v1/archive/candidates") {
+        archivePosts += 1
+        throw new Error("stale candidate must not be posted")
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+    confirmArchive: () => new Promise((resolve) => { resolveConfirmation = resolve }),
+  })
+  await controller.start()
+  const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+  const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+  input.value = "Wang23-DIO"
+  input.dispatch("input")
+  const pendingArchive = archive.dispatch("click")
+  await Promise.resolve()
+
+  const busyCard = findDescendant(root.elements.get("#candidate-queue-list"), (node) => node.dataset?.queuePaper === "W4387886124")
+  const busyInput = findDescendant(busyCard, (node) => node.dataset?.archivePaperId === "W4387886124")
+  assert.equal(busyInput.disabled, true, "candidate operations are locked while confirmation is pending")
+  store.moveToPending("W4387886124")
+  resolveConfirmation(true)
+  await pendingArchive
+
+  assert.equal(archivePosts, 0)
+  assert.equal(store.read().candidates[0].stage, "pending_screening")
+  const currentCard = findDescendant(root.elements.get("#candidate-queue-list"), (node) => node.dataset?.queuePaper === "W4387886124")
+  assert.match(currentCard.textContent, /待筛选/u)
+  assert.equal(findDescendant(currentCard, (node) => node.dataset?.archiveCandidate === "W4387886124"), null)
 })
 
 test("Task 11 RED3 archive 500 refreshes capabilities into fixed manual recovery and disables writes", async () => {
@@ -470,6 +526,151 @@ test("Task 11 RED3 archive 500 refreshes capabilities into fixed manual recovery
   assert.equal(rebuiltArchive.disabled, true)
   assert.equal(store.read().candidates[0].stage, "confirmed_for_archive")
   assert.doesNotMatch(panel.textContent + oldStatus.textContent, /Users|alice|private|source_path|raw_body|do not render/iu)
+})
+
+test("Task 11 RED4 discovery treats exact rebuild 200 as final when index or candidate reconciliation fails", async (t) => {
+  const fixedNotice = "恢复已完成，但新索引或本地候选状态尚未核对。"
+  const scenarios = [
+    {
+      name: "fresh index fails",
+      loadIndex: async () => { throw new Error("invalid fresh index") },
+      transition: null,
+    },
+    {
+      name: "candidate persistence is rejected",
+      loadIndex: async () => ({ papers: [{ paper_id: "Wang23-DIO", doi_or_url: "10.1109/access.2023.3327199" }] }),
+      transition: () => ({ changed: false, persisted: false, reason: "persistence_failed" }),
+    },
+    {
+      name: "candidate persistence throws",
+      loadIndex: async () => ({ papers: [{ paper_id: "Wang23-DIO", doi_or_url: "10.1109/access.2023.3327199" }] }),
+      transition: () => { throw new Error("local storage unavailable") },
+    },
+  ]
+
+  for (const scenario of scenarios) await t.test(scenario.name, async () => {
+    const root = keywordRoot()
+    const store = task11CandidateStore([task11Candidate()], scenario.transition)
+    let capabilityReads = 0
+    let rebuildCalls = 0
+    const recovery = task11Capabilities({
+      note_import: false,
+      candidate_archive: false,
+      recovery: {
+        required: true,
+        kind: "candidate_archive",
+        reason_code: "ARCHIVE_REBUILD_FAILED",
+        archive_source_id: "main_papers",
+        paper_id: "Wang23-DIO",
+        openalex_id: "W4387886124",
+      },
+    })
+    const controller = createKeywordDiscoveryController({
+      root,
+      candidateStore: store,
+      prepareAccess() {},
+      searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+      fetchImpl: async (url) => {
+        if (url === "/api/v1/capabilities") {
+          capabilityReads += 1
+          return task11Response(capabilityReads === 1 ? recovery : task11Capabilities())
+        }
+        if (url === "/api/v1/archive/rebuild") {
+          rebuildCalls += 1
+          return task11Response({
+            status: "recovered",
+            paper_id: "Wang23-DIO",
+            rebuild_status: "complete",
+            paper_count: 1,
+          })
+        }
+        throw new Error(`unexpected ${url}`)
+      },
+      loadIndex: scenario.loadIndex,
+      confirmArchive: () => false,
+    })
+    await controller.start()
+    const panel = root.elements.get("#candidate-queue-panel")
+    const banner = findDescendant(panel, (node) => node.dataset?.archiveRecoveryBanner === "")
+    const oldRebuild = findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild")
+    assert.ok(oldRebuild)
+    await oldRebuild.dispatch("click")
+
+    assert.equal(rebuildCalls, 1)
+    assert.equal(capabilityReads, 2, "post-200 verification failure must still refresh capabilities")
+    assert.equal(store.read().candidates[0].stage, "confirmed_for_archive")
+    assert.equal(banner.hidden, false)
+    assert.match(banner.textContent, new RegExp(fixedNotice, "u"))
+    assert.doesNotMatch(banner.textContent, /恢复未完成|正在重建/u)
+    assert.equal(findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild"), null)
+
+    const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+    const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+    input.value = "Wang23-DIO"
+    input.dispatch("input")
+    assert.equal(archive.disabled, false, "normal capabilities must re-enable eligible writes")
+    await oldRebuild.dispatch("click")
+    assert.equal(rebuildCalls, 1, "the consumed recovery tuple must never be retried")
+  })
+})
+
+test("Task 11 recovery keeps a neutral visible result when no browser candidate exists", async () => {
+  const root = keywordRoot()
+  const store = task11CandidateStore([])
+  let capabilityReads = 0
+  let rebuildCalls = 0
+  const recovery = task11Capabilities({
+    note_import: false,
+    candidate_archive: false,
+    recovery: {
+      required: true,
+      kind: "candidate_archive",
+      reason_code: "ARCHIVE_REBUILD_FAILED",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+  })
+  const controller = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    prepareAccess() {},
+    searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") {
+        capabilityReads += 1
+        return task11Response(capabilityReads === 1 ? recovery : task11Capabilities())
+      }
+      if (url === "/api/v1/archive/rebuild") {
+        rebuildCalls += 1
+        return task11Response({
+          status: "recovered",
+          paper_id: "Wang23-DIO",
+          rebuild_status: "complete",
+          paper_count: 1,
+        })
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+    loadIndex: async () => ({ papers: [] }),
+    confirmArchive: () => false,
+  })
+  await controller.start()
+  const panel = root.elements.get("#candidate-queue-panel")
+  const banner = findDescendant(panel, (node) => node.dataset?.archiveRecoveryBanner === "")
+  const rebuild = findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild")
+  assert.ok(rebuild)
+  await rebuild.dispatch("click")
+
+  assert.equal(rebuildCalls, 1)
+  assert.equal(capabilityReads, 2)
+  assert.deepEqual(store.marked, [])
+  assert.equal(banner.hidden, false)
+  assert.match(banner.textContent, /未找到本地候选|未更改本地候选/u)
+  assert.doesNotMatch(banner.textContent, /元数据归档完成/u)
+  assert.equal(findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild"), null)
+  await rebuild.dispatch("click")
+  assert.equal(rebuildCalls, 1, "the consumed no-candidate tuple must not be retried")
 })
 
 test("Task 11 RED2 capability matrices show rebuild only for candidate recovery and fixed manual blocking banners", async () => {
@@ -609,11 +810,12 @@ test("Task 11 RED2 failed immediate rebuild refreshes recovery, and explicit rec
   const banner = findDescendant(root.elements.get("#candidate-queue-panel"), (node) => node.dataset?.archiveRecoveryBanner === "")
   const rebuild = findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild")
   assert.ok(rebuild)
-  assert.equal(archive.disabled, true)
+  assert.equal(findCandidateControl(root, "archiveCandidate", "W4387886124").disabled, true)
   await rebuild.dispatch("click")
   assert.equal(indexLoads, 1)
   assert.deepEqual(store.marked, ["W4387886124"])
   assert.equal(capabilityReads, 3, "successful recovery must re-read capabilities")
-  assert.equal(banner.hidden, true, "cleared server recovery must remove the stale failure banner")
+  assert.equal(banner.hidden, false, "the current session keeps a neutral recovery result")
+  assert.match(banner.textContent, /元数据归档完成/u)
   assert.equal(findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild"), null)
 })

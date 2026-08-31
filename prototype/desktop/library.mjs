@@ -43,6 +43,7 @@ const ARCHIVE_CANDIDATE_FIELDS = Object.freeze([
   "paperId", "doi", "title", "authors", "year", "source", "citations", "isOpenAccess",
   "openAccessUrl", "landingPageUrl", "topics", "abstract", "stage",
 ])
+const ARCHIVE_RECONCILIATION_PENDING = "恢复已完成，但新索引或本地候选状态尚未核对。"
 const OPENALEX_ID = /^W[1-9]\d*$/u
 const DOI_IDENTITY = /^10\.\d{4,9}\/[\-._;()/:a-z0-9]+$/u
 const ARCHIVE_CREDENTIAL_QUERY_KEYS = new Set([
@@ -1945,12 +1946,18 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   let indexRefreshFailed = false
   let archiveRecoveryBusy = false
   let archiveRecoveryResolved = false
+  let archiveRecoveryResolvedKey = null
   let archiveRecoveryStatus = ""
   const indexLoader = createRetryableLoader(() => loadPaperIndex(fetchImpl))
   const privatePathCopyGuard = createPrivatePathCopyGuard(() => {
     const status = elements().inspectorStatus
     if (status) status.textContent = ""
   })
+  const archiveRecoveryKey = (recovery) => [
+    recovery?.archive_source_id,
+    recovery?.paper_id,
+    recovery?.openalex_id,
+  ].join("\u0000")
 
   function elements() {
     return {
@@ -2373,7 +2380,20 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   function renderArchiveRecovery(ui) {
     const recovery = localCapabilities?.recovery
     const required = recovery?.required === true
-    if (ui.recoveryBanner) ui.recoveryBanner.hidden = !required
+    const completedCurrentRecovery = required
+      && recovery.kind === "candidate_archive"
+      && archiveRecoveryKey(recovery) === archiveRecoveryResolvedKey
+    const showSettledResult = archiveRecoveryResolved
+      && archiveRecoveryStatus.length > 0
+      && (!required || completedCurrentRecovery)
+    if (ui.recoveryBanner) ui.recoveryBanner.hidden = !required && !showSettledResult
+    if (showSettledResult) {
+      if (ui.recoveryMessage) ui.recoveryMessage.textContent = archiveRecoveryStatus
+      if (ui.recoveryTuple) { ui.recoveryTuple.textContent = ""; ui.recoveryTuple.hidden = true }
+      if (ui.recoveryStatus) ui.recoveryStatus.textContent = ""
+      if (ui.archiveRebuild) { ui.archiveRebuild.hidden = true; ui.archiveRebuild.disabled = true }
+      return
+    }
     if (!required) {
       if (ui.recoveryMessage) ui.recoveryMessage.textContent = ""
       if (ui.recoveryTuple) { ui.recoveryTuple.textContent = ""; ui.recoveryTuple.hidden = true }
@@ -2388,8 +2408,8 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
         ui.recoveryTuple.textContent = `归档来源 ${recovery.archive_source_id} · 本地论文 ID ${recovery.paper_id} · OpenAlex ${recovery.openalex_id}`
       }
       if (ui.archiveRebuild) {
-        ui.archiveRebuild.hidden = archiveRecoveryResolved
-        ui.archiveRebuild.disabled = archiveRecoveryBusy || archiveRecoveryResolved || localCapabilities.archive_rebuild !== true
+        ui.archiveRebuild.hidden = false
+        ui.archiveRebuild.disabled = archiveRecoveryBusy || localCapabilities.archive_rebuild !== true
       }
     } else {
       if (ui.recoveryMessage) {
@@ -2732,53 +2752,72 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     const recovery = localCapabilities?.recovery
     if (
       archiveRecoveryBusy
-      || archiveRecoveryResolved
       || recovery?.required !== true
       || recovery.kind !== "candidate_archive"
       || localCapabilities?.archive_rebuild !== true
+      || archiveRecoveryKey(recovery) === archiveRecoveryResolvedKey
     ) return false
     archiveRecoveryBusy = true
     archiveRecoveryStatus = "正在重建论文库索引…"
     renderArchiveRecovery(elements())
     try {
-      const result = await requestArchiveRebuild({
-        fetchImpl,
-        archiveSourceId: recovery.archive_source_id,
-        paperId: recovery.paper_id,
-        openAlexId: recovery.openalex_id,
-      })
-      indexLoader.invalidate()
-      const outcome = await indexLoader.run()
-      loadState = indexLoader.getState()
-      if (!outcome.ok) throw new Error("论文库索引不可用")
-      const index = outcome.value
-      papers = index.papers
-      facetSchema = index.facet_schema
-      warningCount = index.warning_count
-      const persistedSelection = store.read().selectedPaperId
-      if (!paperById(papers, persistedSelection) && papers.length > 0) store.setSelectedPaper(papers[0].paper_id)
-      const marked = candidateStore
-        ? markCandidateArchivedAfterIndexRefresh({
-            candidateStore,
-            paperIndex: index,
-            localPaperId: result.paper_id,
-            openAlexId: recovery.openalex_id,
-          })
-        : false
-      localCapabilities = await loadLocalLibraryCapabilities(fetchImpl).catch(() => null)
-      archiveRecoveryResolved = localCapabilities?.recovery?.required === false
-      archiveRecoveryStatus = localCapabilities?.recovery?.required === true
-        ? "重建请求已完成，但本地服务仍报告需要恢复。"
+      let result
+      try {
+        result = await requestArchiveRebuild({
+          fetchImpl,
+          archiveSourceId: recovery.archive_source_id,
+          paperId: recovery.paper_id,
+          openAlexId: recovery.openalex_id,
+        })
+      } catch (error) {
+        archiveRecoveryStatus = error instanceof LocalLibraryApiError
+          ? error.message
+          : "论文库恢复未完成，请稍后重试。"
+        return false
+      }
+      archiveRecoveryResolved = true
+      archiveRecoveryResolvedKey = archiveRecoveryKey(recovery)
+      const previousLoadState = loadState
+      let marked = false
+      let hadConfirmedCandidate = false
+      let reconciliationFailed = false
+      let refreshedIndex = false
+      try {
+        hadConfirmedCandidate = candidateStore
+          ? confirmedCandidate(candidateStore, recovery.openalex_id) !== null
+          : false
+        indexLoader.invalidate()
+        const outcome = await indexLoader.run()
+        loadState = indexLoader.getState()
+        if (!outcome.ok) throw new Error("论文库索引不可用")
+        refreshedIndex = true
+        const index = outcome.value
+        papers = index.papers
+        facetSchema = index.facet_schema
+        warningCount = index.warning_count
+        const persistedSelection = store.read().selectedPaperId
+        if (!paperById(papers, persistedSelection) && papers.length > 0) store.setSelectedPaper(papers[0].paper_id)
+        marked = candidateStore
+          ? markCandidateArchivedAfterIndexRefresh({
+              candidateStore,
+              paperIndex: index,
+              localPaperId: result.paper_id,
+              openAlexId: recovery.openalex_id,
+            })
+          : false
+        reconciliationFailed = hadConfirmedCandidate && !marked
+      } catch {
+        if (!refreshedIndex) loadState = previousLoadState
+        reconciliationFailed = true
+      }
+      archiveRecoveryStatus = reconciliationFailed
+        ? ARCHIVE_RECONCILIATION_PENDING
         : marked
-        ? "恢复完成，元数据归档完成。"
-        : "恢复完成；未找到本地候选或严格身份不匹配，未更改本地候选状态。"
+          ? "恢复完成，元数据归档完成。"
+          : "恢复完成；未找到本地候选或严格身份不匹配，未更改本地候选状态。"
+      localCapabilities = await loadLocalLibraryCapabilities(fetchImpl).catch(() => null)
       render()
-      return archiveRecoveryResolved
-    } catch (error) {
-      archiveRecoveryStatus = error instanceof LocalLibraryApiError
-        ? error.message
-        : "论文库恢复未完成，请稍后重试。"
-      return false
+      return true
     } finally {
       archiveRecoveryBusy = false
       renderArchiveRecovery(elements())
@@ -3126,6 +3165,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     localCapabilities = capabilities
     archiveRecoveryBusy = false
     archiveRecoveryResolved = false
+    archiveRecoveryResolvedKey = null
     archiveRecoveryStatus = ""
     loadState = indexLoader.getState()
     if (outcome.ok) {
