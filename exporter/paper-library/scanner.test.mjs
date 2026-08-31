@@ -1,7 +1,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { constants } from "node:fs"
-import { appendFile, mkdtemp, mkdir, open as openFile, rename, symlink, writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { appendFile, link as linkFile, mkdtemp, mkdir, open as openFile, rename, stat, symlink, utimes, writeFile } from "node:fs/promises"
 import { dirname, join, win32 } from "node:path"
 import { tmpdir } from "node:os"
 import { classifyArtifact, scanPaperSources } from "./scanner.mjs"
@@ -13,6 +14,10 @@ async function put(root, relativePath, content = "fixture") {
   const target = join(root, relativePath)
   await mkdir(dirname(target), { recursive: true })
   await writeFile(target, content)
+  if (relativePath.endsWith("/metadata.yaml")) {
+    const digest = createHash("sha256").update(content).digest("hex")
+    await writeFile(join(dirname(target), ".metadata.commit"), `sha256:${digest}\n`)
+  }
   return target
 }
 
@@ -157,7 +162,7 @@ test("indexes an override-declared review container even without a PDF of its ow
 
 test("indexes one direct metadata-only package conservatively without treating metadata.yaml as an artifact", async () => {
   const root = await mkdtemp(join(tmpdir(), "paper-metadata-scan-"))
-  await put(root, "Candidate/metadata.yaml", archiveMetadata())
+  await put(root, "Wang23-DIO/metadata.yaml", archiveMetadata())
 
   const result = await scan(root)
   assert.equal(result.papers.length, 1)
@@ -180,7 +185,9 @@ test("indexes one direct metadata-only package conservatively without treating m
     facet_states: {},
   })
   assert.equal(Object.values(paper.artifacts).flat().some((item) => item.file_name === "metadata.yaml"), false)
-  assert.equal(result.audit.warnings.unrecognized_artifacts.includes("Candidate/metadata.yaml"), false)
+  assert.equal(Object.values(paper.artifacts).flat().some((item) => item.file_name === ".metadata.commit"), false)
+  assert.equal(result.audit.warnings.unrecognized_artifacts.includes("Wang23-DIO/metadata.yaml"), false)
+  assert.equal(result.audit.warnings.unrecognized_artifacts.includes("Wang23-DIO/.metadata.commit"), false)
   assert.deepEqual(result.audit.archive_identity_lookup, { "Wang23-DIO": "openalex:W4387886124" })
   for (const field of ["archive_source_id", "candidate_source", "openalex_id", "archive_identity"]) {
     assert.equal(Object.hasOwn(paper, field), false)
@@ -190,7 +197,7 @@ test("indexes one direct metadata-only package conservatively without treating m
 test("reads metadata.yaml with O_NOFOLLOW and blocks metadata beyond the fixed size limit", async () => {
   const { createPaperSourceScanner } = await import("./scanner.mjs")
   const root = await mkdtemp(join(tmpdir(), "paper-metadata-safe-read-"))
-  await put(root, "Candidate/metadata.yaml", archiveMetadata())
+  await put(root, "Wang23-DIO/metadata.yaml", archiveMetadata())
   let observedFlags = null
   const scanner = createPaperSourceScanner({
     metadataFileSystem: {
@@ -210,20 +217,46 @@ test("reads metadata.yaml with O_NOFOLLOW and blocks metadata beyond the fixed s
   }
 
   const exactRoot = await mkdtemp(join(tmpdir(), "paper-metadata-exact-limit-"))
-  await put(exactRoot, "Candidate/metadata.yaml", archiveMetadataAtBytes(8_000))
+  await put(exactRoot, "Wang23-DIO/metadata.yaml", archiveMetadataAtBytes(8_000))
   assert.equal((await scan(exactRoot)).papers.length, 1)
 
   const oversizedRoot = await mkdtemp(join(tmpdir(), "paper-metadata-oversized-"))
-  await put(oversizedRoot, "Candidate/metadata.yaml", `${archiveMetadata()}${"汉".repeat(2_700)}`)
+  await put(oversizedRoot, "Wang23-DIO/metadata.yaml", `${archiveMetadata()}${"汉".repeat(2_700)}`)
   const error = await rejectedScan(() => scan(oversizedRoot))
   assert.equal(error.message, "扫描存在阻塞问题：frontmatter 元数据冲突")
-  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Candidate:metadata.yaml"])
+  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
+})
+
+test("blocks a recovered metadata file with a second hard-link alias across a fresh scanner run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paper-metadata-hardlink-recovery-"))
+  const metadataPath = await put(root, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  await linkFile(metadataPath, join(root, ".candidate-recovery-metadata"))
+  assert.equal((await stat(metadataPath)).nlink, 2)
+
+  const error = await rejectedScan(() => scan(root))
+  assert.equal(error.message, "扫描存在阻塞问题：frontmatter 元数据冲突")
+  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
+})
+
+test("blocks metadata packages whose internal commit marker is missing or bound to different bytes", async () => {
+  const missingRoot = await mkdtemp(join(tmpdir(), "paper-metadata-missing-commit-"))
+  const missingPackage = join(missingRoot, "Wang23-DIO")
+  await mkdir(missingPackage, { recursive: true })
+  await writeFile(join(missingPackage, "metadata.yaml"), archiveMetadata())
+  const missingError = await rejectedScan(() => scan(missingRoot))
+  assert.deepEqual(missingError.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
+
+  const mismatchRoot = await mkdtemp(join(tmpdir(), "paper-metadata-mismatched-commit-"))
+  await put(mismatchRoot, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  await writeFile(join(mismatchRoot, "Wang23-DIO/.metadata.commit"), `sha256:${"0".repeat(64)}\n`)
+  const mismatchError = await rejectedScan(() => scan(mismatchRoot))
+  assert.deepEqual(mismatchError.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
 })
 
 test("fails closed when O_NOFOLLOW is unavailable or metadata bytes are invalid UTF-8", async () => {
   const { createPaperSourceScanner } = await import("./scanner.mjs")
   const noFollowRoot = await mkdtemp(join(tmpdir(), "paper-metadata-no-nofollow-"))
-  await put(noFollowRoot, "Candidate/metadata.yaml", archiveMetadata())
+  await put(noFollowRoot, "Wang23-DIO/metadata.yaml", archiveMetadata())
   let opened = false
   const scanner = createPaperSourceScanner({
     metadataFileSystem: {
@@ -239,44 +272,88 @@ test("fails closed when O_NOFOLLOW is unavailable or metadata bytes are invalid 
     overrides: { version: 1, papers: {} },
   }))
   assert.equal(opened, false)
-  assert.deepEqual(noFollowError.blocking?.metadata_conflicts, ["main_papers::Candidate:metadata.yaml"])
+  assert.deepEqual(noFollowError.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
 
   const invalidRoot = await mkdtemp(join(tmpdir(), "paper-metadata-invalid-utf8-"))
   const invalidBytes = Buffer.from(archiveMetadata(), "utf8")
   invalidBytes[invalidBytes.indexOf(Buffer.from("Distributed"))] = 0xff
-  await put(invalidRoot, "Candidate/metadata.yaml", invalidBytes)
+  await put(invalidRoot, "Wang23-DIO/metadata.yaml", invalidBytes)
   const invalidError = await rejectedScan(() => scan(invalidRoot))
-  assert.deepEqual(invalidError.blocking?.metadata_conflicts, ["main_papers::Candidate:metadata.yaml"])
+  assert.deepEqual(invalidError.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
+})
+
+test("rejects same-inode same-size metadata tampering even when mtime is restored", async () => {
+  const { createPaperSourceScanner } = await import("./scanner.mjs")
+  const root = await mkdtemp(join(tmpdir(), "paper-metadata-ctime-race-"))
+  const metadataPath = await put(root, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  const fixedTime = new Date("2026-08-30T04:05:06.000Z")
+  await utimes(metadataPath, fixedTime, fixedTime)
+  const before = await stat(metadataPath, { bigint: true })
+  let tampered = false
+  const scanner = createPaperSourceScanner({
+    metadataFileSystem: {
+      open: async (path, flags) => {
+        const handle = await openFile(path, flags)
+        return {
+          stat: (...args) => handle.stat(...args),
+          read: async (...args) => {
+            const result = await handle.read(...args)
+            if (!tampered && result.bytesRead > 0) {
+              tampered = true
+              const changed = archiveMetadata().replace("Distributed", "Xistributed")
+              assert.equal(Buffer.byteLength(changed), Number(before.size))
+              await writeFile(metadataPath, changed)
+              await utimes(metadataPath, fixedTime, fixedTime)
+            }
+            return result
+          },
+          close: () => handle.close(),
+        }
+      },
+    },
+  })
+
+  const error = await rejectedScan(() => scanner({
+    config: { version: 1, sources: [{ source_id: "main_papers", path: root }] },
+    overrides: { version: 1, papers: {} },
+  }))
+  const after = await stat(metadataPath, { bigint: true })
+  assert.equal(tampered, true)
+  assert.equal(after.ino, before.ino)
+  assert.equal(after.size, before.size)
+  assert.equal(after.mtimeNs, before.mtimeNs)
+  assert.notEqual(after.ctimeNs, before.ctimeNs)
+  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:metadata.yaml"])
 })
 
 test("ignores a metadata.yaml symlink instead of indexing or following it", async () => {
   const root = await mkdtemp(join(tmpdir(), "paper-metadata-symlink-"))
   const outside = await mkdtemp(join(tmpdir(), "paper-metadata-outside-"))
   const outsideMetadata = await put(outside, "metadata.yaml", archiveMetadata())
-  await mkdir(join(root, "Candidate"), { recursive: true })
-  await symlink(outsideMetadata, join(root, "Candidate/metadata.yaml"))
+  await mkdir(join(root, "Wang23-DIO"), { recursive: true })
+  await symlink(outsideMetadata, join(root, "Wang23-DIO/metadata.yaml"))
 
   const result = await scan(root)
   assert.deepEqual(result.papers, [])
-  assert.deepEqual(result.audit.warnings.external_symlinks, ["Candidate/metadata.yaml"])
+  assert.deepEqual(result.audit.warnings.external_symlinks, ["Wang23-DIO/metadata.yaml"])
 })
 
 test("ignores and audits an in-root metadata.yaml symlink", async () => {
   const root = await mkdtemp(join(tmpdir(), "paper-metadata-internal-symlink-"))
   const target = await put(root, "holding/safe-metadata.txt", archiveMetadata())
-  await mkdir(join(root, "Candidate"), { recursive: true })
-  await symlink(target, join(root, "Candidate/metadata.yaml"))
+  await mkdir(join(root, "Wang23-DIO"), { recursive: true })
+  await symlink(target, join(root, "Wang23-DIO/metadata.yaml"))
 
   const result = await scan(root)
   assert.deepEqual(result.papers, [])
-  assert.deepEqual(result.audit.warnings.internal_symlinks, ["Candidate/metadata.yaml"])
+  assert.deepEqual(result.audit.warnings.internal_symlinks, ["Wang23-DIO/metadata.yaml"])
 })
 
 test("keeps one metadata identity when PDF and reading notes are added later", async () => {
   const root = await mkdtemp(join(tmpdir(), "paper-metadata-evolves-"))
-  await put(root, "Candidate/metadata.yaml", archiveMetadata())
-  await put(root, "Candidate/paper.pdf")
-  await put(root, "Candidate/reading-note.md", "# Reading note")
+  await put(root, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  await put(root, "Wang23-DIO/paper.pdf")
+  await put(root, "Wang23-DIO/reading-note.md", "# Reading note")
 
   const result = await scan(root)
   const paper = result.papers[0]
@@ -289,8 +366,8 @@ test("keeps one metadata identity when PDF and reading notes are added later", a
 
 test("metadata participates in existing frontmatter conflict and higher-priority shadow rules", async () => {
   const equalRoot = await mkdtemp(join(tmpdir(), "paper-metadata-equal-"))
-  await put(equalRoot, "Candidate/metadata.yaml", archiveMetadata())
-  await put(equalRoot, "Candidate/reading-note.md", [
+  await put(equalRoot, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  await put(equalRoot, "Wang23-DIO/reading-note.md", [
     "---",
     "paper_id: Wang23-DIO",
     "title: Distributed Interval Optimization Over Time-Varying Networks",
@@ -301,14 +378,14 @@ test("metadata participates in existing frontmatter conflict and higher-priority
   assert.deepEqual(equal.audit.blocking.metadata_conflicts, [])
 
   const conflictRoot = await mkdtemp(join(tmpdir(), "paper-metadata-conflict-"))
-  await put(conflictRoot, "Candidate/metadata.yaml", archiveMetadata())
-  await put(conflictRoot, "Candidate/reading-note.md", "---\ntitle: Conflicting title\n---\n")
+  await put(conflictRoot, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  await put(conflictRoot, "Wang23-DIO/reading-note.md", "---\ntitle: Conflicting title\n---\n")
   const conflict = await rejectedScan(() => scan(conflictRoot))
-  assert.deepEqual(conflict.blocking?.metadata_conflicts, ["main_papers::Candidate:title_original"])
+  assert.deepEqual(conflict.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:title_original"])
 
   const shadowRoot = await mkdtemp(join(tmpdir(), "paper-metadata-shadow-"))
-  await put(shadowRoot, "Candidate/metadata.yaml", archiveMetadata())
-  await put(shadowRoot, "Candidate/reading-note.md", "---\ntitle: Conflicting title\n---\n")
+  await put(shadowRoot, "Wang23-DIO/metadata.yaml", archiveMetadata())
+  await put(shadowRoot, "Wang23-DIO/reading-note.md", "---\ntitle: Conflicting title\n---\n")
   const shadow = await scanPaperSources({
     config: { version: 1, sources: [{ source_id: "main_papers", path: shadowRoot }] },
     overrides: { version: 1, papers: {} },
@@ -316,32 +393,32 @@ test("metadata participates in existing frontmatter conflict and higher-priority
       main_papers: {
         version: 1,
         papers: {
-          "main_papers::Candidate": { paper_id: "Wang23-DIO", title_original: "Catalog title" },
+          "main_papers::Wang23-DIO": { paper_id: "Wang23-DIO", title_original: "Catalog title" },
         },
       },
     },
   })
   assert.equal(shadow.papers[0].title_original, "Catalog title")
   assert.deepEqual(shadow.audit.warnings.shadowed_metadata_conflicts, [
-    "main_papers::Candidate:title_original:catalog",
+    "main_papers::Wang23-DIO:title_original:catalog",
   ])
 })
 
 test("blocks metadata whose archive source differs from the configured source", async () => {
   const root = await mkdtemp(join(tmpdir(), "paper-metadata-source-mismatch-"))
-  await put(root, "Candidate/metadata.yaml", archiveMetadata({ archiveSourceId: "other_papers" }))
+  await put(root, "Wang23-DIO/metadata.yaml", archiveMetadata({ archiveSourceId: "other_papers" }))
 
   const error = await rejectedScan(() => scan(root))
   assert.equal(error.message, "扫描存在阻塞问题：frontmatter 元数据冲突")
-  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Candidate:archive_source_id"])
+  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO:archive_source_id"])
   assert.equal(JSON.stringify(error.blocking).includes("other_papers"), false)
 })
 
 test("blocks one provider-qualified archive identity duplicated across configured sources", async () => {
   const firstRoot = await mkdtemp(join(tmpdir(), "paper-metadata-source-a-"))
   const secondRoot = await mkdtemp(join(tmpdir(), "paper-metadata-source-b-"))
-  await put(firstRoot, "First/metadata.yaml", archiveMetadata({ paperId: "First23-Paper", archiveSourceId: "source_one" }))
-  await put(secondRoot, "Second/metadata.yaml", archiveMetadata({
+  await put(firstRoot, "First23-Paper/metadata.yaml", archiveMetadata({ paperId: "First23-Paper", archiveSourceId: "source_one" }))
+  await put(secondRoot, "Second23-Paper/metadata.yaml", archiveMetadata({
     paperId: "Second23-Paper",
     archiveSourceId: "source_two",
     doi: "10.1234/changed-record",
@@ -359,6 +436,14 @@ test("blocks one provider-qualified archive identity duplicated across configure
   }))
   assert.equal(error.message, "扫描存在阻塞问题：归档来源身份重复")
   assert.deepEqual(error.blocking?.duplicate_archive_source_ids, ["openalex:W4387886124"])
+})
+
+test("blocks metadata moved to a directory whose basename differs from its paper_id", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paper-metadata-folder-identity-"))
+  await put(root, "Wang23-DIO-displaced/metadata.yaml", archiveMetadata())
+
+  const error = await rejectedScan(() => scan(root))
+  assert.deepEqual(error.blocking?.metadata_conflicts, ["main_papers::Wang23-DIO-displaced:paper_id"])
 })
 
 test("warns and refuses to read a symlink that resolves outside the root", async () => {

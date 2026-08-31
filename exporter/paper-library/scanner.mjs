@@ -5,7 +5,15 @@ import { basename, extname, relative, resolve, sep } from "node:path"
 import posix from "node:path/posix"
 import { isDeepStrictEqual } from "node:util"
 import { classifyArtifact as classifyBaseArtifact, createEmptyArtifacts, summarizeArtifactAvailability, ARTIFACT_KEYS } from "./artifacts.mjs"
-import { ARCHIVE_METADATA_FILE, ARCHIVE_METADATA_MAX_BYTES, parseArchiveMetadata } from "./archive-metadata.mjs"
+import {
+  ARCHIVE_COMMIT_FILE,
+  ARCHIVE_COMMIT_MAX_BYTES,
+  ARCHIVE_METADATA_FILE,
+  ARCHIVE_METADATA_MAX_BYTES,
+  archiveMetadataSha256,
+  parseArchiveCommit,
+  parseArchiveMetadata,
+} from "./archive-metadata.mjs"
 import { parsePaperFrontmatter } from "./frontmatter.mjs"
 import { makeOverrideKey, makePathPaperId, makeSlug, normalizeRelativePath } from "./ids.mjs"
 import { isPathOnlyReadingNoteEligible, validatePaperOverride } from "./overrides.mjs"
@@ -55,7 +63,7 @@ function insideRoot(root, target) {
 }
 
 function statFingerprint(info) {
-  return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs ?? info.mtimeMs}`
+  return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs ?? info.mtimeMs}:${info.ctimeNs ?? info.ctimeMs}`
 }
 
 function unsafeMarkdown(message = "Markdown 文件在安全读取期间发生变化") {
@@ -117,7 +125,7 @@ function unsafeArchiveMetadata(message = "归档元数据在安全读取期间�
   return new UnsafeArchiveMetadataReadError(message)
 }
 
-function createSafeArchiveMetadataReader(fileSystem = {}) {
+function createSafeArchiveFileReader(fileSystem = {}, maximumBytes = ARCHIVE_METADATA_MAX_BYTES) {
   const io = { ...DEFAULT_METADATA_FILE_SYSTEM, ...fileSystem }
   for (const method of ["lstat", "open", "realpath"]) {
     if (typeof io[method] !== "function") throw new TypeError(`归档元数据文件系统缺少 ${method}`)
@@ -135,13 +143,15 @@ function createSafeArchiveMetadataReader(fileSystem = {}) {
     if (
       info.isSymbolicLink()
       || !info.isFile()
-      || Number(info.size) > ARCHIVE_METADATA_MAX_BYTES
+      || Number(info.nlink) !== 1
+      || Number(info.size) > maximumBytes
       || !insideRoot(sourceRoot, canonicalPath)
     ) throw unsafeArchiveMetadata()
     return { canonicalPath, fingerprint: statFingerprint(info), size: Number(info.size) }
   }
 
   return async function readArchiveMetadata({ file, sourceRoot }) {
+    if (file.discovery_link_count !== 1) throw unsafeArchiveMetadata()
     const before = await pathSnapshot(file.lexical_path, sourceRoot)
     if (before.canonicalPath !== file.absolute_path || before.fingerprint !== file.discovery_fingerprint) throw unsafeArchiveMetadata()
     if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw unsafeArchiveMetadata("当前平台不支持安全打开归档元数据")
@@ -157,7 +167,8 @@ function createSafeArchiveMetadataReader(fileSystem = {}) {
       const openedBefore = await handle.stat({ bigint: true })
       if (
         !openedBefore.isFile()
-        || Number(openedBefore.size) > ARCHIVE_METADATA_MAX_BYTES
+        || Number(openedBefore.nlink) !== 1
+        || Number(openedBefore.size) > maximumBytes
         || statFingerprint(openedBefore) !== before.fingerprint
       ) throw unsafeArchiveMetadata()
 
@@ -173,7 +184,9 @@ function createSafeArchiveMetadataReader(fileSystem = {}) {
       const openedAfter = await handle.stat({ bigint: true })
       const after = await pathSnapshot(file.lexical_path, sourceRoot)
       if (
-        statFingerprint(openedAfter) !== statFingerprint(openedBefore)
+        Number(openedAfter.nlink) !== 1
+        || !openedAfter.isFile()
+        || statFingerprint(openedAfter) !== statFingerprint(openedBefore)
         || after.fingerprint !== statFingerprint(openedAfter)
         || after.canonicalPath !== before.canonicalPath
       ) throw unsafeArchiveMetadata()
@@ -412,7 +425,8 @@ async function walkSource({ source, rootPath, audit }) {
         record.files.push({
           relative_path: childRelative, resolved_relative_path: normalizeRelativePath(resolvedRelativePath),
           absolute_path: actualPath, lexical_path: candidatePath, discovery_fingerprint: statFingerprint(fileStat),
-          file_name: entry.name, size_bytes: Number(fileStat.size), via_symlink: viaSymlink || entryIsSymlink,
+          discovery_link_count: Number(fileStat.nlink), file_name: entry.name,
+          size_bytes: Number(fileStat.size), via_symlink: viaSymlink || entryIsSymlink,
         })
       }
     }
@@ -426,13 +440,21 @@ function directPdfFiles(directory) {
   return directory.files.filter((file) => extname(file.file_name).toLowerCase() === ".pdf" && (!file.via_symlink || isWithinUnit(file.resolved_relative_path, directory.relative_path)))
 }
 
-function directArchiveMetadataFile(directory) {
-  const expectedPath = relativeSourcePath(directory.relative_path, ARCHIVE_METADATA_FILE)
+function directArchiveFile(directory, fileName) {
+  const expectedPath = relativeSourcePath(directory.relative_path, fileName)
   return directory.files.find((file) => (
-    file.file_name === ARCHIVE_METADATA_FILE
+    file.file_name === fileName
     && file.relative_path === expectedPath
     && !file.via_symlink
   )) ?? null
+}
+
+function directArchiveMetadataFile(directory) {
+  return directArchiveFile(directory, ARCHIVE_METADATA_FILE)
+}
+
+function directArchiveCommitFile(directory) {
+  return directArchiveFile(directory, ARCHIVE_COMMIT_FILE)
 }
 
 function isDescendant(path, parent) {
@@ -487,13 +509,20 @@ async function markdownMetadata(files, audit, { readMarkdownPrefix, sourceRoot, 
   return { data, explicitId }
 }
 
-async function archiveMetadataForUnit({ file, readArchiveMetadata, sourceRoot, sourceId, unitKey, audit }) {
+async function archiveMetadataForUnit({ file, commitFile, readArchiveMetadata, readArchiveCommit, sourceRoot, sourceId, relativePath, unitKey, audit }) {
   if (!file) return null
   try {
+    if (!commitFile) throw new Error("归档提交标记缺失")
     const text = await readArchiveMetadata({ file, sourceRoot })
+    const commitText = await readArchiveCommit({ file: commitFile, sourceRoot })
+    if (parseArchiveCommit(commitText) !== archiveMetadataSha256(text)) throw new Error("归档提交标记与元数据不匹配")
     const parsed = parseArchiveMetadata(text)
     if (parsed.archive_source_id !== sourceId) {
       audit.blocking.metadata_conflicts.push(`${unitKey}:archive_source_id`)
+      return null
+    }
+    if (posix.basename(relativePath) !== parsed.metadata.paper_id) {
+      audit.blocking.metadata_conflicts.push(`${unitKey}:paper_id`)
       return null
     }
     return parsed
@@ -565,7 +594,7 @@ function sortedFilesForUnit(unit, unitRoots, directories) {
   return files.sort((left, right) => left.relative_path.localeCompare(right.relative_path))
 }
 
-async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, { readMarkdownPrefix, readArchiveMetadata }) {
+async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, { readMarkdownPrefix, readArchiveMetadata, readArchiveCommit }) {
   const audit = emptyAudit()
   const papers = []
   const paperIds = new Map()
@@ -610,6 +639,7 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
         relative_path: relativePath,
         absolute_path: directory.absolute_path,
         archive_file: directArchiveMetadataFile(directory),
+        archive_commit_file: directArchiveCommitFile(directory),
         override,
         catalog,
         all_unit_files: allUnitFiles,
@@ -629,9 +659,12 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
       })
       unit.archive_metadata = await archiveMetadataForUnit({
         file: unit.archive_file,
+        commitFile: unit.archive_commit_file,
         readArchiveMetadata,
+        readArchiveCommit,
         sourceRoot: walked.rootPath,
         sourceId: source.source_id,
+        relativePath: unit.relative_path,
         unitKey: makeOverrideKey({ sourceId: source.source_id, relativePath: unit.relative_path }),
         audit,
       })
@@ -666,7 +699,7 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
       const artifacts = createEmptyArtifacts()
       const siblingPdfStems = files.filter((file) => extname(file.file_name).toLowerCase() === ".pdf").map((file) => basename(file.file_name, extname(file.file_name)))
       for (const file of files) {
-        if (file.file_name === ARCHIVE_METADATA_FILE) continue
+        if (file.file_name === ARCHIVE_METADATA_FILE || file.file_name === ARCHIVE_COMMIT_FILE) continue
         const localPath = normalizeRelativePath(posix.relative(unit.relative_path, file.relative_path))
         const explicitCategory = artifactCategories.get(file.relative_path) ?? null
         const category = classifyArtifact({ relativePath: localPath, siblingPdfStems, explicitCategory })
@@ -744,8 +777,9 @@ async function scanPaperSourcesWithReader({ config, overrides, catalogs = {} }, 
 
 export function createPaperSourceScanner({ markdownFileSystem, metadataFileSystem } = {}) {
   const readMarkdownPrefix = createSafeMarkdownPrefixReader(markdownFileSystem)
-  const readArchiveMetadata = createSafeArchiveMetadataReader(metadataFileSystem)
-  return (options) => scanPaperSourcesWithReader(options, { readMarkdownPrefix, readArchiveMetadata })
+  const readArchiveMetadata = createSafeArchiveFileReader(metadataFileSystem, ARCHIVE_METADATA_MAX_BYTES)
+  const readArchiveCommit = createSafeArchiveFileReader(metadataFileSystem, ARCHIVE_COMMIT_MAX_BYTES)
+  return (options) => scanPaperSourcesWithReader(options, { readMarkdownPrefix, readArchiveMetadata, readArchiveCommit })
 }
 
 export const scanPaperSources = createPaperSourceScanner()

@@ -51,6 +51,10 @@ async function put(root, relativePath, content = "fixture") {
   const target = join(root, relativePath)
   await mkdir(dirname(target), { recursive: true })
   await writeFile(target, content)
+  if (relativePath.endsWith("/metadata.yaml")) {
+    const digest = createHash("sha256").update(content).digest("hex")
+    await writeFile(join(dirname(target), ".metadata.commit"), `sha256:${digest}\n`)
+  }
   return target
 }
 
@@ -371,7 +375,7 @@ test("public index exposes only the aggregate count of audit warning arrays", as
 test("metadata-only build keeps archive identity private and emits only the existing public URL field", async () => {
   const fixture = await makeFixture()
   fixture.config.archive_source_id = "main_papers"
-  await put(fixture.sourceRoot, "Candidate/metadata.yaml", metadataOnlyFixture())
+  await put(fixture.sourceRoot, "Wang23-DIO/metadata.yaml", metadataOnlyFixture())
 
   await buildPrivateLibrary(fixture)
   const indexPath = join(fixture.repoRoot, "local_library_data/paper-index.json")
@@ -382,7 +386,7 @@ test("metadata-only build keeps archive identity private and emits only the exis
   const paper = index.papers[0]
 
   assert.equal(paper.source_id, "main_papers")
-  assert.equal(paper.relative_path, "Candidate")
+  assert.equal(paper.relative_path, "Wang23-DIO")
   assert.equal(paper.doi_or_url, "https://openalex.org/W4387886124")
   assert.equal(paper.note_status, "metadata_only")
   assert.deepEqual(paper.facet_states, {})

@@ -3,7 +3,12 @@ import assert from "node:assert/strict"
 import {
   ARCHIVE_METADATA_FILE,
   ARCHIVE_METADATA_MAX_BYTES,
+  ARCHIVE_COMMIT_FILE,
+  ARCHIVE_COMMIT_MAX_BYTES,
+  archiveMetadataSha256,
+  parseArchiveCommit,
   parseArchiveMetadata,
+  serializeArchiveCommit,
   serializeArchiveMetadata,
 } from "./archive-metadata.mjs"
 
@@ -60,6 +65,18 @@ test("archive metadata has one fixed filename, byte limit, and deterministic app
     assert.equal(expected.includes(excluded), false)
   }
   assert.ok(Buffer.byteLength(expected, "utf8") <= ARCHIVE_METADATA_MAX_BYTES)
+})
+
+test("archive commit marker binds one exact metadata payload with a fixed private format", () => {
+  const metadata = serialize()
+  const marker = serializeArchiveCommit(metadata)
+  assert.equal(ARCHIVE_COMMIT_FILE, ".metadata.commit")
+  assert.equal(ARCHIVE_COMMIT_MAX_BYTES, 72)
+  assert.equal(Buffer.byteLength(marker, "utf8"), ARCHIVE_COMMIT_MAX_BYTES)
+  assert.equal(parseArchiveCommit(marker), archiveMetadataSha256(metadata))
+  for (const invalid of [marker.toUpperCase(), marker.slice(0, -1), `${marker}x`, `sha256:${"0".repeat(64)} `]) {
+    assert.throws(() => parseArchiveCommit(invalid), /提交标记|格式/u)
+  }
 })
 
 test("DOI-less metadata stores only the canonical OpenAlex landing URL", () => {
@@ -178,6 +195,228 @@ test("metadata text rejects line separators, replacement characters, and isolate
     const invalid = serialize().replace("Distributed Interval Optimization Over Time-Varying Networks", unsafeText)
     assert.throws(() => parseArchiveMetadata(invalid), /元数据|字段|控制|格式/u)
   }
+})
+
+test("metadata text rejects bidi spoofing, zero-width space, internal BOM, and noncharacters", () => {
+  const unsafeCodePoints = [
+    0x0085, 0x00ad, 0x0600, 0x061c, 0x070f, 0x180e,
+    0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
+    0x200e, 0x200f,
+    0x2066, 0x2067, 0x2068, 0x2069,
+    0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xfffe, 0xffff, 0xe0001,
+  ]
+  for (const codePoint of unsafeCodePoints) {
+    const unsafeText = `safe${String.fromCodePoint(codePoint)}text`
+    assert.throws(() => serialize({
+      candidate: { ...CANDIDATE, title: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    }), /元数据|字段|控制|格式/u)
+    const invalid = serialize().replace(CANDIDATE.title, unsafeText)
+    assert.throws(() => parseArchiveMetadata(invalid), /元数据|字段|控制|格式/u)
+  }
+})
+
+test("serializer and parser reject obvious private locators in every public free bibliographic field", () => {
+  const unsafeLocators = [
+    ["", "Users", "researcher", "paper.pdf"].join("/"),
+    ["~", "notes", "paper.md"].join("/"),
+    ["file:", "", "private", "source.pdf"].join("/"),
+    ["C:", "Users", "researcher", "document.txt"].join("\\"),
+    ["", "", "server", "share", "paper.pdf"].join("\\"),
+    ["..", "private-paper.pdf"].join("/"),
+    ["notes", "paper.pdf"].join("/"),
+    `Results loaded from ${["", "etc", "passwd"].join("/")} for evaluation`,
+    `Results loaded from ${["", "opt", "private", "paper.pdf"].join("/")} for evaluation`,
+    `See ${[".", "private", "paper.md"].join("/")} for details`,
+    `See:${["", "etc", "passwd"].join("/")}`,
+    `path=${["", "opt", "private", "data"].join("/")}`,
+    `Read[${["", "home", "person", "paper"].join("/")}]`,
+    `Location:${["C:", "Users", "person", "paper"].join("\\")}`,
+    `UNC=${["", "", "server", "share", "folder"].join("\\")}`,
+    ...[")", ",", ";", "|", "]", "}"].map((punctuation) => `See${punctuation}${["", "etc", "passwd"].join("/")}`),
+    ["private", "notes", "research"].join("/"),
+    ["folder", "private"].join("/"),
+    ["papers", "2024", "W4387886124"].join("/"),
+    ["relative", "path"].join("/"),
+  ]
+  const valid = serialize()
+
+  for (const locator of unsafeLocators) {
+    for (const candidate of [
+      { ...CANDIDATE, title: locator, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, authors: [locator], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, source: locator, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    ]) {
+      assert.throws(() => serialize({ candidate }), /元数据|字段|路径|定位/u)
+    }
+
+    for (const document of [
+      valid.replace(`title: ${JSON.stringify(CANDIDATE.title)}`, `title: ${JSON.stringify(locator)}`),
+      valid.replace(`  - ${JSON.stringify(CANDIDATE.authors[0])}`, `  - ${JSON.stringify(locator)}`),
+      valid.replace(`venue: ${JSON.stringify(CANDIDATE.source)}`, `venue: ${JSON.stringify(locator)}`),
+    ]) {
+      assert.throws(() => parseArchiveMetadata(document), /元数据|字段|路径|定位/u)
+    }
+  }
+})
+
+test("serializer and parser reject compact bare credential assignments in public bibliographic text", () => {
+  const keys = [
+    ["api", "key"].join("_"),
+    ["access", "key"].join("_"),
+    ["auth", "token"].join("_"),
+    ["pass", "word"].join(""),
+    ["client", "secret"].join("_"),
+  ]
+  const marker = ["hidden", "marker"].join("-")
+  const valid = serialize()
+  for (const key of keys) {
+    const unsafeText = `Replication ${key}=${marker}`
+    for (const candidate of [
+      { ...CANDIDATE, title: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, authors: [unsafeText], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, source: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    ]) assert.throws(() => serialize({ candidate }), /元数据|字段|凭据|格式/u)
+
+    for (const document of [
+      valid.replace(`title: ${JSON.stringify(CANDIDATE.title)}`, `title: ${JSON.stringify(unsafeText)}`),
+      valid.replace(`  - ${JSON.stringify(CANDIDATE.authors[0])}`, `  - ${JSON.stringify(unsafeText)}`),
+      valid.replace(`venue: ${JSON.stringify(CANDIDATE.source)}`, `venue: ${JSON.stringify(unsafeText)}`),
+    ]) assert.throws(() => parseArchiveMetadata(document), /元数据|字段|凭据|格式/u)
+  }
+
+  const spacedCredentials = [
+    `Replication ${["api", "key"].join("_")} = ${marker}`,
+    `Replication ${["access", "token"].join("_")} : ${marker}`,
+    `Replication ${JSON.stringify(["client", "secret"].join("_"))}: ${JSON.stringify(marker)}`,
+    `${["Authori", "zation"].join("")}: ${["Bear", "er"].join("")} ${marker}`,
+    `Replication ${["api", "key"].join(" ")} = ${marker}`,
+    `Replication ${["private", "key"].join(" ")}: ${marker}`,
+    `Replication ${["secret", "key"].join(" ")} = ${marker}`,
+    `${["api", "key"].join("_")}=x`,
+    `${["access", "token"].join("_")}:ab`,
+    `${["to", "ken"].join("")}=abc`,
+    `${["pass", "word"].join("")}=123`,
+    `${["sec", "ret"].join("")}=xyz`,
+    `${["api", "key"].join("_")}=`,
+  ]
+  for (const unsafeText of spacedCredentials) {
+    for (const candidate of [
+      { ...CANDIDATE, title: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, authors: [unsafeText], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, source: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    ]) assert.throws(() => serialize({ candidate }), /元数据|字段|凭据|格式/u)
+
+    for (const document of [
+      valid.replace(`title: ${JSON.stringify(CANDIDATE.title)}`, `title: ${JSON.stringify(unsafeText)}`),
+      valid.replace(`  - ${JSON.stringify(CANDIDATE.authors[0])}`, `  - ${JSON.stringify(unsafeText)}`),
+      valid.replace(`venue: ${JSON.stringify(CANDIDATE.source)}`, `venue: ${JSON.stringify(unsafeText)}`),
+    ]) assert.throws(() => parseArchiveMetadata(document), /元数据|字段|凭据|格式/u)
+  }
+
+  const scholarly = "Shared-secret = latent variable in the proof"
+  assert.doesNotThrow(() => serialize({
+    candidate: { ...CANDIDATE, title: scholarly, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+  }))
+})
+
+test("serializer and parser repeatedly decode bibliographic percent escapes before privacy validation", () => {
+  const credentialKey = ["api", "key"].join("_")
+  const encodedCredentialKey = ["api", "key"].join("%5F")
+  const hiddenMarker = ["hidden", "marker"].join("-")
+  const unsafeTexts = [
+    "Reference file%3A%2F%2F%2Fprivate%2Fpaper.pdf",
+    "See .%2Fprivate%2Fpaper.md for details",
+    `Paper https%3A%2F%2Fexample.org%2Fview%3F${credentialKey}%3D${hiddenMarker}`,
+    `Replication ${encodedCredentialKey}=${hiddenMarker}`,
+    "Reference file%253A%252F%252F%252Fprivate%252Fpaper.pdf",
+    "Malformed %E0%A4%A locator",
+    "Deep file%252525253A%252525252F%252525252F%252525252Fprivate%252525252Fpaper.pdf",
+  ]
+  const valid = serialize()
+
+  for (const unsafeText of unsafeTexts) {
+    for (const candidate of [
+      { ...CANDIDATE, title: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, authors: [unsafeText], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, source: unsafeText, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    ]) assert.throws(() => serialize({ candidate }), /元数据|字段|路径|定位|凭据|编码/u)
+
+    for (const document of [
+      valid.replace(`title: ${JSON.stringify(CANDIDATE.title)}`, `title: ${JSON.stringify(unsafeText)}`),
+      valid.replace(`  - ${JSON.stringify(CANDIDATE.authors[0])}`, `  - ${JSON.stringify(unsafeText)}`),
+      valid.replace(`venue: ${JSON.stringify(CANDIDATE.source)}`, `venue: ${JSON.stringify(unsafeText)}`),
+    ]) assert.throws(() => parseArchiveMetadata(document), /元数据|字段|路径|定位|凭据|编码/u)
+  }
+
+  for (const ordinary of ["95% confidence intervals", "Accuracy improved by 10% in simulation"]) {
+    assert.doesNotThrow(() => serialize({
+      candidate: { ...CANDIDATE, title: ordinary, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    }))
+  }
+})
+
+test("serializer and parser reject URL-like bibliographic text carrying hidden credentials or repeated encoding", () => {
+  const credentialKey = ["api", "key"].join("_")
+  const hiddenValue = ["hidden", "value"].join("-")
+  const unsafeUrls = [
+    "https://reader@example.org/paper",
+    "https://example.org/paper#private-section",
+    `https://example.org/paper?${credentialKey}=${hiddenValue}`,
+    `https://example.org/view?foo=${["private", "marker"].join("-")}`,
+    "https://example.org/paper?ref=%252fprivate",
+  ]
+  const valid = serialize()
+
+  for (const unsafeUrl of unsafeUrls) {
+    for (const candidate of [
+      { ...CANDIDATE, title: unsafeUrl, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, authors: [unsafeUrl], topics: [...CANDIDATE.topics] },
+      { ...CANDIDATE, source: unsafeUrl, authors: [...CANDIDATE.authors], topics: [...CANDIDATE.topics] },
+    ]) assert.throws(() => serialize({ candidate }), /元数据|字段|路径|定位|凭据/u)
+
+    for (const document of [
+      valid.replace(`title: ${JSON.stringify(CANDIDATE.title)}`, `title: ${JSON.stringify(unsafeUrl)}`),
+      valid.replace(`  - ${JSON.stringify(CANDIDATE.authors[0])}`, `  - ${JSON.stringify(unsafeUrl)}`),
+      valid.replace(`venue: ${JSON.stringify(CANDIDATE.source)}`, `venue: ${JSON.stringify(unsafeUrl)}`),
+    ]) assert.throws(() => parseArchiveMetadata(document), /元数据|字段|路径|定位|凭据/u)
+  }
+})
+
+test("free bibliographic text still permits ordinary scholarly slash and colon punctuation", () => {
+  const candidate = {
+    ...CANDIDATE,
+    title: "Push/Pull Optimization: A Unified View",
+    authors: ["Alpha/Beta Collaboration"],
+    source: "IEEE/CAA Journal: Automatica Sinica",
+    topics: [...CANDIDATE.topics],
+  }
+  const text = serialize({ candidate })
+  const parsed = parseArchiveMetadata(text)
+  assert.equal(parsed.metadata.title_original, candidate.title)
+  assert.deepEqual(parsed.metadata.authors, candidate.authors)
+  assert.equal(parsed.metadata.venue, candidate.source)
+  assert.doesNotThrow(() => serialize({
+    candidate: {
+      ...CANDIDATE,
+      title: "Control/Optimization: Methods for x/y Coupling",
+      authors: [...CANDIDATE.authors],
+      topics: [...CANDIDATE.topics],
+    },
+  }))
+})
+
+test("strict archive JSON scalars round trip scholarly YAML marker characters without shared-parser warnings", () => {
+  const candidate = {
+    ...CANDIDATE,
+    title: "R&D Optimization",
+    authors: ["A&B Research Group", "Star * Methods"],
+    source: "Theory ! [Robust] {Systems}",
+    topics: [...CANDIDATE.topics],
+  }
+  const parsed = parseArchiveMetadata(serialize({ candidate }))
+  assert.equal(parsed.metadata.title_original, candidate.title)
+  assert.deepEqual(parsed.metadata.authors, candidate.authors)
+  assert.equal(parsed.metadata.venue, candidate.source)
 })
 
 test("parser rejects unknown or duplicate keys and YAML structure tricks", () => {

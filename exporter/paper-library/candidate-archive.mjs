@@ -1,20 +1,18 @@
+import { createHash } from "node:crypto"
 import { constants } from "node:fs"
 import {
   lstat,
   mkdir,
   open,
   realpath,
-  rename,
-  rmdir,
-  unlink,
 } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { serializeArchiveMetadata } from "./archive-metadata.mjs"
+import { ARCHIVE_COMMIT_FILE, serializeArchiveCommit, serializeArchiveMetadata } from "./archive-metadata.mjs"
 import { isValidPaperId } from "./overrides.mjs"
 
 const SOURCE_ID = /^[a-z][a-z0-9_-]*$/u
 const OPENALEX_IDENTITY = /^openalex:W\d+$/u
-const OPENALEX_URL = /^https:\/\/openalex\.org\/(W\d+)$/u
+const OPENALEX_RESOLVER = /^https:\/\/(?:openalex\.org\/|api\.openalex\.org\/works\/)(W\d+)\/?$/iu
 const DOI = /^10\.\d{4,9}\/[\-._;()/:a-z0-9]+$/u
 const REQUEST_KEYS = Object.freeze(["version", "confirmation", "archive_source_id", "paper_id", "candidate"])
 const CANDIDATE_KEYS = Object.freeze([
@@ -37,9 +35,6 @@ const DEFAULT_FILE_SYSTEM = Object.freeze({
   mkdir,
   open,
   realpath,
-  rename,
-  rmdir,
-  unlink,
   noFollowFlag: constants.O_NOFOLLOW,
 })
 
@@ -140,6 +135,12 @@ function normalizeDoi(value) {
   return normalized
 }
 
+function normalizeOpenAlexIdentity(value) {
+  if (typeof value !== "string") return null
+  const match = OPENALEX_RESOLVER.exec(value.trim())
+  return match ? `openalex:W${match[1].slice(1)}` : null
+}
+
 function paperFields(paper) {
   if (!isPlainObject(paper)) throw new TypeError("既有论文索引格式无效")
   const paperId = Object.getOwnPropertyDescriptor(paper, "paper_id")
@@ -177,8 +178,7 @@ function assertNoDuplicate({ existingPapers, existingArchiveIdentities, request 
     if (existing.paperId === request.paper_id) throw new Error("论文 ID 已存在，未执行归档")
     const existingDoi = normalizeDoi(existing.doiOrUrl)
     if (requestedDoi && existingDoi === requestedDoi) throw new Error("相同 DOI 已存在，未执行归档")
-    const openAlexMatch = OPENALEX_URL.exec(existing.doiOrUrl)
-    if (openAlexMatch && `openalex:${openAlexMatch[1]}` === requestedIdentity) {
+    if (normalizeOpenAlexIdentity(existing.doiOrUrl) === requestedIdentity) {
       throw new Error("相同归档来源身份已存在，未执行归档")
     }
   }
@@ -197,20 +197,64 @@ function identityFingerprint(info) {
   return `${info.dev}:${info.ino}`
 }
 
-async function canonicalSourceRoot(sourceRoot, io) {
+function contentFingerprint(bytes) {
+  return createHash("sha256").update(bytes).digest("hex")
+}
+
+async function acquireSourceRoot(sourceRoot, io) {
   if (typeof sourceRoot !== "string" || !isAbsolute(sourceRoot) || resolve(sourceRoot) !== sourceRoot) {
     throw new Error("论文根目录必须是规范绝对路径")
   }
-  let lexical
+  let before
   let canonical
+  let handle = null
   try {
-    lexical = await io.lstat(sourceRoot, { bigint: true })
+    before = await io.lstat(sourceRoot, { bigint: true })
     canonical = await io.realpath(sourceRoot)
+    if (canonical !== sourceRoot || before.isSymbolicLink() || !before.isDirectory()) {
+      throw new Error("invalid root")
+    }
+    handle = await io.open(
+      canonical,
+      constants.O_RDONLY | constants.O_DIRECTORY | io.noFollowFlag,
+    )
+    const opened = await handle.stat({ bigint: true })
+    const after = await io.lstat(sourceRoot, { bigint: true })
+    const canonicalAfter = await io.realpath(sourceRoot)
+    const identity = identityFingerprint(before)
+    if (
+      !opened.isDirectory()
+      || after.isSymbolicLink()
+      || !after.isDirectory()
+      || identityFingerprint(opened) !== identity
+      || identityFingerprint(after) !== identity
+      || canonicalAfter !== canonical
+    ) throw new Error("invalid root")
+    return Object.freeze({ requestedPath: sourceRoot, path: canonical, identity, handle })
   } catch {
+    if (handle) {
+      try { await handle.close() } catch { /* the validation error remains authoritative */ }
+    }
     throw new Error("论文根目录不存在或不可访问")
   }
-  if (lexical.isSymbolicLink() || !lexical.isDirectory()) throw new Error("论文根目录必须是普通目录")
-  return canonical
+}
+
+async function assertRootAnchor(anchor, io) {
+  const opened = await anchor.handle.stat({ bigint: true })
+  const lexical = await io.lstat(anchor.requestedPath, { bigint: true })
+  const canonical = await io.realpath(anchor.requestedPath)
+  const canonicalInfo = await io.lstat(anchor.path, { bigint: true })
+  if (
+    !opened.isDirectory()
+    || lexical.isSymbolicLink()
+    || !lexical.isDirectory()
+    || canonicalInfo.isSymbolicLink()
+    || !canonicalInfo.isDirectory()
+    || identityFingerprint(opened) !== anchor.identity
+    || identityFingerprint(lexical) !== anchor.identity
+    || identityFingerprint(canonicalInfo) !== anchor.identity
+    || canonical !== anchor.path
+  ) throw new Error("论文根目录锚点在事务期间发生变化")
 }
 
 async function lstatIfPresent(path, io) {
@@ -222,7 +266,8 @@ async function lstatIfPresent(path, io) {
   }
 }
 
-async function assertOwnedPackage({ packagePath, canonicalRoot, packageIdentity, io }) {
+async function assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io }) {
+  await assertRootAnchor(rootAnchor, io)
   const info = await io.lstat(packagePath, { bigint: true })
   const canonical = await io.realpath(packagePath)
   if (
@@ -230,30 +275,173 @@ async function assertOwnedPackage({ packagePath, canonicalRoot, packageIdentity,
     || !info.isDirectory()
     || identityFingerprint(info) !== packageIdentity
     || canonical !== packagePath
-    || !isInside(canonicalRoot, canonical)
+    || !isInside(rootAnchor.path, canonical)
   ) throw new Error("归档目标目录在事务期间发生变化")
+  await assertRootAnchor(rootAnchor, io)
 }
 
-async function cleanupOwnedTransaction({ packagePath, temporaryPath, canonicalRoot, packageIdentity, temporaryIdentity, io }) {
-  let complete = true
-  if (temporaryIdentity !== null) {
-    try {
-      const info = await io.lstat(temporaryPath, { bigint: true })
-      if (info.isSymbolicLink() || !info.isFile() || identityFingerprint(info) !== temporaryIdentity) complete = false
-      else await io.unlink(temporaryPath)
-    } catch (error) {
-      if (error?.code !== "ENOENT") complete = false
+async function verifyExpectedFile({ path, expectedIdentity, expectedSize, expectedHash, io }) {
+  let handle = null
+  try {
+    const lexical = await io.lstat(path, { bigint: true })
+    if (
+      lexical.isSymbolicLink()
+      || !lexical.isFile()
+      || identityFingerprint(lexical) !== expectedIdentity
+      || Number(lexical.size) !== expectedSize
+      || Number(lexical.nlink) !== 1
+    ) throw new Error("归档文件身份或大小校验失败")
+    handle = await io.open(path, constants.O_RDONLY | io.noFollowFlag)
+    const before = await handle.stat({ bigint: true })
+    if (
+      before.isSymbolicLink()
+      || !before.isFile()
+      || identityFingerprint(before) !== expectedIdentity
+      || Number(before.size) !== expectedSize
+      || Number(before.nlink) !== 1
+    ) throw new Error("归档文件身份或大小校验失败")
+    const bytes = await handle.readFile()
+    const after = await handle.stat({ bigint: true })
+    if (
+      !after.isFile()
+      || identityFingerprint(after) !== expectedIdentity
+      || Number(after.size) !== expectedSize
+      || Number(after.nlink) !== 1
+      || bytes.length !== expectedSize
+      || contentFingerprint(bytes) !== expectedHash
+    ) throw new Error("归档文件内容校验失败")
+    return Object.freeze({ identity: expectedIdentity, size: expectedSize, hash: expectedHash })
+  } finally {
+    if (handle) {
+      try { await handle.close() } catch { /* verification failure remains authoritative */ }
     }
   }
-  if (packageIdentity !== null) {
-    try {
-      await assertOwnedPackage({ packagePath, canonicalRoot, packageIdentity, io })
-      await io.rmdir(packagePath)
-    } catch (error) {
-      if (error?.code !== "ENOENT") complete = false
+}
+
+async function writeArchiveCommitMarker({
+  markerPath,
+  markerBytes,
+  packagePath,
+  packageIdentity,
+  rootAnchor,
+  metadataPath,
+  metadataIdentity,
+  metadataSize,
+  metadataHash,
+  io,
+}) {
+  const markerSize = markerBytes.length
+  const markerHash = contentFingerprint(markerBytes)
+  let markerIdentity = null
+  let handle = null
+  let phase = "precommit"
+
+  const proveMetadataAndParent = async () => {
+    await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+    await verifyExpectedFile({
+      path: metadataPath,
+      expectedIdentity: metadataIdentity,
+      expectedSize: metadataSize,
+      expectedHash: metadataHash,
+      io,
+    })
+    await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+  }
+
+  const validateHandle = async (candidateHandle) => {
+    const before = await candidateHandle.stat({ bigint: true })
+    if (
+      !before.isFile()
+      || identityFingerprint(before) !== markerIdentity
+      || Number(before.size) !== markerSize
+      || Number(before.nlink) !== 1
+    ) throw new Error("归档提交标记身份校验失败")
+    if (typeof candidateHandle.sync !== "function") throw new Error("归档提交标记同步不可用")
+    await candidateHandle.sync()
+    const observed = Buffer.alloc(markerSize)
+    const { bytesRead } = await candidateHandle.read(observed, 0, markerSize, 0)
+    const after = await candidateHandle.stat({ bigint: true })
+    if (
+      bytesRead !== markerSize
+      || !after.isFile()
+      || identityFingerprint(after) !== markerIdentity
+      || Number(after.size) !== markerSize
+      || Number(after.nlink) !== 1
+      || contentFingerprint(observed) !== markerHash
+    ) throw new Error("归档提交标记内容校验失败")
+  }
+
+  try {
+    await proveMetadataAndParent()
+    handle = await io.open(
+      markerPath,
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | io.noFollowFlag,
+      0o600,
+    )
+    const opened = await handle.stat({ bigint: true })
+    if (!opened.isFile() || Number(opened.size) !== 0 || Number(opened.nlink) !== 1) {
+      throw new Error("归档提交标记无效")
+    }
+    markerIdentity = identityFingerprint(opened)
+    phase = "commit_io"
+    await handle.writeFile(markerBytes)
+    await validateHandle(handle)
+    await handle.close()
+    handle = null
+    phase = "post_validation"
+    await proveMetadataAndParent()
+    await verifyExpectedFile({
+      path: markerPath,
+      expectedIdentity: markerIdentity,
+      expectedSize: markerSize,
+      expectedHash: markerHash,
+      io,
+    })
+    await proveMetadataAndParent()
+    return
+  } catch (error) {
+    if (["commit_io", "post_validation"].includes(phase) && markerIdentity) {
+      let reconciliationHandle = handle
+      try {
+        await proveMetadataAndParent()
+        if (reconciliationHandle) {
+          try {
+            await reconciliationHandle.stat({ bigint: true })
+          } catch (handleError) {
+            if (handleError?.code !== "EBADF") throw handleError
+            try { await reconciliationHandle.close() } catch { /* already closed */ }
+            if (reconciliationHandle === handle) handle = null
+            reconciliationHandle = null
+          }
+        }
+        if (!reconciliationHandle) reconciliationHandle = await io.open(markerPath, constants.O_RDWR | io.noFollowFlag)
+        await validateHandle(reconciliationHandle)
+        await reconciliationHandle.close()
+        if (reconciliationHandle === handle) handle = null
+        reconciliationHandle = null
+        await proveMetadataAndParent()
+        await verifyExpectedFile({
+          path: markerPath,
+          expectedIdentity: markerIdentity,
+          expectedSize: markerSize,
+          expectedHash: markerHash,
+          io,
+        })
+        await proveMetadataAndParent()
+        return
+      } catch {
+        if (reconciliationHandle) {
+          try { await reconciliationHandle.close() } catch { /* recovery remains blocked */ }
+          if (reconciliationHandle === handle) handle = null
+        }
+      }
+    }
+    throw error
+  } finally {
+    if (handle) {
+      try { await handle.close() } catch { /* recovery remains blocked */ }
     }
   }
-  return complete
 }
 
 export async function archiveCandidateMetadata({
@@ -272,7 +460,7 @@ export async function archiveCandidateMetadata({
   assertNoDuplicate({ existingPapers, existingArchiveIdentities, request })
 
   const io = { ...DEFAULT_FILE_SYSTEM, ...fileSystem }
-  for (const method of ["lstat", "mkdir", "open", "realpath", "rename", "rmdir", "unlink"]) {
+  for (const method of ["lstat", "mkdir", "open", "realpath"]) {
     if (typeof io[method] !== "function") throw new TypeError(`归档文件系统缺少 ${method}`)
   }
   if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw new Error("当前平台不支持归档安全写入")
@@ -291,74 +479,179 @@ export async function archiveCandidateMetadata({
     candidate: request.candidate,
     archivedAt,
   })
-  const canonicalRoot = await canonicalSourceRoot(sourceRoot, io)
-  const packagePath = join(canonicalRoot, request.paper_id)
-  if (dirname(packagePath) !== canonicalRoot || !isInside(canonicalRoot, packagePath)) throw new Error("归档目标路径无效")
-  const temporaryPath = join(packagePath, ".metadata.yaml.tmp")
+  const expectedBytes = Buffer.from(metadata, "utf8")
+  const expectedSize = expectedBytes.length
+  const expectedHash = contentFingerprint(expectedBytes)
+  const rootAnchor = await acquireSourceRoot(sourceRoot, io)
+  const packagePath = join(rootAnchor.path, request.paper_id)
+  if (dirname(packagePath) !== rootAnchor.path || !isInside(rootAnchor.path, packagePath)) {
+    try { await rootAnchor.handle.close() } catch { /* invalid path remains authoritative */ }
+    throw new Error("归档目标路径无效")
+  }
   const metadataPath = join(packagePath, "metadata.yaml")
-  if (await lstatIfPresent(packagePath, io)) throw new Error("目标论文目录已存在，拒绝覆盖")
+  const markerPath = join(packagePath, ARCHIVE_COMMIT_FILE)
+  const markerBytes = Buffer.from(serializeArchiveCommit(metadata), "utf8")
   let packageIdentity = null
-  let temporaryIdentity = null
+  let metadataIdentity = null
   let handle = null
+  let mutated = false
+  let phase = "precommit"
 
   try {
+    await assertRootAnchor(rootAnchor, io)
+    if (await lstatIfPresent(packagePath, io)) throw new Error("目标论文目录已存在，拒绝覆盖")
+    await assertRootAnchor(rootAnchor, io)
     try {
       await io.mkdir(packagePath, { recursive: false, mode: 0o700 })
     } catch (error) {
       if (error?.code === "EEXIST") throw new Error("目标论文目录已存在，拒绝覆盖")
       throw new Error("无法创建归档目标目录")
     }
+    mutated = true
     const packageInfo = await io.lstat(packagePath, { bigint: true })
     if (packageInfo.isSymbolicLink() || !packageInfo.isDirectory()) throw new Error("归档目标目录无效")
     packageIdentity = identityFingerprint(packageInfo)
-    await assertOwnedPackage({ packagePath, canonicalRoot, packageIdentity, io })
-
+    await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
     handle = await io.open(
-      temporaryPath,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | io.noFollowFlag,
+      metadataPath,
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | io.noFollowFlag,
       0o600,
     )
     const openedBefore = await handle.stat({ bigint: true })
-    if (openedBefore.isSymbolicLink() || !openedBefore.isFile()) throw new Error("归档临时文件无效")
-    temporaryIdentity = identityFingerprint(openedBefore)
-    await handle.writeFile(metadata, { encoding: "utf8" })
-    if (typeof handle.sync === "function") await handle.sync()
-    const openedAfter = await handle.stat({ bigint: true })
     if (
-      !openedAfter.isFile()
-      || identityFingerprint(openedAfter) !== temporaryIdentity
-      || Number(openedAfter.size) !== Buffer.byteLength(metadata, "utf8")
-    ) throw new Error("归档临时文件校验失败")
+      openedBefore.isSymbolicLink()
+      || !openedBefore.isFile()
+      || Number(openedBefore.size) !== 0
+      || Number(openedBefore.nlink) !== 1
+    ) {
+      throw new Error("归档目标文件无效")
+    }
+    metadataIdentity = identityFingerprint(openedBefore)
+    phase = "commit_io"
+    await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+    await handle.writeFile(expectedBytes)
+    if (typeof handle.sync === "function") await handle.sync()
+    const openedAfterWrite = await handle.stat({ bigint: true })
+    if (
+      !openedAfterWrite.isFile()
+      || identityFingerprint(openedAfterWrite) !== metadataIdentity
+      || Number(openedAfterWrite.size) !== expectedSize
+      || Number(openedAfterWrite.nlink) !== 1
+    ) throw new Error("归档目标文件校验失败")
+    const observedBytes = Buffer.alloc(expectedSize)
+    const { bytesRead } = await handle.read(observedBytes, 0, expectedSize, 0)
+    const openedAfterRead = await handle.stat({ bigint: true })
+    if (
+      bytesRead !== expectedSize
+      || !openedAfterRead.isFile()
+      || identityFingerprint(openedAfterRead) !== metadataIdentity
+      || Number(openedAfterRead.size) !== expectedSize
+      || Number(openedAfterRead.nlink) !== 1
+      || contentFingerprint(observedBytes) !== expectedHash
+    ) throw new Error("归档目标文件内容校验失败")
     await handle.close()
     handle = null
-
-    await assertOwnedPackage({ packagePath, canonicalRoot, packageIdentity, io })
-    const temporaryInfo = await io.lstat(temporaryPath, { bigint: true })
-    if (temporaryInfo.isSymbolicLink() || !temporaryInfo.isFile() || identityFingerprint(temporaryInfo) !== temporaryIdentity) {
-      throw new Error("归档临时文件在提交前发生变化")
-    }
-    if (await lstatIfPresent(metadataPath, io)) throw new Error("归档目标文件已存在，拒绝覆盖")
-    await io.rename(temporaryPath, metadataPath)
-    const published = await io.lstat(metadataPath, { bigint: true })
-    if (published.isSymbolicLink() || !published.isFile() || identityFingerprint(published) !== temporaryIdentity) {
-      throw new Error("归档提交后校验失败")
-    }
-    await assertOwnedPackage({ packagePath, canonicalRoot, packageIdentity, io })
-  } catch {
-    if (handle) {
-      try { await handle.close() } catch { /* cleanup result below remains authoritative */ }
-      handle = null
-    }
-    const complete = await cleanupOwnedTransaction({
-      packagePath,
-      temporaryPath,
-      canonicalRoot,
-      packageIdentity,
-      temporaryIdentity,
+    phase = "post_validation"
+    await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+    await verifyExpectedFile({
+      path: metadataPath,
+      expectedIdentity: metadataIdentity,
+      expectedSize,
+      expectedHash,
       io,
     })
-    if (!complete) throw new Error("归档写入失败且清理未完成，未覆盖现有内容")
+    await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+    await writeArchiveCommitMarker({
+      markerPath,
+      markerBytes,
+      packagePath,
+      packageIdentity,
+      rootAnchor,
+      metadataPath,
+      metadataIdentity,
+      metadataSize: expectedSize,
+      metadataHash: expectedHash,
+      io,
+    })
+  } catch (error) {
+    if (phase === "commit_io" && mutated && packageIdentity && metadataIdentity) {
+      let reconciliationHandle = handle
+      try {
+        await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+        if (reconciliationHandle) {
+          try {
+            await reconciliationHandle.stat({ bigint: true })
+          } catch (handleError) {
+            if (handleError?.code !== "EBADF") throw handleError
+            try { await reconciliationHandle.close() } catch { /* already closed */ }
+            if (reconciliationHandle === handle) handle = null
+            reconciliationHandle = null
+          }
+        }
+        if (!reconciliationHandle) {
+          reconciliationHandle = await io.open(metadataPath, constants.O_RDWR | io.noFollowFlag)
+        }
+        const before = await reconciliationHandle.stat({ bigint: true })
+        if (
+          !before.isFile()
+          || identityFingerprint(before) !== metadataIdentity
+          || Number(before.size) !== expectedSize
+          || Number(before.nlink) !== 1
+        ) throw new Error("ambiguous archive state")
+        if (typeof reconciliationHandle.sync !== "function") throw new Error("ambiguous archive state")
+        await reconciliationHandle.sync()
+        const observedBytes = Buffer.alloc(expectedSize)
+        const { bytesRead } = await reconciliationHandle.read(observedBytes, 0, expectedSize, 0)
+        const after = await reconciliationHandle.stat({ bigint: true })
+        if (
+          bytesRead !== expectedSize
+          || !after.isFile()
+          || identityFingerprint(after) !== metadataIdentity
+          || Number(after.size) !== expectedSize
+          || Number(after.nlink) !== 1
+          || contentFingerprint(observedBytes) !== expectedHash
+        ) throw new Error("ambiguous archive state")
+        await reconciliationHandle.close()
+        if (reconciliationHandle === handle) handle = null
+        reconciliationHandle = null
+        await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+        await verifyExpectedFile({
+          path: metadataPath,
+          expectedIdentity: metadataIdentity,
+          expectedSize,
+          expectedHash,
+          io,
+        })
+        await assertOwnedPackage({ packagePath, rootAnchor, packageIdentity, io })
+        await writeArchiveCommitMarker({
+          markerPath,
+          markerBytes,
+          packagePath,
+          packageIdentity,
+          rootAnchor,
+          metadataPath,
+          metadataIdentity,
+          metadataSize: expectedSize,
+          metadataHash: expectedHash,
+          io,
+        })
+        return Object.freeze({ status: "created", paper_id: request.paper_id, folder_name: request.paper_id })
+      } catch {
+        if (reconciliationHandle) {
+          try { await reconciliationHandle.close() } catch { /* recovery remains blocked */ }
+          if (reconciliationHandle === handle) handle = null
+        }
+      }
+    }
+    if (handle) {
+      try { await handle.close() } catch { /* recovery result below remains authoritative */ }
+      handle = null
+    }
+    if (!mutated && error?.message === "目标论文目录已存在，拒绝覆盖") throw error
+    if (mutated) throw new Error("归档写入失败且恢复受阻，清理未完成；请人工检查，未声称已清理")
     throw new Error("归档写入失败，未保留不完整资料包")
+  } finally {
+    try { await rootAnchor.handle.close() } catch { /* transaction result remains authoritative */ }
   }
 
   return Object.freeze({ status: "created", paper_id: request.paper_id, folder_name: request.paper_id })
