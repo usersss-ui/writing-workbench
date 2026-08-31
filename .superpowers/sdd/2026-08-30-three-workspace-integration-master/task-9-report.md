@@ -11,7 +11,8 @@
 - Checkpoint 4: `adb482a` (`feat(paper-library): add local note import dialog shell`).
 - Checkpoint 5: `2feab98` (`feat(paper-library): complete note import workflow`).
 - Independent-review hardening: `0d16483` (`fix(paper-library): harden note import boundaries`).
-- Implementation head before this report update: `0d16483`.
+- Second-review syntax and response hardening: `24286cf` (`fix(paper-library): validate canonical note syntax`).
+- Implementation head before this report update: `24286cf`.
 
 ## RED/GREEN evidence
 
@@ -63,20 +64,29 @@
 - A failure to remove `.previous-*` after both generated directories have been published is treated as post-commit housekeeping and does not turn a successful rebuild into a source-note rollback.
 - The desktop client NFKC-normalizes requested basenames, accepts only canonical response basenames or `_vN` variants, validates only the three exact capability matrices, preserves static browsing without capabilities, and aborts obsolete inspections while retaining generation checks.
 
+### Second-review syntax and response hardening
+
+- Canonical-basename RED: the focused DOM command discovered 10 tests with 3 passed and 7 failed. `_v10`, `_v19`, `_v100`, uppercase `.MD`, and rejection of an extension-case change all exposed the old response matcher; nested rollups account for the remaining failures.
+- Server-bound RED: after the legal range was made explicit, the focused DOM command discovered 11 tests with 9 passed and 2 failed because the client still accepted impossible `_v100000` output.
+- Markdown-code RED: the first focused note command failed 2/2 for double-backtick inline code and a four-backtick fence containing a shorter three-backtick line. Separate anti-overreach, multiline, and backslash-closer RED commands then failed 0/1, 0/3, and 0/1 respectively.
+- Governing GREEN: the final note syntax matcher passed 7/7, and the final basename matcher passed 12/12.
+- Import responses now accept only the exact NFKC canonical requested basename or the server-generated `_vN` form for `2 <= N <= 99999`. The matcher covers 10–19 and higher integers, preserves the requested `.md` extension casing, and rejects leading zeroes, extension-case drift, arbitrary suffixes, and versions outside the server loop.
+- LaTeX inspection now removes exact-length variable-backtick code spans across non-fenced line breaks, keeps escaped prose openers visible, treats backslashes inside code as ordinary content, preserves removed-span newlines, and closes fences only with the same marker character and at least the opener length.
+
 ## Final verification
 
 - Required focused suite:
   `node --test exporter/paper-library/runtime.test.mjs exporter/paper-library/note-import.test.mjs exporter/paper-library/note-import-transaction.test.mjs prototype/desktop/paper-library-dom.test.mjs`
-  exited 0 with 143 passed and 0 failed.
+  exited 0 with 162 passed and 0 failed.
 - Coordinator suite:
   `node --test exporter/paper-library/write-coordinator.test.mjs`
   exited 0 with 11 passed and 0 failed.
 - Required aggregate:
   `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs`
-  discovered 465 tests and exited 1 with 464 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
+  discovered 484 tests and exited 1 with 483 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
 - Aggregate excluding the package-policy test:
   `zsh -o extendedglob -o pipefail -c 'node --test exporter/paper-library/^package-audit.test.mjs prototype/desktop/*.test.mjs 2>&1 | tail -30'`
-  exited 0 with 450 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
+  exited 0 with 469 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
 - Syntax checks passed independently for `runtime.mjs`, `note-import.mjs`, `library.mjs`, and `paper-inspector.mjs` using `node --check`.
 - `git diff --check` and `git diff --check 7013fc2..HEAD` both passed with no output.
 
