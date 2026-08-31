@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="P02 个人论文工作台：把旧阅读笔记中的算法机制转化为写作材料，并显式补齐理论结果。"
+    />
+    <title>P02 项目工作台 · 学术研究工作台</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231677ff'/%3E%3Cpath d='M18 47V17h15c8 0 13 4 13 11 0 5-3 9-8 10l10 9H37l-8-8h-2v8zm9-16h6c3 0 5-1 5-4s-2-4-5-4h-6z' fill='white'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-window" aria-label="P02 个人论文桌面工作台">
+      <header class="window-bar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light traffic-light--red"></span>
+          <span class="traffic-light traffic-light--yellow"></span>
+          <span class="traffic-light traffic-light--green"></span>
+        </div>
+        <div class="window-context">
+          <span class="context-kicker">我的论文</span>
+          <span class="context-divider">/</span>
+          <strong>P02 项目工作台</strong>
+        </div>
+        <label class="command-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="global-search" type="search" aria-label="搜索论文或理论结果" placeholder="搜索论文或理论结果" />
+          <kbd aria-hidden="true">⌘ K</kbd>
+        </label>
+        <div class="window-actions">
+          <button class="icon-button" type="button" aria-label="通知">○</button>
+          <button class="avatar-button" type="button" aria-label="用户菜单">杨</button>
+        </div>
+      </header>
+
+      <div class="workspace-shell">
+        <aside class="sidebar">
+          <a class="brand" href="./index.html" aria-label="返回研究首页">
+            <span class="brand-mark" aria-hidden="true">R</span>
+            <span>
+              <strong>学术研究工作台</strong>
+              <small>个人研究控制台</small>
+            </span>
+          </a>
+
+          <nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">研究流程</p>
+            <a class="nav-item" href="./index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
+            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
+            <a class="nav-item nav-item--active" href="./p02.html" aria-current="page">
+              <span aria-hidden="true">□</span><span>我的论文</span>
+            </a>
+            <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
+
+            <p class="nav-caption nav-caption--spaced">P02 工作区</p>
+            <a class="nav-item" href="#materials"><span aria-hidden="true">⌘</span><span>写作材料</span></a>
+            <a class="nav-item" href="#writing-entry"><span aria-hidden="true">✓</span><span>写作入口</span></a>
+          </nav>
+
+          <section class="sidebar-plan" aria-labelledby="p02-focus-title">
+            <div class="plan-title-row">
+              <h2 id="p02-focus-title">当前重点</h2>
+              <strong>理论出口</strong>
+            </div>
+            <p>算法机制继续整理；同时先确定最终需要证明和测量的结果。</p>
+          </section>
+        </aside>
+
+        <section class="main-column project-main" id="dashboard">
+          <div class="page-heading project-heading">
+            <div>
+              <p class="eyebrow">我的论文 · P02 · 在研</p>
+              <h1>动态有向网络下的低通信约束优化</h1>
+              <p>旧笔记先作为算法机制库；理论结论必须回到论文原文，重新记录条件、定理和适用边界。</p>
+            </div>
+            <div class="heading-actions">
+              <a class="button button--secondary" href="./directions.html">查看方向依据</a>
+              <button class="button button--primary" id="search-new-paper" type="button">补充理论文献</button>
+            </div>
+          </div>
+
+          <section class="project-contract" aria-labelledby="project-contract-title">
+            <div class="project-contract-main">
+              <div class="section-heading section-heading--compact">
+                <div>
+                  <p class="eyebrow">项目路径</p>
+                  <h2 id="project-contract-title">算法先行，但先留下理论出口</h2>
+                </div>
+                <span class="path-summary">当前：算法规划</span>
+              </div>
+              <ol class="project-stage-steps">
+                <li class="project-stage project-stage--active"><span>1</span><strong>算法规划</strong><small>机制画布</small></li>
+                <li class="project-stage"><span>2</span><strong>理论目标</strong><small>确定要证明什么</small></li>
+                <li class="project-stage"><span>3</span><strong>理论分析</strong><small>引理与证明链</small></li>
+                <li class="project-stage"><span>4</span><strong>仿真验证</strong><small>指标与对照</small></li>
+                <li class="project-stage"><span>5</span><strong>写作材料</strong><small>进入章节</small></li>
+              </ol>
+            </div>
+            <div class="project-contract-note">
+              <span aria-hidden="true">i</span>
+              <div>
+                <strong>这里不计算虚假的完成百分比</strong>
+                <p>页面只记录“材料处于什么状态”。笔记没整理理论结果，不代表原论文没有报告。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel material-workbench" id="materials" aria-labelledby="materials-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">章节材料整理器</p>
+                <h2 id="materials-title">从阅读笔记进入 P02</h2>
+                <p>算法和理论使用不同的核验标准；切换查看两类材料当前能做什么、还缺什么。</p>
+              </div>
+              <a class="text-button" href="#writing-entry">查看写作入口 ↓</a>
+            </div>
+
+            <div class="material-switcher" role="radiogroup" aria-label="材料类型切换">
+              <input class="visually-hidden material-radio" type="radio" name="material-view" id="material-algorithm" checked />
+              <input class="visually-hidden material-radio" type="radio" name="material-view" id="material-theory" />
+
+              <div class="material-tabs">
+                <label for="material-algorithm"><span aria-hidden="true">⌘</span>算法材料<small>旧笔记的主要内容</small></label>
+                <label for="material-theory"><span aria-hidden="true">∑</span>理论结果<small>条件、定理与结果边界</small></label>
+              </div>
+
+              <section class="material-view material-view--algorithm" aria-labelledby="algorithm-material-title">
+                <div class="material-summary">
+                  <div><span>旧笔记定位</span><strong>算法机制库</strong><small>继续复用，不批量重写</small></div>
+                  <div><span>可直接进入</span><strong>机制画布</strong><small>记录继承、修改和新增</small></div>
+                  <div><span>不能自动进入</span><strong>理论结论</strong><small>收敛结果必须重新核验</small></div>
+                </div>
+
+                <div class="section-heading material-section-heading">
+                  <div>
+                    <p class="eyebrow">算法候选</p>
+                    <h3 id="algorithm-material-title">可供 P02 组合的四类机制</h3>
+                  </div>
+                  <span class="status status--active">规划中</span>
+                </div>
+
+                <div class="mechanism-material-grid">
+                  <article class="mechanism-material-card">
+                    <div class="mechanism-card-meta"><code>M01</code><span>继承候选</span></div>
+                    <h4>有向非平衡网络归一化</h4>
+                    <p>用于处理权重偏置与信息混合，先进入问题模型和网络机制部分。</p>
+                    <dl><div><dt>候选笔记</dt><dd>Xi18-ADDOPT</dd></div><div><dt>写作用途</dt><dd>算法设计依据</dd></div></dl>
+                  </article>
+                  <article class="mechanism-material-card">
+                    <div class="mechanism-card-meta"><code>M02</code><span>修改候选</span></div>
+                    <h4>梯度或状态跟踪更新</h4>
+                    <p>梳理局部变量、邻居信息和跟踪误差，暂不继承原论文的收敛结论。</p>
+                    <dl><div><dt>候选笔记</dt><dd>Nedic17-DIGing</dd></div><div><dt>写作用途</dt><dd>更新式骨架</dd></div></dl>
+                  </article>
+                  <article class="mechanism-material-card">
+                    <div class="mechanism-card-meta"><code>M03</code><span>新增候选</span></div>
+                    <h4>低通信触发规则</h4>
+                    <p>明确何时发送、何时保持，以及触发误差会怎样进入后续证明。</p>
+                    <dl><div><dt>候选笔记</dt><dd>待从同类工作筛选</dd></div><div><dt>写作用途</dt><dd>核心差异</dd></div></dl>
+                  </article>
+                  <article class="mechanism-material-card">
+                    <div class="mechanism-card-meta"><code>M04</code><span>修改候选</span></div>
+                    <h4>耦合约束协调机制</h4>
+                    <p>记录局部约束信息如何汇总，并保留可行性与对偶误差的理论出口。</p>
+                    <dl><div><dt>候选笔记</dt><dd>Falsone17-DD</dd></div><div><dt>写作用途</dt><dd>约束处理</dd></div></dl>
+                  </article>
+                </div>
+              </section>
+
+              <section class="material-view material-view--theory" aria-labelledby="theory-material-title">
+                <div class="theory-boundary" id="theory-boundary">
+                  <span aria-hidden="true">!</span>
+                  <div>
+                    <strong>理论结果待补层</strong>
+                    <p>旧笔记偏重算法，不把“尚未整理”误写成“原论文未报告”。每项结果都按原文核验状态推进。</p>
+                  </div>
+                </div>
+
+                <div class="evidence-status-flow" aria-label="理论材料状态说明">
+                  <span>未检查原文</span><b aria-hidden="true">→</b><span>已定位</span><b aria-hidden="true">→</b>
+                  <span>已核验</span><b aria-hidden="true">→</b><span>可用于 P02</span><b aria-hidden="true">/</b><span>不适用</span>
+                </div>
+
+                <div class="section-heading material-section-heading">
+                  <div>
+                    <p class="eyebrow">理论结果清单</p>
+                    <h3 id="theory-material-title">P02 需要逐项回答的结果</h3>
+                  </div>
+                  <span class="status status--warning">不从算法笔记推断</span>
+                </div>
+
+                <div class="theory-result-list">
+                  <article><div><strong>收敛性</strong><small>收敛到什么对象：最优点、解集还是邻域？</small></div><p>先定义主定理对象、网络条件和步长条件。</p><span class="evidence-state evidence-state--unchecked">未检查原文</span></article>
+                  <article><div><strong>收敛率</strong><small>目标误差、迭代差或解集距离必须区分</small></div><p>机制确定后，再核验可继承的证明工具与速率形式。</p><span class="evidence-state evidence-state--unchecked">未检查原文</span></article>
+                  <article><div><strong>共识与跟踪误差</strong><small>网络混合误差如何衰减或累积</small></div><p>已有算法笔记仅提供检索入口，尚未回到原文定位定理与条件。</p><span class="evidence-state evidence-state--unchecked">未检查原文</span></article>
+                  <article><div><strong>约束违背</strong><small>瞬时、累计或渐近可行性不能混写</small></div><p>需要与耦合约束协调机制及仿真指标对应。</p><span class="evidence-state evidence-state--unchecked">未检查原文</span></article>
+                  <article><div><strong>通信复杂度</strong><small>触发次数、消息量或通信轮数先选口径</small></div><p>低通信不能只靠曲线描述，需要明确比较预算。</p><span class="evidence-state evidence-state--unchecked">未检查原文</span></article>
+                  <article class="theory-result--decision"><div><strong>遗憾界</strong><small>仅当目标函数或数据随时间变化时才成为核心结果</small></div><p><b>动态网络不等于在线目标</b>；先确定 P02 是离线优化还是在线优化，不适用时再明确标记。</p><span class="evidence-state evidence-state--unchecked">未检查原文</span></article>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel writing-entry" id="writing-entry" aria-labelledby="writing-entry-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">写作入口</p>
+                <h2 id="writing-entry-title">材料先进入对应章节，不直接拼接原笔记</h2>
+              </div>
+              <span class="status">第一版仅整理材料</span>
+            </div>
+            <div class="writing-entry-grid">
+              <article><span class="writing-order">01</span><div><strong>问题模型与算法</strong><p>从机制卡生成章节提纲，保留候选来源和修改理由。</p></div><span class="writing-readiness writing-readiness--ready">可开始整理</span></article>
+              <article><span class="writing-order">02</span><div><strong>理论分析</strong><p>先确定目标结果，再建立假设、引理和主定理依赖链。</p></div><span class="writing-readiness">等待核验</span></article>
+              <article><span class="writing-order">03</span><div><strong>仿真与结果</strong><p>指标必须对应理论目标，基线比较需统一通信与停止预算。</p></div><span class="writing-readiness">等待设计</span></article>
+            </div>
+          </section>
+        </section>
+
+        <aside class="inspector project-inspector" aria-labelledby="current-project-title">
+          <div class="inspector-heading">
+            <div>
+              <p class="eyebrow">当前课题</p>
+              <h2 id="current-project-title">P02 项目状态</h2>
+            </div>
+            <button class="icon-button" type="button" aria-label="课题设置">•••</button>
+          </div>
+
+          <section class="current-project-card">
+            <div class="project-card-top"><code>P02</code><span class="status status--active">算法规划中</span></div>
+            <h3>旧笔记可用，但理论结果尚未系统核验</h3>
+            <p>当前阶段的目标不是写完证明，而是让每个算法机制都有明确的理论出口。</p>
+          </section>
+
+          <section class="inspector-section">
+            <h3>阶段状态</h3>
+            <dl class="project-status-list">
+              <div><dt>算法材料</dt><dd class="stage-value stage-value--active">正在整理</dd></div>
+              <div><dt>理论目标</dt><dd class="stage-value stage-value--waiting">待确定</dd></div>
+              <div><dt>理论证据</dt><dd class="stage-value stage-value--waiting">待核验</dd></div>
+              <div><dt>写作章节</dt><dd class="stage-value">尚未进入</dd></div>
+            </dl>
+          </section>
+
+          <section class="inspector-section">
+            <div class="inspector-title-row"><h3>下一步只做三件事</h3><span class="count-badge">3</span></div>
+            <ol class="next-action-list">
+              <li><span>1</span><p>确认 P02 的目标函数是否随时间变化。</p></li>
+              <li><span>2</span><p>为四类算法机制选择核心来源论文。</p></li>
+              <li><span>3</span><p>先写主定理目标，再展开引理与证明。</p></li>
+            </ol>
+          </section>
+
+          <section class="inspector-section source-boundary-card">
+            <h3>材料边界</h3>
+            <p><strong>阅读笔记</strong>回答“别人怎么设计算法”。</p>
+            <p><strong>理论证据</strong>回答“在什么条件下得到什么结果”。</p>
+            <p><strong>P02 写作材料</strong>回答“这条证据如何服务自己的章节”。</p>
+          </section>
+
+          <section class="thesis-map">
+            <p class="eyebrow">学位论文映射</p>
+            <h3>计划进入第 3 章</h3>
+            <p>章节映射暂时保留为计划，不在理论结果核验前标记完成。</p>
+            <a class="button button--secondary button--full" href="./index.html#thesis">查看论文关系 →</a>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <dialog class="search-dialog" id="search-dialog" aria-labelledby="search-dialog-title">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">理论证据补充</p><h2 id="search-dialog-title">搜索 P02 所需的理论论文</h2></div>
+          <button class="icon-button" value="cancel" aria-label="关闭">×</button>
+        </div>
+        <p>这里只保存检索条件。找到论文后先进入阅读队列，不自动把摘要升级为可引用理论结论。</p>
+        <label>研究主题<input name="topic" id="search-topic" value="时变有向网络 低通信 耦合约束 收敛性" /></label>
+        <div class="dialog-grid">
+          <label>优先结果<select><option>收敛性与收敛率</option><option>约束违背</option><option>通信复杂度</option><option>遗憾界</option></select></label>
+          <label>核验阶段<select><option>先找候选论文</option><option>定位主定理</option><option>核验条件与结论</option></select></label>
+        </div>
+        <div class="dialog-note"><strong>证据路径</strong><span>候选论文 → 回到原文 → 定位定理 → 核验条件 → 进入 P02</span></div>
+        <div class="dialog-actions">
+          <button class="button button--secondary" value="cancel">取消</button>
+          <button class="button button--primary" id="save-search" value="default">保存检索任务</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">理论检索任务已保存</div>
+    <script type="module" src="./app.mjs?v=3"></script>
+  </body>
+</html>

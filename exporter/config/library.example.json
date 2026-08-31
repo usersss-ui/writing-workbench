@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "source_id": "main_papers",
+      "path": "REPLACE_WITH_ABSOLUTE_PATH"
+    }
+  ]
+}

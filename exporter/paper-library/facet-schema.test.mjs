@@ -1,0 +1,105 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+import {
+  FACET_GROUPS,
+  FACET_PATHS,
+  createEmptyFacets,
+  flattenFacetValues,
+  serializeFacetSchema,
+  validatePaperFacets,
+} from "./facet-schema.mjs"
+
+test("facet schema exposes unique orthogonal paths", () => {
+  assert.equal(new Set(FACET_PATHS).size, FACET_PATHS.length)
+  assert.deepEqual(FACET_PATHS, [
+    "research.domain", "research.mode", "objective",
+    "constraints.scope", "constraints.form", "constraints.consistency",
+    "oracle.information", "oracle.estimation",
+    "methods.framework", "methods.coordination", "methods.operator",
+    "network.direction", "network.time", "network.balance", "network.mixing",
+    "privacy_robustness", "results", "applications",
+  ])
+  assert.equal(new Set(FACET_GROUPS.flatMap(({ values }) => values)).size,
+    FACET_GROUPS.flatMap(({ values }) => values).length)
+})
+
+test("empty facets has a stable nested object shape", () => {
+  assert.deepEqual(createEmptyFacets(), {
+    research: { domain: [], mode: [] },
+    objective: [],
+    constraints: { scope: [], form: [], consistency: [] },
+    oracle: { information: [], estimation: [] },
+    methods: { framework: [], coordination: [], operator: [] },
+    network: { direction: [], time: [], balance: [], mixing: [] },
+    privacy_robustness: [],
+    results: [],
+    applications: [],
+  })
+})
+
+test("facet values must come from the controlled vocabulary", () => {
+  const facets = createEmptyFacets()
+  facets.constraints.scope = ["耦合约束对偶分解"]
+  assert.throws(() => validatePaperFacets(facets), /分面值不在受控词表/u)
+})
+
+test("flattenFacetValues returns every atomic value once", () => {
+  const facets = createEmptyFacets()
+  facets.constraints.scope = ["耦合约束"]
+  facets.constraints.form = ["不等式约束"]
+  facets.methods.framework = ["对偶分解"]
+  assert.deepEqual(flattenFacetValues(facets), ["耦合约束", "不等式约束", "对偶分解"])
+})
+
+test("facet validation rejects unknown fields and composite legacy labels", () => {
+  const unknown = createEmptyFacets()
+  unknown.legacy = []
+  assert.throws(() => validatePaperFacets(unknown), /未知分面字段/u)
+
+  const nestedUnknown = createEmptyFacets()
+  nestedUnknown.research.extra = []
+  assert.throws(() => validatePaperFacets(nestedUnknown), /未知分面字段/u)
+
+  const composite = createEmptyFacets()
+  composite.methods.framework = ["有向网络-梯度跟踪"]
+  assert.throws(() => validatePaperFacets(composite), /分面值不在受控词表/u)
+})
+
+test("facet validation rejects malformed arrays, duplicates, and whitespace", () => {
+  const malformed = createEmptyFacets()
+  malformed.objective = "凸"
+  assert.throws(() => validatePaperFacets(malformed), /分面字段必须是字符串数组/u)
+
+  const duplicate = createEmptyFacets()
+  duplicate.objective = ["凸", "凸"]
+  assert.throws(() => validatePaperFacets(duplicate), /分面数组不能重复/u)
+
+  const whitespace = createEmptyFacets()
+  whitespace.objective = [" 凸"]
+  assert.throws(() => validatePaperFacets(whitespace), /分面值不能包含首尾空白/u)
+})
+
+test("facet validation returns the original object and schema serialization is data-only", () => {
+  const facets = createEmptyFacets()
+  facets.research.domain = ["分布式优化"]
+  assert.equal(validatePaperFacets(facets), facets)
+
+  const serialized = serializeFacetSchema()
+  assert.deepEqual(Object.keys(serialized), ["version", "groups"])
+  assert.equal(serialized.version, 1)
+  assert.deepEqual(serialized.groups, FACET_GROUPS)
+  assert.notEqual(serialized.groups, FACET_GROUPS)
+  assert.notEqual(serialized.groups[0], FACET_GROUPS[0])
+  assert.notEqual(serialized.groups[0].values, FACET_GROUPS[0].values)
+})
+
+test("facet validation requires own root fields rather than inherited fields", () => {
+  const inherited = Object.create(createEmptyFacets())
+  assert.throws(() => validatePaperFacets(inherited), /分面字段缺失/u)
+})
+
+test("facet validation rejects non-enumerable unknown fields", () => {
+  const facets = createEmptyFacets()
+  Object.defineProperty(facets, "hidden", { value: [], enumerable: false })
+  assert.throws(() => validatePaperFacets(facets), /未知分面字段/u)
+})

@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="桌面端个人论文库：统一浏览阅读材料、证据状态、仿真复现状态与 P02 写作用途。"
+    />
+    <title>论文库 · 学术研究工作台</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%231677ff%22/%3E%3Cpath d=%22M18 15h22a7 7 0 0 1 7 7v27H25a7 7 0 0 0-7 7V15z%22 fill=%22white%22/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./assets/vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="./assets/styles.css?v=reader-20260828" />
+  </head>
+  <body class="library-page paper-library-page">
+    <main class="app-window" aria-label="个人论文库桌面工作台">
+      <header class="window-bar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light traffic-light--red"></span>
+          <span class="traffic-light traffic-light--yellow"></span>
+          <span class="traffic-light traffic-light--green"></span>
+        </div>
+        <div class="window-context">
+          <span class="context-kicker">研究工作台</span>
+          <span class="context-divider">/</span>
+          <strong id="library-context-title">论文库</strong>
+        </div>
+        <label class="command-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            id="library-search"
+            type="search"
+            autocomplete="off"
+            aria-label="搜索论文标题、作者、编号、研究分面或原文术语"
+            placeholder="搜索标题、作者、编号、研究分面或原文术语"
+          />
+          <kbd aria-hidden="true">⌘ K</kbd>
+        </label>
+        <div class="window-actions">
+          <span class="icon-button" aria-hidden="true">i</span>
+          <span class="avatar-button" aria-label="当前用户：杨">杨</span>
+        </div>
+      </header>
+
+      <div class="workspace-shell library-shell">
+        <aside class="sidebar library-sidebar">
+          <a class="brand" href="../../prototype/desktop/index.html" aria-label="返回研究首页">
+            <span class="brand-mark" aria-hidden="true">R</span>
+            <span>
+              <strong>学术研究工作台</strong>
+              <small>个人研究控制台</small>
+            </span>
+          </a>
+
+          <nav class="primary-nav" aria-label="论文库主导航">
+            <p class="nav-caption">研究流程</p>
+            <a class="nav-item" href="../../prototype/desktop/index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
+            <a class="nav-item" href="../../prototype/desktop/directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
+            <a class="nav-item nav-item--active" href="./library.html" aria-current="page"><span aria-hidden="true">▤</span><span>论文库</span></a>
+            <a class="nav-item" href="../../prototype/desktop/p02.html"><span aria-hidden="true">□</span><span>我的论文</span></a>
+
+            <p class="nav-caption nav-caption--spaced">本页定位</p>
+            <a class="nav-item" href="#p02-shelf"><span aria-hidden="true">◎</span><span>P02 用途架</span></a>
+            <a class="nav-item" href="#library-results"><span aria-hidden="true">≡</span><span>论文列表</span></a>
+          </nav>
+
+          <section class="sidebar-plan" aria-labelledby="library-boundary-title">
+            <div class="plan-title-row">
+              <h2 id="library-boundary-title">材料边界</h2>
+              <strong>只读源文件</strong>
+            </div>
+            <p>网页只读取本机构建产物；个人标记保存在浏览器，不改动论文与笔记原文。</p>
+          </section>
+        </aside>
+
+        <section class="main-column library-main" aria-labelledby="library-page-title">
+          <div class="page-heading library-heading">
+            <div>
+              <p class="eyebrow">外部文献 · 阅读与写作材料</p>
+              <h1 id="library-page-title">个人论文库</h1>
+              <p>统一查看论文材料、核验状态、复现记录与它们对 P02 的具体用途。</p>
+            </div>
+            <div class="heading-actions">
+              <button
+                class="button button--secondary"
+                type="button"
+                disabled
+                aria-describedby="search-new-paper-help"
+              >搜索新论文</button>
+              <span class="library-action-help" id="search-new-paper-help">首版先整理本地论文；外部检索将在后续接入。</span>
+            </div>
+          </div>
+
+          <section class="library-shelf" id="p02-shelf" aria-labelledby="p02-shelf-title">
+            <div class="section-heading section-heading--compact">
+              <div>
+                <p class="eyebrow">P02 用途架</p>
+                <h2 id="p02-shelf-title">这些论文怎样服务于写作</h2>
+              </div>
+              <span class="path-summary">点击用途即可筛选</span>
+            </div>
+            <div class="library-shelf-grid">
+              <button class="library-shelf-slot" type="button" data-shelf-role="algorithm_mechanism" data-role="algorithm_mechanism" aria-pressed="false">
+                <span class="library-shelf-icon" aria-hidden="true">⌘</span>
+                <span><strong>算法机制来源</strong><small data-field="shelf-count">0 篇</small></span>
+                <span class="library-shelf-titles" data-field="shelf-titles">尚未加入论文</span>
+                <span class="library-shelf-overflow" data-field="shelf-overflow" hidden></span>
+              </button>
+              <button class="library-shelf-slot" type="button" data-shelf-role="theory_evidence" data-role="theory_evidence" aria-pressed="false">
+                <span class="library-shelf-icon" aria-hidden="true">∑</span>
+                <span><strong>理论分析来源</strong><small data-field="shelf-count">0 篇</small></span>
+                <span class="library-shelf-titles" data-field="shelf-titles">尚未加入论文</span>
+                <span class="library-shelf-overflow" data-field="shelf-overflow" hidden></span>
+              </button>
+              <button class="library-shelf-slot" type="button" data-shelf-role="simulation_baseline" data-role="simulation_baseline" aria-pressed="false">
+                <span class="library-shelf-icon" aria-hidden="true">◫</span>
+                <span><strong>仿真比较基线</strong><small data-field="shelf-count">0 篇</small></span>
+                <span class="library-shelf-titles" data-field="shelf-titles">尚未加入论文</span>
+                <span class="library-shelf-overflow" data-field="shelf-overflow" hidden></span>
+              </button>
+              <button class="library-shelf-slot" type="button" data-shelf-role="related_work" data-role="related_work" aria-pressed="false">
+                <span class="library-shelf-icon" aria-hidden="true">¶</span>
+                <span><strong>相关工作与写作引用</strong><small data-field="shelf-count">0 篇</small></span>
+                <span class="library-shelf-titles" data-field="shelf-titles">尚未加入论文</span>
+                <span class="library-shelf-overflow" data-field="shelf-overflow" hidden></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="library-catalog" aria-labelledby="library-catalog-title">
+            <div class="library-toolbar">
+              <div>
+                <p class="eyebrow">统一论文记录</p>
+                <h2 id="library-catalog-title">筛选与排序</h2>
+              </div>
+              <div class="library-toolbar-actions">
+                <label class="library-sort-control" for="library-sort">排序
+                  <select id="library-sort">
+                    <option value="default">默认顺序</option>
+                    <option value="title">标题</option>
+                    <option value="year">年份</option>
+                    <option value="contribution">贡献类型</option>
+                    <option value="evidence">证据完整度</option>
+                  </select>
+                </label>
+                <button class="button button--secondary button--small" id="library-reset" type="button">重置筛选</button>
+              </div>
+            </div>
+
+            <details class="library-filter-panel" open>
+              <summary>展开或收起材料进度与学术筛选</summary>
+              <form id="library-filters" aria-label="论文筛选条件">
+                <fieldset data-filter-axis="personalReadingMarkers">
+                  <legend>个人阅读状态</legend>
+                  <label><input type="checkbox" name="personalReadingMarkers" value="unread" />未读</label>
+                  <label><input type="checkbox" name="personalReadingMarkers" value="reading" />在读</label>
+                  <label><input type="checkbox" name="personalReadingMarkers" value="read" />读过</label>
+                </fieldset>
+                <fieldset data-filter-axis="sourceStatuses">
+                  <legend>原文核验</legend>
+                  <label><input type="checkbox" name="sourceStatuses" value="not_checked" />未检查原文</label>
+                  <label><input type="checkbox" name="sourceStatuses" value="located" />来源已定位</label>
+                  <label><input type="checkbox" name="sourceStatuses" value="verified" />关键来源已核验</label>
+                </fieldset>
+                <fieldset data-filter-axis="evidenceStatuses">
+                  <legend>证据结构</legend>
+                  <label><input type="checkbox" name="evidenceStatuses" value="none" />无证据卡</label>
+                  <label><input type="checkbox" name="evidenceStatuses" value="partial" />部分证据</label>
+                  <label><input type="checkbox" name="evidenceStatuses" value="core_verified" />核心证据已核验</label>
+                </fieldset>
+                <fieldset data-filter-axis="reproductionStatuses">
+                  <legend>仿真复现</legend>
+                  <label><input type="checkbox" name="reproductionStatuses" value="none" />尚无记录</label>
+                  <label><input type="checkbox" name="reproductionStatuses" value="description_only" />已有仿真描述</label>
+                  <label><input type="checkbox" name="reproductionStatuses" value="code_unrun" />有代码，未记录运行</label>
+                  <label><input type="checkbox" name="reproductionStatuses" value="ran_no_record" />已运行，未记录结果</label>
+                  <label><input type="checkbox" name="reproductionStatuses" value="results_recorded" />已有结果记录</label>
+                  <label><input type="checkbox" name="reproductionStatuses" value="consistency_verified" />结果一致性已核验</label>
+                </fieldset>
+                <div class="facet-entry-bar" aria-label="学术筛选">
+                  <button type="button" data-facet-panel-trigger="research" aria-controls="library-facet-panel" aria-expanded="false">研究任务</button>
+                  <button type="button" data-facet-panel-trigger="constraints" aria-controls="library-facet-panel" aria-expanded="false">约束结构</button>
+                  <button type="button" data-facet-panel-trigger="oracle" aria-controls="library-facet-panel" aria-expanded="false">梯度与反馈</button>
+                  <button type="button" data-facet-panel-trigger="methods" aria-controls="library-facet-panel" aria-expanded="false">方法体系</button>
+                  <button type="button" data-facet-panel-trigger="more" aria-controls="library-facet-panel" aria-expanded="false">更多条件</button>
+                </div>
+                <div class="selected-facet-chips" data-selected-facets aria-live="polite"></div>
+                <section class="facet-panel" id="library-facet-panel" data-facet-panel hidden></section>
+              </form>
+            </details>
+
+            <div class="library-result-heading">
+              <h2 id="library-count" tabindex="-1" aria-live="polite">正在读取论文库</h2>
+              <div class="library-result-summary">
+                <p id="library-coverage-summary" aria-live="polite">中文标题 0/0；待整理身份 0/0</p>
+                <p id="library-warning-summary" aria-live="polite">扫描警告数量未提供</p>
+              </div>
+            </div>
+
+            <section class="library-list-view" data-view="list">
+              <div class="library-table-wrap">
+                <div class="library-paper-list" id="library-results" aria-label="论文结果列表" aria-live="polite"></div>
+              </div>
+              <div class="library-empty-state" id="library-empty" hidden>
+                <span aria-hidden="true">⌕</span>
+                <strong>没有符合当前条件的论文</strong>
+                <p>可以减少筛选条件，或使用“重置筛选”。</p>
+              </div>
+              <div class="library-error-state" id="library-error" role="alert" hidden>
+                <strong>论文库尚未构建，请先运行本地构建命令</strong>
+                <p>构建后请通过本地 HTTP 地址打开本页。</p>
+              </div>
+            </section>
+
+            <section class="library-detail library-reader" id="library-detail" aria-labelledby="library-context-title" hidden>
+              <div class="library-reader-toolbar">
+                <button class="text-button library-detail-back" id="library-detail-back" type="button">← 返回论文列表</button>
+                <div class="library-reader-toolbar-trailing">
+                  <p class="library-reader-load-status" data-reader-load-status role="status" aria-live="polite"></p>
+                  <button class="text-button library-reader-toc-toggle" id="library-reader-toc-toggle" type="button" aria-controls="library-reader-toc" aria-expanded="true">隐藏目录</button>
+                </div>
+              </div>
+
+              <div class="library-reader-tabs" id="library-reader-tabs" role="tablist" aria-label="论文阅读内容">
+                <button id="library-reader-tab-overview" type="button" role="tab" data-reader-tab="overview" aria-controls="library-reader-panel-overview" aria-selected="true" tabindex="0">快速概览</button>
+                <button id="library-reader-tab-source" type="button" role="tab" data-reader-tab="source" aria-controls="library-reader-panel-source" aria-selected="false" tabindex="-1">原文材料</button>
+                <button id="library-reader-tab-note" type="button" role="tab" data-reader-tab="note" aria-controls="library-reader-panel-note" aria-selected="false" tabindex="-1">论文精读</button>
+                <button id="library-reader-tab-derivation" type="button" role="tab" data-reader-tab="derivation" aria-controls="library-reader-panel-derivation" aria-selected="false" tabindex="-1">推导过程</button>
+                <button id="library-reader-tab-simulation" type="button" role="tab" data-reader-tab="simulation" aria-controls="library-reader-panel-simulation" aria-selected="false" tabindex="-1">仿真描述</button>
+                <button id="library-reader-tab-code_compare" type="button" role="tab" data-reader-tab="code_compare" aria-controls="library-reader-panel-code_compare" aria-selected="false" tabindex="-1">代码对照</button>
+                <button id="library-reader-tab-writing" type="button" role="tab" data-reader-tab="writing" aria-controls="library-reader-panel-writing" aria-selected="false" tabindex="-1">写作用途</button>
+              </div>
+
+              <div class="library-reader-panels">
+                <section class="library-reader-panel" id="library-reader-panel-overview" role="tabpanel" aria-labelledby="library-reader-tab-overview" data-reader-panel="overview" tabindex="0">
+                  <div class="library-reader-document" data-reader-overview-content>
+                    <p class="library-reader-placeholder">请选择一篇论文查看快速概览。</p>
+                  </div>
+                </section>
+
+                <section class="library-reader-panel library-source-panel" id="library-reader-panel-source" role="tabpanel" aria-labelledby="library-reader-tab-source" data-reader-panel="source" tabindex="0" hidden>
+                  <div class="library-source-toolbar">
+                    <div class="library-source-modes" role="group" aria-label="原文查看方式">
+                      <button type="button" data-source-mode="compare" aria-pressed="true">并排</button>
+                      <button type="button" data-source-mode="pdf" aria-pressed="false">PDF</button>
+                      <button type="button" data-source-mode="ocr" aria-pressed="false">OCR</button>
+                    </div>
+                    <div class="library-source-version-controls">
+                      <label data-source-version-control="pdf">PDF 版本
+                        <select id="library-source-pdf-select" aria-label="选择 PDF 版本"></select>
+                      </label>
+                      <label data-source-version-control="ocr">OCR 版本
+                        <select id="library-source-ocr-select" aria-label="选择 OCR 版本"></select>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="library-source-workspace" data-source-workspace data-source-mode="compare">
+                    <div class="library-source-pane library-source-pane--pdf" data-source-pane="pdf">
+                      <div class="library-source-pane-heading">
+                        <div><span>论文原文</span><strong data-source-pdf-label>PDF</strong></div>
+                        <a id="library-source-pdf-open" class="text-button" target="_blank" rel="noopener noreferrer" hidden>新标签打开 PDF</a>
+                      </div>
+                      <p class="library-source-empty" data-source-pdf-empty>未发现 PDF 文件。</p>
+                      <iframe id="library-source-pdf-frame" class="library-source-pdf-frame" title="PDF 原文" loading="lazy" hidden></iframe>
+                    </div>
+                    <div class="library-source-pane library-source-pane--ocr" data-source-pane="ocr">
+                      <div class="library-source-pane-heading">
+                        <div><span>OCR 文本</span><strong data-source-ocr-label>Markdown</strong></div>
+                      </div>
+                      <p class="library-source-warning">OCR 仅供检索与浏览，关键公式和结论以 PDF 原文为准。</p>
+                      <div class="library-reader-document library-source-ocr-preview" id="library-source-ocr-preview">未发现 OCR Markdown。</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="library-reader-panel" id="library-reader-panel-note" role="tabpanel" aria-labelledby="library-reader-tab-note" data-reader-panel="note" tabindex="0" hidden>
+                  <div class="library-reader-section-heading">
+                    <p class="eyebrow">受控笔记预览</p>
+                    <h3 id="library-note-title">论文精读</h3>
+                    <label class="library-reader-material-control" data-reader-material-control="note" hidden>
+                      <span>选择材料</span>
+                      <select id="library-note-material-select" data-reader-material-select="note" aria-label="选择论文精读材料"></select>
+                    </label>
+                  </div>
+                  <div class="library-reader-document" id="library-note-preview">打开论文详情后按需读取笔记预览。</div>
+                </section>
+
+                <section class="library-reader-panel" id="library-reader-panel-derivation" role="tabpanel" aria-labelledby="library-reader-tab-derivation" data-reader-panel="derivation" tabindex="0" hidden>
+                  <div class="library-reader-section-heading">
+                    <p class="eyebrow">公式与证明脉络</p>
+                    <h3>推导过程</h3>
+                    <label class="library-reader-material-control" data-reader-material-control="derivation" hidden>
+                      <span>选择材料</span>
+                      <select id="library-derivation-material-select" data-reader-material-select="derivation" aria-label="选择推导过程材料"></select>
+                    </label>
+                  </div>
+                  <div class="library-reader-document library-reader-placeholder" id="library-derivation-preview">尚无可显示的推导材料。</div>
+                </section>
+
+                <section class="library-reader-panel" id="library-reader-panel-simulation" role="tabpanel" aria-labelledby="library-reader-tab-simulation" data-reader-panel="simulation" tabindex="0" hidden>
+                  <div class="library-reader-section-heading">
+                    <p class="eyebrow">实验设置、指标与结果记录</p>
+                    <h3>仿真描述</h3>
+                    <label class="library-reader-material-control" data-reader-material-control="simulation" hidden>
+                      <span>选择材料</span>
+                      <select id="library-simulation-material-select" data-reader-material-select="simulation" aria-label="选择仿真描述材料"></select>
+                    </label>
+                  </div>
+                  <div class="library-reader-document library-reader-placeholder" id="library-simulation-preview">尚无可显示的仿真材料。</div>
+                </section>
+
+                <section class="library-reader-panel" id="library-reader-panel-code_compare" role="tabpanel" aria-labelledby="library-reader-tab-code_compare" data-reader-panel="code_compare" tabindex="0" hidden>
+                  <div class="library-reader-section-heading">
+                    <p class="eyebrow">公式、变量与实现映射</p>
+                    <h3>代码对照</h3>
+                    <label class="library-reader-material-control" data-reader-material-control="code_compare" hidden>
+                      <span>选择材料</span>
+                      <select id="library-code-compare-material-select" data-reader-material-select="code_compare" aria-label="选择代码对照材料"></select>
+                    </label>
+                  </div>
+                  <div class="library-reader-document library-reader-placeholder" id="library-code-compare-preview">尚无可显示的代码对照材料。</div>
+                </section>
+
+                <section class="library-reader-panel" id="library-reader-panel-writing" role="tabpanel" aria-labelledby="library-reader-tab-writing" data-reader-panel="writing" tabindex="0" hidden>
+                  <div class="library-reader-section-heading">
+                    <p class="eyebrow">P02 材料边界</p>
+                    <h3>写作用途</h3>
+                  </div>
+                  <div class="library-reader-document" data-reader-writing-content>
+                    <p class="library-reader-placeholder">尚未整理这篇论文的写作用途。</p>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </section>
+        </section>
+
+        <aside class="library-reader-toc" id="library-reader-toc" aria-labelledby="library-reader-toc-title" hidden>
+          <div class="library-reader-toc-heading">
+            <p class="eyebrow">当前阅读位置</p>
+            <h2 id="library-reader-toc-title">文章目录</h2>
+          </div>
+          <nav class="library-reader-toc-links" data-reader-toc-links aria-label="当前标签目录">
+            <p class="library-reader-toc-empty" data-reader-toc-empty>当前内容暂无目录。</p>
+          </nav>
+        </aside>
+
+        <aside class="inspector library-inspector" id="library-inspector" aria-labelledby="library-inspector-title">
+          <div class="inspector-heading">
+            <div>
+              <p class="eyebrow">当前论文</p>
+              <h2 id="library-inspector-title">论文检查器</h2>
+            </div>
+          </div>
+          <div class="library-inspector-content" data-inspector-content>
+            <div class="library-inspector-empty">
+              <span aria-hidden="true">▤</span>
+              <strong>请选择一篇论文</strong>
+              <p>这里显示材料数量、阅读标记与 P02 用途，不展示私有文件路径。</p>
+            </div>
+          </div>
+          <p class="library-inspector-status" data-inspector-status role="status" aria-live="polite"></p>
+        </aside>
+      </div>
+    </main>
+
+    <dialog class="library-image-lightbox" id="library-image-lightbox" aria-labelledby="library-image-lightbox-title">
+      <div class="library-image-lightbox-shell">
+        <div class="library-image-lightbox-toolbar">
+          <div>
+            <p class="eyebrow">论文图片</p>
+            <h2 id="library-image-lightbox-title">放大预览</h2>
+          </div>
+          <button class="text-button library-image-lightbox-close" id="library-image-lightbox-close" type="button" aria-label="关闭图片预览">关闭</button>
+        </div>
+        <figure class="library-image-lightbox-canvas">
+          <img id="library-image-lightbox-image" alt="">
+          <figcaption id="library-image-lightbox-caption"></figcaption>
+        </figure>
+      </div>
+    </dialog>
+
+    <template id="library-paper-row-template">
+      <article class="library-paper-row" data-hit-fields="">
+        <button class="library-paper-select" type="button" data-action="select-paper">
+          <span class="library-row-state" data-field="reading-marker">未读</span>
+        </button>
+        <div class="library-row-main">
+          <span class="library-row-meta"><code data-field="paper-id"></code><span data-field="year"></span><span class="library-identity-badge" data-field="identity-status" hidden>待整理身份</span></span>
+          <button class="library-paper-title" type="button" data-action="open-detail" aria-label="打开论文详情">
+            <strong data-field="title">暂无书目信息</strong>
+          </button>
+          <span class="library-row-source" data-field="source-directory" data-source-directory hidden><strong>来源目录</strong><span data-field="relative-path" data-relative-path></span></span>
+          <span data-field="authors"></span>
+          <span class="library-search-hits" data-field="search-hits"></span>
+        </div>
+        <span class="library-row-evidence" data-field="availability"></span>
+      </article>
+    </template>
+
+    <script type="module" src="./assets/library.mjs"></script>
+    <script type="module">
+      import { createLibraryController } from "./assets/library.mjs"
+
+      const controller = createLibraryController({
+        document,
+        storage: window.localStorage,
+        fetchImpl: window.fetch.bind(window),
+      })
+      await controller.start()
+    </script>
+  </body>
+</html>

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="桌面端学术研究工作台：从研究方向、论文阅读和仿真复现推进到个人论文与学位论文。"
+    />
+    <title>学术研究工作台 · 桌面原型</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231677ff'/%3E%3Cpath d='M18 47V17h15c8 0 13 4 13 11 0 5-3 9-8 10l10 9H37l-8-8h-2v8zm9-16h6c3 0 5-1 5-4s-2-4-5-4h-6z' fill='white'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-window" aria-label="学术研究工作台桌面原型">
+      <header class="window-bar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light traffic-light--red"></span>
+          <span class="traffic-light traffic-light--yellow"></span>
+          <span class="traffic-light traffic-light--green"></span>
+        </div>
+        <div class="window-context">
+          <span class="context-kicker">研究工作台</span>
+          <span class="context-divider">/</span>
+          <strong>研究首页</strong>
+        </div>
+        <label class="command-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="global-search" type="search" aria-label="搜索新论文或研究方向" placeholder="搜索新论文或研究方向" />
+          <kbd aria-hidden="true">⌘ K</kbd>
+        </label>
+        <div class="window-actions">
+          <button class="icon-button" type="button" aria-label="通知">○</button>
+          <button class="avatar-button" type="button" aria-label="用户菜单">杨</button>
+        </div>
+      </header>
+
+      <div class="workspace-shell">
+        <aside class="sidebar">
+          <a class="brand" href="./index.html" aria-label="返回研究首页">
+            <span class="brand-mark" aria-hidden="true">R</span>
+            <span>
+              <strong>学术研究工作台</strong>
+              <small>个人研究控制台</small>
+            </span>
+          </a>
+
+          <nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">研究流程</p>
+            <a class="nav-item nav-item--active" href="./index.html" aria-current="page">
+              <span aria-hidden="true">⌂</span><span>研究首页</span>
+            </a>
+            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
+            <a class="nav-item" href="./p02.html"><span aria-hidden="true">□</span><span>我的论文</span></a>
+            <a class="nav-item" href="#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
+
+            <p class="nav-caption nav-caption--spaced">研究资产</p>
+            <a class="nav-item" href="#simulation"><span aria-hidden="true">⌘</span><span>仿真与代码</span></a>
+            <a class="nav-item" href="#claims"><span aria-hidden="true">✓</span><span>主张与证据</span></a>
+          </nav>
+
+          <section class="sidebar-plan" aria-labelledby="weekly-plan-title">
+            <div class="plan-title-row">
+              <h2 id="weekly-plan-title">当前重点</h2>
+              <strong>P02</strong>
+            </div>
+            <p>梳理算法机制，同时明确收敛性、约束违背与通信指标的理论出口。</p>
+          </section>
+        </aside>
+
+        <section class="main-column" id="dashboard">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">2026 · 研究控制台</p>
+              <h1>把阅读转化为可写作的研究证据</h1>
+              <p>先缩小研究方向，再组织阅读、复现、个人论文和学位论文之间的关系。</p>
+            </div>
+            <div class="heading-actions">
+              <button class="button button--secondary" id="search-new-paper" type="button">搜索新论文</button>
+              <button class="button button--primary" type="button">＋ 新建课题</button>
+            </div>
+          </div>
+
+          <section class="research-path" aria-labelledby="research-path-title">
+            <div class="section-heading section-heading--compact">
+              <div>
+                <p class="eyebrow">研究路径</p>
+                <h2 id="research-path-title">当前研究路径</h2>
+              </div>
+              <span class="path-summary">P02 · 算法规划中</span>
+            </div>
+            <ol class="path-steps">
+              <li class="path-step path-step--done"><span>1</span><strong>准备方向</strong><small>已确定</small></li>
+              <li class="path-step path-step--done"><span>2</span><strong>阅读与复现</strong><small>8 篇完成</small></li>
+              <li class="path-step path-step--active"><span>3</span><strong>算法规划</strong><small>机制画布</small></li>
+              <li class="path-step"><span>4</span><strong>理论与仿真</strong><small>待闭环</small></li>
+              <li class="path-step"><span>5</span><strong>小论文</strong><small>P02 写作</small></li>
+              <li class="path-step"><span>6</span><strong>学位论文</strong><small>章节映射</small></li>
+            </ol>
+          </section>
+
+          <section class="panel direction-overview" id="directions" aria-labelledby="direction-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">方向探索</p>
+                <h2 id="direction-title">当前方向组合</h2>
+                <p>首页只保留研究方向摘要；完整组合、论文筛选和研究空白判断进入方向探索页。</p>
+              </div>
+              <span class="status status--active">P02 · 在研</span>
+            </div>
+            <div class="direction-snapshot">
+              <div class="direction-snapshot-main">
+                <h3>动态有向网络下的低通信约束优化</h3>
+                <div class="direction-tag-list" aria-label="当前方向条件">
+                  <span>分布式优化</span><span>有向网络</span><span>时变拓扑</span>
+                  <span>非平衡网络</span><span>耦合约束</span><span>低通信</span>
+                </div>
+                <dl class="direction-metrics">
+                  <div><dt>已选条件</dt><dd>6</dd></div>
+                  <div><dt>直接匹配</dt><dd>1 篇</dd></div>
+                  <div><dt>近邻工作</dt><dd>3 篇</dd></div>
+                </dl>
+              </div>
+              <div class="direction-next-card">
+                <span class="direction-next-icon" aria-hidden="true">↗</span>
+                <div><strong>下一步：核验贡献边界</strong><p>比较时变拓扑、耦合约束和低通信是否已被同一工作覆盖。</p></div>
+                <a class="button button--primary" href="./directions.html">进入方向探索 →</a>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel project-panel" id="projects" aria-labelledby="project-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">我的论文</p>
+                <h2 id="project-title">个人论文推进</h2>
+              </div>
+              <button class="text-button" type="button">查看全部项目</button>
+            </div>
+            <div class="project-grid">
+              <article class="project-card project-card--published">
+                <div class="project-card-top"><code>P01</code><span class="status status--published">已发表 · 冻结</span></div>
+                <h3>静态有向网络下的受约束分布式优化基线</h3>
+                <p>作为系列论文的理论基线，已迁移到学位论文第 2 章。</p>
+                <div class="project-meta"><span>理论 100%</span><span>仿真 100%</span></div>
+              </article>
+              <article class="project-card project-card--active">
+                <a class="project-card-link" href="./p02.html" aria-label="打开 P02 项目工作台">
+                  <div class="project-card-top"><code>P02</code><span class="status status--active">在研</span></div>
+                  <h3>动态有向网络下的低通信约束优化</h3>
+                  <p>旧笔记先整理为算法材料，理论结论按原文逐项补充。</p>
+                  <div class="project-meta"><span>算法规划中</span><span>理论待系统核验</span></div>
+                </a>
+              </article>
+              <article class="project-card">
+                <div class="project-card-top"><code>P03</code><span class="status">方向候选</span></div>
+                <h3>隐私机制与零阶反馈的组合方向</h3>
+                <p>等待 P02 证明闭环后，再判断是否形成独立贡献。</p>
+                <div class="project-meta"><span>选题 20%</span><span>证据待补</span></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel reading-overview" id="library" aria-labelledby="library-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">阅读论文库</p>
+                <h2 id="library-title">阅读任务概览</h2>
+                <p>论文详细筛选与排序已经移到方向探索页，首页只显示当前工作量。</p>
+              </div>
+              <a class="text-button" href="../../local_library_output/desktop/library.html">查看全部论文 →</a>
+            </div>
+            <div class="reading-summary-grid">
+              <article><span class="paper-state paper-state--completed">已读</span><strong>5</strong><small>含 2 篇开创性工作</small></article>
+              <article><span class="paper-state paper-state--reading">在读</span><strong>3</strong><small>当前聚焦条件组合</small></article>
+              <article><span class="paper-state paper-state--queued">未开始</span><strong>2</strong><small>按贡献边界优先阅读</small></article>
+            </div>
+          </section>
+        </section>
+
+        <aside class="inspector" aria-labelledby="current-project-title">
+          <div class="inspector-heading">
+            <div>
+              <p class="eyebrow">当前课题</p>
+              <h2 id="current-project-title">当前课题</h2>
+            </div>
+            <button class="icon-button" type="button" aria-label="课题设置">•••</button>
+          </div>
+
+          <section class="current-project-card">
+            <div class="project-card-top"><code>P02</code><span class="status status--active">在研</span></div>
+            <h3>动态有向网络下的低通信约束优化</h3>
+            <p>从静态基线扩展到时变、权重非平衡的有向网络，同时减少不必要通信。</p>
+          </section>
+
+          <section class="inspector-section">
+            <div class="progress-header"><h3>论文阶段</h3><strong>按材料状态记录</strong></div>
+            <dl class="progress-list">
+              <div><dt>问题模型</dt><dd>条件待确认</dd></div>
+              <div><dt>算法机制</dt><dd>规划中</dd></div>
+              <div><dt>理论分析</dt><dd>待系统核验</dd></div>
+              <div><dt>仿真实验</dt><dd>待建立对照</dd></div>
+            </dl>
+          </section>
+
+          <section class="inspector-section" id="claims">
+            <div class="inspector-title-row"><h3>当前阻塞</h3><span class="count-badge">2</span></div>
+            <ul class="blocker-list">
+              <li><span aria-hidden="true">!</span><div><strong>问题类型尚未最终确认</strong><small>先判断固定目标还是在线变化目标</small></div></li>
+              <li><span aria-hidden="true">!</span><div><strong>理论结果尚未系统整理</strong><small>不能由算法笔记直接推断收敛结论</small></div></li>
+            </ul>
+          </section>
+
+          <section class="inspector-section" id="simulation">
+            <h3>证据与资产</h3>
+            <ul class="check-list">
+              <li><span>✓</span>算法机制笔记可继续复用</li>
+              <li><span>○</span>理论定理等待回到原文核验</li>
+              <li><span>○</span>仿真指标等待对应理论目标</li>
+            </ul>
+          </section>
+
+          <section class="thesis-map" id="thesis">
+            <p class="eyebrow">学位论文映射</p>
+            <h3>学位论文第 3 章</h3>
+            <p>P01 提供静态基线，P02 形成动态网络扩展。</p>
+            <button class="button button--secondary button--full" type="button">查看章节映射 →</button>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <dialog class="search-dialog" id="search-dialog" aria-labelledby="search-dialog-title">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">新文献检索</p><h2 id="search-dialog-title">搜索指定方向的新论文</h2></div>
+          <button class="icon-button" value="cancel" aria-label="关闭">×</button>
+        </div>
+        <p>这里先保存检索条件；后续可以接入学术搜索插件，结果确认后再进入阅读队列。</p>
+        <label>研究主题<input name="topic" id="search-topic" value="时变有向网络 低通信 耦合约束" /></label>
+        <div class="dialog-grid">
+          <label>年份范围<select><option>近 5 年</option><option>近 10 年</option><option>不限</option></select></label>
+          <label>优先类型<select><option>开创性与关键方法</option><option>实际问题</option><option>最新论文</option></select></label>
+        </div>
+        <div class="dialog-note"><strong>建议流程</strong><span>检索 → 去重 → 人工筛选 → 加入阅读队列 → 结构化解读</span></div>
+        <div class="dialog-actions">
+          <button class="button button--secondary" value="cancel">取消</button>
+          <button class="button button--primary" id="save-search" value="default">保存检索任务</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">检索任务已保存到方向探索</div>
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>
