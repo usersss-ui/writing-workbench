@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { validatePaperOverride } from "./overrides.mjs"
+import { validateMetadataProvenance, validatePaperOverride } from "./overrides.mjs"
 
 test("override validation accepts normalized metadata fields and provenance", () => {
   assert.doesNotThrow(() => validatePaperOverride("main_papers::Paper", {
@@ -13,6 +13,10 @@ test("override validation accepts normalized metadata fields and provenance", ()
       version_date: "frontmatter",
     },
   }))
+})
+
+test("metadata provenance accepts the generated facet_states field", () => {
+  assert.doesNotThrow(() => validateMetadataProvenance({ facet_states: "tag_catalog" }))
 })
 
 test("override validation rejects unknown provenance fields and sources", () => {

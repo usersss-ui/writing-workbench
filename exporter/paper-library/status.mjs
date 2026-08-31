@@ -1,6 +1,6 @@
 import { basename, extname } from "node:path/posix"
 import { ARTIFACT_KEYS, createEmptyArtifacts } from "./artifacts.mjs"
-import { createEmptyFacets, validatePaperFacets } from "./facet-schema.mjs"
+import { createEmptyFacets, validateFacetStates, validatePaperFacets } from "./facet-schema.mjs"
 import { normalizeRelativePath } from "./ids.mjs"
 import { PAPER_RECORD_TYPES } from "./tag-catalog.mjs"
 import {
@@ -25,7 +25,7 @@ const HASHED_HTML_NAME = /^[a-f0-9]{64}\.html$/u
 const PAPER_FIELDS = Object.freeze([
   "paper_id", "slug", "source_id", "relative_path", "identity_source", "unit_type", "parent_paper_id", "title_original", "title_zh", "title_en", "authors",
   "publication_year", "version_date", "year", "venue", "doi_or_url", "metadata_provenance",
-  "record_type", "facets", "source_terms", "contribution_role", "p02_relevance",
+  "record_type", "facets", "facet_states", "source_terms", "contribution_role", "p02_relevance",
   "artifacts", "artifact_availability", "source_status", "evidence_status", "reproduction_status", "writing_material_count", "preferred_note", "note_preview_url", "warnings",
   "note_status",
 ])
@@ -33,12 +33,12 @@ const DEFAULTS = Object.freeze({
   title_original: "", title_zh: "", title_en: "", authors: [], publication_year: null, version_date: null,
   year: null, venue: "", doi_or_url: "", metadata_provenance: {}, unit_type: "article", parent_paper_id: null,
   topic_l1: "", topic_l2: "", research_scopes: [], method_tags: [], network_tags: [], problem_tags: [], property_tags: [], theory_tags: [],
-  record_type: "外部论文", facets: createEmptyFacets(), source_terms: [], contribution_role: "unclassified",
+  record_type: "外部论文", facets: createEmptyFacets(), facet_states: {}, source_terms: [], contribution_role: "unclassified",
   p02_relevance: null, note_status: "metadata_only", preferred_note: null, note_preview_url: null, warnings: [],
 })
 const PROVENANCE_FIELDS = Object.freeze([
   "title_original", "title_zh", "title_en", "authors", "publication_year", "version_date", "year", "venue", "doi_or_url",
-  "unit_type", "parent_paper_id", "record_type", "facets", "source_terms",
+  "unit_type", "parent_paper_id", "record_type", "facets", "facet_states", "source_terms",
   "contribution_role", "p02_relevance",
 ])
 
@@ -207,6 +207,7 @@ export function validateGeneratedPaper(paper) {
   if (!CONTRIBUTION_ROLES.includes(paper.contribution_role)) throw new Error("contribution_role 枚举值无效")
   assertStringArray("authors", paper.authors)
   validatePaperFacets(paper.facets)
+  validateFacetStates(paper.facets, paper.facet_states)
   assertCanonicalStringArray("source_terms", paper.source_terms)
   if (paper.year !== null && (!Number.isInteger(paper.year) || paper.year < 1000 || paper.year > 9999)) throw new Error("year 必须是四位整数或 null")
   if (paper.publication_year !== null && (!Number.isInteger(paper.publication_year) || paper.publication_year < 1000 || paper.publication_year > 9999)) throw new Error("publication_year 必须是四位整数或 null")

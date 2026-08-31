@@ -526,6 +526,7 @@ function serializePublicPaper(paper, controlledPreviews, controlledPreviewDocume
   for (const field of PAPER_SCALAR_FIELDS) record[field] = paper[field]
   for (const field of PAPER_ARRAY_FIELDS) record[field] = [...paper[field]]
   record.facets = structuredClone(paper.facets)
+  record.facet_states = { ...paper.facet_states }
   record.metadata_provenance = Object.fromEntries(
     Object.entries(paper.metadata_provenance).filter(([field]) => METADATA_PROVENANCE_FIELDS.has(field)),
   )
@@ -907,7 +908,7 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
     ? applyPaperTagCatalog({ papers: scanned.papers, tagCatalog })
     : { papers: scanned.papers, tagging: { tagged_count: 0, pending_paper_ids: [], unmatched_paper_ids: [] } }
   const papers = tagged.papers
-  audit.tagging = { ...tagged.tagging, schema_version: 2 }
+  audit.tagging = { ...tagged.tagging, schema_version: 3 }
   const previewFiles = new Map()
   const imageAssetFiles = new Map()
   const sourceDocumentFiles = new Map()
@@ -1020,7 +1021,7 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
     0,
   )
   const index = {
-    version: 2,
+    version: 3,
     facet_schema: serializeFacetSchema(),
     warning_count: aggregateWarningCount(audit),
     papers: papers.map((paper) => serializePublicPaper(

@@ -23,7 +23,7 @@ const FIELDS = new Set([
 ])
 export const METADATA_PROVENANCE_FIELDS = new Set([
   "paper_id", "title_original", "title_zh", "title_en", "authors", "publication_year", "version_date", "year", "venue", "doi_or_url",
-  "unit_type", "parent_paper_id", "record_type", "facets", "source_terms",
+  "unit_type", "parent_paper_id", "record_type", "facets", "facet_states", "source_terms",
   "contribution_role", "p02_relevance",
 ])
 const TAG_LISTS = ["research_scopes", "method_tags", "network_tags", "problem_tags", "property_tags", "theory_tags"]

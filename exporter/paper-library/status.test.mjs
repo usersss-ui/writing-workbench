@@ -25,7 +25,7 @@ function validPaper(overrides = {}) {
     identity_source: "override", unit_type: "article", parent_paper_id: null,
     title_original: "Original title", title_zh: "中文标题", title_en: "English title", authors: [],
     publication_year: null, version_date: null, year: null, venue: "", doi_or_url: "", metadata_provenance: {},
-    record_type: "外部论文", facets: createEmptyFacets(), source_terms: [],
+    record_type: "外部论文", facets: createEmptyFacets(), facet_states: {}, source_terms: [],
     contribution_role: "unclassified", p02_relevance: null, artifacts: artifacts(), artifact_availability: availability(),
     source_status: "not_checked", evidence_status: "none", reproduction_status: "none", writing_material_count: 0,
     note_status: "metadata_only", preferred_note: null, note_preview_url: null, warnings: [], ...overrides,
@@ -186,12 +186,29 @@ test("loads only versioned canonical override records and rejects duplicate pape
   await assert.rejects(() => loadPaperOverrides(duplicate), /paper_id 重复/)
 })
 
-test("generated paper accepts only version-2 facet fields", () => {
+test("generated paper accepts only canonical facet fields", () => {
   const paper = validPaper()
   paper.facets.constraints.scope = ["耦合约束"]
   paper.source_terms = ["Tracking-ADMM"]
   assert.doesNotThrow(() => validateGeneratedPaper(paper))
   assert.throws(() => validateGeneratedPaper({ ...paper, topic_l1: "分布式优化" }), /固定字段/)
+})
+
+test("generated paper validates sparse facet states against its facet values", () => {
+  const paper = validPaper({ facet_states: { applications: "not_applicable" } })
+  assert.doesNotThrow(() => validateGeneratedPaper(paper))
+  assert.throws(() => validateGeneratedPaper({ ...paper, facet_states: { private: "unrecorded" } }), /路径无效/u)
+  assert.throws(() => validateGeneratedPaper({
+    ...paper,
+    facets: { ...paper.facets, results: ["线性收敛"] },
+    facet_states: { results: "pending_verification" },
+  }), /不能覆盖已有分面值/u)
+})
+
+test("facet state participates in merge defaults and metadata provenance", () => {
+  const paper = mergePaperRecord({ catalog: { facet_states: { results: "pending_verification" } } })
+  assert.deepEqual(paper.facet_states, { results: "pending_verification" })
+  assert.equal(paper.metadata_provenance.facet_states, "catalog")
 })
 
 test("validates the generated contract and rejects English display placeholders", () => {

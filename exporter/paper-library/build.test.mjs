@@ -168,7 +168,7 @@ async function makeFixture() {
     templateRoot,
     config: { version: 1, sources: [{ source_id: "main_papers", path: sourceRoot }] },
     overrides: { version: 1, papers: {} },
-    tagCatalog: { version: 2, papers: {} },
+    tagCatalog: { version: 3, papers: {} },
   }
 }
 
@@ -606,16 +606,17 @@ test("final public-value validation blocks file URLs, configured roots, and abso
   }
 })
 
-test("final public-value validation recurses through v2 source terms before swapping", async () => {
+test("final public-value validation recurses through v3 source terms before swapping", async () => {
   const fixture = await makeFixture()
   await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
   fixture.overrides.papers["main_papers::Paper A"] = { paper_id: "PaperA-01" }
   fixture.tagCatalog = {
-    version: 2,
+    version: 3,
     papers: {
       "PaperA-01": {
         record_type: "外部论文",
         facets: createEmptyFacets(),
+        facet_states: {},
         source_terms: [fixture.sourceRoot],
       },
     },
@@ -949,7 +950,7 @@ test("CLI main is import-safe, uses fixed relative config paths, and redacts bui
   const stdout = []
   const stderr = []
   const loads = []
-  const tagCatalog = { version: 2, papers: {} }
+  const tagCatalog = { version: 3, papers: {} }
   const code = await runBuildCli({
     repoRoot: fixture.repoRoot,
     loadConfig: async (path) => { loads.push(path); return fixture.config },
@@ -988,7 +989,7 @@ test("CLI loads catalogs before building and reports only aggregate counts", asy
   const fixture = await makeFixture()
   const catalogPath = join(fixture.repoRoot, "private-catalog.md")
   const catalog = { version: 1, papers: {}, warnings: [] }
-  const tagCatalog = { version: 2, papers: {} }
+  const tagCatalog = { version: 3, papers: {} }
   const config = {
     version: 1,
     sources: [{ source_id: "main_papers", path: fixture.sourceRoot, catalog_path: catalogPath }],
@@ -1025,7 +1026,7 @@ test("build writes the facet schema and strips legacy composite filters", async 
   await put(fixture.sourceRoot, "Paper A/paper.pdf", "pdf")
   fixture.overrides.papers["main_papers::Paper A"] = { paper_id: "PaperA-01" }
   const tagCatalog = {
-    version: 2,
+    version: 3,
     papers: {
       "PaperA-01": {
         record_type: "外部论文",
@@ -1033,6 +1034,7 @@ test("build writes the facet schema and strips legacy composite filters", async 
           ...createEmptyFacets(),
           constraints: { ...createEmptyFacets().constraints, scope: ["耦合约束"] },
         },
+        facet_states: { results: "pending_verification", applications: "not_applicable" },
         source_terms: ["Tracking-ADMM"],
       },
     },
@@ -1042,13 +1044,18 @@ test("build writes the facet schema and strips legacy composite filters", async 
   const index = await readJson(join(fixture.repoRoot, "local_library_data/paper-index.json"))
   const audit = await readJson(join(fixture.repoRoot, "local_library_data/paper-library-audit.json"))
 
-  assert.equal(index.version, 2)
-  assert.equal(index.facet_schema.version, 1)
+  assert.equal(index.version, 3)
+  assert.equal(index.facet_schema.version, 2)
   assert.deepEqual(index.papers[0].facets.constraints.scope, ["耦合约束"])
+  assert.deepEqual(index.papers[0].facet_states, {
+    results: "pending_verification",
+    applications: "not_applicable",
+  })
   assert.deepEqual(index.papers[0].source_terms, ["Tracking-ADMM"])
   assert.equal(Object.hasOwn(index.papers[0], "topic_l2"), false)
   assert.equal(index.papers[0].metadata_provenance.facets, "tag_catalog")
-  assert.deepEqual(audit.tagging, { tagged_count: 1, pending_paper_ids: [], unmatched_paper_ids: [], schema_version: 2 })
+  assert.equal(index.papers[0].metadata_provenance.facet_states, "tag_catalog")
+  assert.deepEqual(audit.tagging, { tagged_count: 1, pending_paper_ids: [], unmatched_paper_ids: [], schema_version: 3 })
 })
 
 test("local configuration declares the real catalog and only stable manual decisions", async () => {
