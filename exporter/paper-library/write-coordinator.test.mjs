@@ -192,3 +192,23 @@ test("logger failures and operation error messages never leak or corrupt recover
   await assert.rejects(coordinator.runRecovery(async () => { throw error }), error)
   assert.deepEqual(coordinator.getState(), { busy: false, recovery: candidateRecovery() })
 })
+
+test("an asynchronously rejected logger never becomes an unhandled path-bearing rejection", async () => {
+  const secret = "/Users/example/async-logger-secret"
+  let unhandled = null
+  const observeUnhandled = (reason) => { unhandled = reason }
+  process.once("unhandledRejection", observeUnhandled)
+
+  try {
+    const coordinator = createWriteCoordinator({
+      logger: async () => { throw new Error(secret) },
+    })
+    await coordinator.markRecovery(candidateRecovery())
+    await new Promise((resolve) => setImmediate(resolve))
+
+    assert.equal(unhandled, null)
+    assert.deepEqual(coordinator.getState(), { busy: false, recovery: candidateRecovery() })
+  } finally {
+    process.removeListener("unhandledRejection", observeUnhandled)
+  }
+})

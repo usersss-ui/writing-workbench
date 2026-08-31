@@ -80,11 +80,11 @@ export function createWriteCoordinator({ logger = () => {} } = {}) {
 
   function logRecovery(record) {
     try {
-      writeLogger({
+      Promise.resolve(writeLogger({
         event: RECOVERY_EVENT,
         kind: record.kind,
         reason_code: record.reason_code,
-      })
+      })).catch(() => {})
     } catch {
       // Logging must never change a write or recovery decision.
     }
