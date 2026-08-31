@@ -97,3 +97,37 @@ The donor test expected stage changes and removals to remain visible in memory a
 - Browser storage has no true compare-and-swap primitive. Reload-and-compare prevents known stale writes, but an unavoidable same-tick race remains if two tabs mutate between the final comparison and write.
 - Syntactic public-host validation cannot eliminate DNS rebinding without performing a network/DNS check; this task intentionally performed no such lookup.
 - Generated output, configured build closure, real browser acceptance, screenshots, and archive-entry integration remain deferred to the later integration tasks.
+
+## Security-review fix loop
+
+### Status and fix head
+
+- Independent review found a shared URL-normalization bypass class, incomplete Windows-style path rejection, missing raw OpenAlex nested-field limits, and an ambiguous storage status after a failed write.
+- Fix implementation head before this report-update commit: `cdb522bd11974bb0396c6e51676d5050f34b6a26` (`fix: harden literature discovery boundaries`).
+- The fix changes only the same four production modules and their four tests; the public descriptor and all other files remain unchanged.
+
+### Additional RED evidence
+
+- Fragment, punctuation-obfuscated query-key, path, and nested-response probes: the focused suite exited 1 with 50 passed and 7 failed. The failures occurred at the institution config, persisted-candidate recovery, candidate add, external URL, title/path, OpenAlex URL, and OpenAlex nested-response boundaries.
+- Raw control-character and DOI backslash probes: the focused suite exited 1 with 53 passed and 4 failed, proving that the URL parser was canonicalizing unsafe raw inputs before validation.
+- Broader secret-like key categories and raw OpenAlex string limits: the focused suite exited 1 with 51 passed and 6 failed.
+- Targeted DOI-response probe: 0 passed and 1 failed because a raw trailing separator was cleaned into an accepted DOI.
+- Targeted storage-status probe: 0 passed and 1 failed because a failed browser-storage write still reported `ready`.
+- Targeted generic Windows-path, obvious local-document name, raw title separator, and ordinary public-query metadata probes each failed before its corresponding implementation change.
+
+### Fixes
+
+- Every public external link now rejects fragments, URL user information, raw backslashes, raw control/line-separator characters, non-public hosts, and secret-like query-key categories after lowercase alphanumeric normalization.
+- The query-key classifier remains bounded and does not reject ordinary citation or conference-session metadata; the checked-in public federation-routing URL continues to validate.
+- DOI parsing rejects raw control characters and backslashes before trimming or URL parsing.
+- Paper-input parsing rejects generic Windows-style relative paths and obvious local document filenames while retaining ordinary scholarly titles that contain a slash.
+- OpenAlex validation now bounds raw ID, DOI, title, author, source, topic, and all selected URL strings before cleanup; abstract entry count, per-entry positions, and total raw positions are bounded before reconstruction.
+- Failed browser-storage writes now report `unavailable`; a successful subsequent reload/write returns the store to `ready`. Stage and removal rollback behavior is unchanged.
+
+### Final verification after review fixes
+
+- Exact focused suite: exit 0; 59 passed and 0 failed.
+- `node --check` passed for all four production modules.
+- `git diff --check` passed before the fix commit.
+- Targeted forbidden-literal scan across the nine implementation files and this report returned zero matches.
+- No live network, browser, service, port, build, generated output, archive, or real-paper operation was introduced during the fix loop.
