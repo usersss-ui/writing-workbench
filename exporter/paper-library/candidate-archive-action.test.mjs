@@ -528,3 +528,87 @@ test("recovery proof rejects re-hashed rewrites, inode replacement, added files,
     assert.equal(recoveryStore.size(), 1, mutation.name)
   }
 })
+
+test("recovery rechecks proof after rebuild mutations before clearing coordinator or private store", async (t) => {
+  const mutations = [
+    {
+      name: "metadata and commit rewritten during rebuild",
+      mutate: async (sourceRoot) => {
+        const metadataPath = join(sourceRoot, "Wang23-DIO/metadata.yaml")
+        const metadata = (await readFile(metadataPath, "utf8")).replace(CANDIDATE.title, "Tampered title")
+        await writeFile(metadataPath, metadata)
+        await writeFile(join(sourceRoot, "Wang23-DIO/.metadata.commit"), `sha256:${archiveMetadataSha256(metadata)}\n`)
+      },
+    },
+    {
+      name: "source root replaced during rebuild",
+      mutate: async (sourceRoot, cleanupPaths) => {
+        const displaced = `${sourceRoot}-displaced`
+        await rename(sourceRoot, displaced)
+        cleanupPaths.push(displaced)
+        await mkdir(sourceRoot)
+      },
+    },
+    {
+      name: "package directory replaced during rebuild",
+      mutate: async (sourceRoot) => {
+        await rename(join(sourceRoot, "Wang23-DIO"), join(sourceRoot, ".displaced-package"))
+        await mkdir(join(sourceRoot, "Wang23-DIO"))
+      },
+    },
+    {
+      name: "metadata inode replaced during rebuild",
+      mutate: async (sourceRoot) => {
+        const metadataPath = join(sourceRoot, "Wang23-DIO/metadata.yaml")
+        const displaced = join(sourceRoot, "Wang23-DIO/.displaced-metadata")
+        const bytes = await readFile(metadataPath)
+        await rename(metadataPath, displaced)
+        await writeFile(metadataPath, bytes)
+        await rm(displaced)
+      },
+    },
+    {
+      name: "package member added during rebuild",
+      mutate: async (sourceRoot) => writeFile(join(sourceRoot, "Wang23-DIO/extra.txt"), "unexpected"),
+    },
+  ]
+
+  for (const mutation of mutations) {
+    const sourceRoot = await realpath(await mkdtemp(join(tmpdir(), "candidate-proof-rebuild-race-")))
+    const cleanupPaths = []
+    t.after(async () => {
+      await rm(sourceRoot, { recursive: true, force: true })
+      for (const path of cleanupPaths) await rm(path, { recursive: true, force: true })
+    })
+    const recoveryStore = createArchiveRecoveryStore()
+    await archiveCandidateAndRebuild({
+      repoRoot: "/fixture/repo",
+      request: archiveRequest(),
+      loadContext: async () => scanContext(sourceRoot),
+      rebuild: async () => { throw new Error("induced initial rebuild failure") },
+      markRecovery: async () => {},
+      recoveryStore,
+    })
+    let clearCalls = 0
+    await assert.rejects(rebuildArchivedCandidate({
+      repoRoot: "/fixture/repo",
+      request: recoveryRequest(),
+      recovery: {
+        kind: "candidate_archive",
+        reason_code: "ARCHIVE_REBUILD_FAILED",
+        archive_source_id: "main_papers",
+        paper_id: "Wang23-DIO",
+        openalex_id: "W4387886124",
+      },
+      loadContext: async () => scanContext(sourceRoot),
+      rebuild: async () => {
+        await mutation.mutate(sourceRoot, cleanupPaths)
+        return { paperCount: 1 }
+      },
+      clearRecovery: async () => { clearCalls += 1 },
+      recoveryStore,
+    }), (error) => error?.code === "ARCHIVE_CONFLICT", mutation.name)
+    assert.equal(clearCalls, 0, mutation.name)
+    assert.equal(recoveryStore.size(), 1, mutation.name)
+  }
+})

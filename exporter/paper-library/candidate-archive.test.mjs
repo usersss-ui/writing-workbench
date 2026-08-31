@@ -10,6 +10,7 @@ import {
   realpath,
   readdir,
   rename as renamePath,
+  rm,
   symlink,
   writeFile,
 } from "node:fs/promises"
@@ -168,6 +169,48 @@ test("returns a non-enumerable process-private proof bound to the committed dire
       openalex_id: "W4387886124",
     },
   }), true)
+})
+
+test("recovery proof catches a same-inode same-length metadata rewrite between grouped validations", async (t) => {
+  const sourceRoot = await realpath(await mkdtemp(join(tmpdir(), "paper-archive-proof-race-")))
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }))
+  const outcome = await archiveCandidateMetadata({
+    sourceRoot,
+    sourceId: "main_papers",
+    existingPapers: [],
+    request: request(),
+    now: () => new Date("2026-08-30T04:05:06.000Z"),
+  })
+  const proof = Object.getOwnPropertyDescriptor(outcome, "recoveryProof").value
+  const original = await readFile(proof.metadata.path)
+  const changed = Buffer.from(original)
+  changed[0] = changed[0] === 0x23 ? 0x24 : 0x23
+  const before = await lstat(proof.metadata.path)
+  let changedDuringVerification = false
+
+  await assert.rejects(verifyArchiveRecoveryProof({
+    proof,
+    request: {
+      confirmation: "retry_archive_rebuild",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+    fileSystem: {
+      open: async (path, flags, mode) => {
+        if (!changedDuringVerification && path === proof.commit.path) {
+          changedDuringVerification = true
+          await writeFile(proof.metadata.path, changed)
+        }
+        return openFile(path, flags, mode)
+      },
+    },
+  }), { code: "ARCHIVE_CONFLICT" })
+  const after = await lstat(proof.metadata.path)
+  assert.equal(changedDuringVerification, true)
+  assert.equal(after.dev, before.dev)
+  assert.equal(after.ino, before.ino)
+  assert.equal(after.size, before.size)
 })
 
 test("rejects local ID, normalized DOI, OpenAlex URL, and composite identity duplicates before mutation", async () => {

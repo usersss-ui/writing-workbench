@@ -1,8 +1,20 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { createServer as createHttpServer, request as httpRequest } from "node:http"
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises"
+import { Agent as HttpAgent, createServer as createHttpServer, request as httpRequest } from "node:http"
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  open as openFile,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -195,9 +207,10 @@ function deferred() {
 }
 
 async function listenHandler(t, dependencies = {}) {
+  const { observeRequest, ...handlerDependencies } = dependencies
   let origin = null
   const handler = createPrivateLibraryRequestHandler({
-    repoRoot: dependencies.repoRoot ?? "/fixture/repo",
+    repoRoot: handlerDependencies.repoRoot ?? "/fixture/repo",
     getOrigin: () => origin,
     loadContext: async () => context(),
     rebuild: async () => ({ paperCount: 1 }),
@@ -241,9 +254,12 @@ async function listenHandler(t, dependencies = {}) {
       rebuild_status: "complete",
       paper_count: 2,
     }),
-    ...dependencies,
+    ...handlerDependencies,
   })
-  const server = createHttpServer(handler)
+  const server = createHttpServer((request, response) => {
+    if (typeof observeRequest === "function") observeRequest(request)
+    handler(request, response)
+  })
   await new Promise((resolve, reject) => {
     server.once("error", reject)
     server.listen(0, "127.0.0.1", resolve)
@@ -292,6 +308,69 @@ async function rawRequest(origin, path, { method = "GET", headers = {}, body = "
       request.end()
     } else request.end(body)
   })
+}
+
+async function slowOversizedRequest(origin, path, { limit, tailBytes, onResponseHeaders }) {
+  const url = new URL(origin)
+  const agent = new HttpAgent({ keepAlive: true })
+  let socket = null
+  let socketClosed = false
+  let responseSeen = false
+  let resolveHeaders
+  let rejectHeaders
+  const headersReady = new Promise((resolve, reject) => {
+    resolveHeaders = resolve
+    rejectHeaders = reject
+  })
+  let resolveResponse
+  let rejectResponse
+  const responseDone = new Promise((resolve, reject) => {
+    resolveResponse = resolve
+    rejectResponse = reject
+  })
+  const request = httpRequest({
+    hostname: "127.0.0.1",
+    port: Number(url.port),
+    method: "POST",
+    path,
+    agent,
+    headers: {
+      connection: "keep-alive",
+      "content-type": "application/json",
+      origin,
+      "sec-fetch-site": "same-origin",
+    },
+  }, (response) => {
+    responseSeen = true
+    const chunks = []
+    resolveHeaders()
+    response.on("data", (chunk) => chunks.push(chunk))
+    response.once("end", () => resolveResponse({
+      status: response.statusCode,
+      headers: response.headers,
+      body: Buffer.concat(chunks),
+    }))
+    response.once("error", rejectResponse)
+  })
+  request.once("socket", (value) => {
+    socket = value
+    socket.once("close", () => { socketClosed = true })
+  })
+  request.on("error", (error) => {
+    if (!responseSeen) rejectHeaders(error)
+  })
+  request.flushHeaders()
+  request.write(Buffer.alloc(limit + 1, 0x61))
+  await headersReady
+  if (typeof onResponseHeaders === "function") onResponseHeaders()
+  try { request.write(Buffer.alloc(tailBytes, 0x62)) } catch { /* closed as required */ }
+  try { request.end() } catch { /* closed as required */ }
+  const response = await responseDone
+  if (response.headers.connection === "close" && socket && !socketClosed) {
+    await new Promise((resolveClose) => socket.once("close", resolveClose))
+  }
+  agent.destroy()
+  return { ...response, socketClosed }
 }
 
 function runNodeImport(moduleUrl) {
@@ -471,6 +550,81 @@ test("capabilities expose exact normal, candidate-recovery, both manual-recovery
   assert.equal(absent.note_import, true)
 })
 
+test("recovery capabilities come from coordinator state even when a blocking scan would throw", async (t) => {
+  const candidateCoordinator = createWriteCoordinator()
+  await candidateCoordinator.markRecovery({
+    kind: "candidate_archive",
+    reason_code: "ARCHIVE_REBUILD_FAILED",
+    archive_source_id: "main_papers",
+    paper_id: "Wang23-DIO",
+    openalex_id: "W4387886124",
+  })
+  let candidateLoads = 0
+  const candidateFixture = await listenHandler(t, {
+    coordinator: candidateCoordinator,
+    loadContext: async () => {
+      candidateLoads += 1
+      throw Object.assign(new Error("private scan blocked"), { code: "ARCHIVE_SCAN_INCOMPLETE" })
+    },
+  })
+  const candidateResponse = await fetch(`${candidateFixture.origin}/api/v1/capabilities`)
+  assert.equal(candidateResponse.status, 200)
+  assert.equal(candidateLoads, 0)
+  assert.deepEqual(await json(candidateResponse), {
+    api_version: 1,
+    note_import: false,
+    source_path: true,
+    candidate_archive: false,
+    archive_rebuild: true,
+    discovery: true,
+    agent_task_center: true,
+    archive_source_id: "main_papers",
+    categories: NOTE_CATEGORIES,
+    recovery: {
+      required: true,
+      kind: "candidate_archive",
+      reason_code: "ARCHIVE_REBUILD_FAILED",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+  })
+
+  const manualCoordinator = createWriteCoordinator()
+  await manualCoordinator.markRecovery({ kind: "manual_archive", reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS" })
+  let manualLoads = 0
+  const manualFixture = await listenHandler(t, {
+    coordinator: manualCoordinator,
+    loadContext: async () => {
+      manualLoads += 1
+      throw Object.assign(new Error("private scan blocked"), { code: "ARCHIVE_SCAN_INCOMPLETE" })
+    },
+  })
+  const manualResponse = await fetch(`${manualFixture.origin}/api/v1/capabilities`)
+  assert.equal(manualResponse.status, 200)
+  assert.equal(manualLoads, 0)
+  assert.deepEqual((await json(manualResponse)).recovery, {
+    required: true,
+    kind: "manual_archive",
+    reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS",
+    archive_source_id: null,
+    paper_id: null,
+    openalex_id: null,
+  })
+
+  let normalLoads = 0
+  const normalFixture = await listenHandler(t, {
+    loadContext: async () => {
+      normalLoads += 1
+      throw Object.assign(new Error("private scan blocked"), { code: "ARCHIVE_SCAN_INCOMPLETE" })
+    },
+  })
+  const normalResponse = await fetch(`${normalFixture.origin}/api/v1/capabilities`)
+  assert.equal(normalResponse.status, 409)
+  assert.equal((await json(normalResponse)).error.code, "ARCHIVE_SCAN_INCOMPLETE")
+  assert.equal(normalLoads, 1)
+})
+
 test("POST guards enforce Host, Origin, fetch-site, JSON, endpoint limits, action headers, and no CORS", async (t) => {
   let inspectCalls = 0
   let importCalls = 0
@@ -598,6 +752,48 @@ test("POST guards enforce Host, Origin, fetch-site, JSON, endpoint limits, actio
   })
 })
 
+test("an oversized slow request stops consuming tail bytes, removes body listeners, and closes only its connection", async (t) => {
+  let serverRequest = null
+  let emittedBodyBytes = 0
+  let bytesAtResponse = null
+  const fixture = await listenHandler(t, {
+    observeRequest(request) {
+      if (serverRequest !== null) return
+      serverRequest = request
+      const emit = request.emit
+      request.emit = function instrumentedEmit(event, ...args) {
+        if (event === "data" && Buffer.isBuffer(args[0])) emittedBodyBytes += args[0].length
+        return Reflect.apply(emit, this, [event, ...args])
+      }
+    },
+  })
+  const response = await slowOversizedRequest(fixture.origin, "/api/v1/papers/source-path", {
+    limit: SOURCE_PATH_REQUEST_MAX_BYTES,
+    tailBytes: 2 * 1024 * 1024,
+    onResponseHeaders: () => { bytesAtResponse = emittedBodyBytes },
+  })
+  assert.equal(response.status, 413)
+  assert.equal(JSON.parse(response.body.toString("utf8")).error.code, "REQUEST_TOO_LARGE")
+  assert.equal(response.headers.connection, "close")
+  assert.equal(response.socketClosed, true)
+  assert.equal(emittedBodyBytes, bytesAtResponse)
+  for (const event of ["data", "end", "error"]) {
+    assert.equal(
+      serverRequest.listeners(event).some((listener) => ["onData", "onEnd", "onError"].includes(listener.name)),
+      false,
+      event,
+    )
+  }
+  assert.equal(serverRequest.readableFlowing, false)
+
+  const nextResponse = await post(fixture.origin, "/api/v1/papers/source-path", { paper_id: "Paper-01" })
+  assert.equal(nextResponse.status, 200)
+  assert.deepEqual(await json(nextResponse), {
+    paper_id: "Paper-01",
+    source_path: "/fixture/source/Paper-01",
+  })
+})
+
 test("the route table is exactly six endpoints and old or unknown API paths are explicit 404", async (t) => {
   const fixture = await listenHandler(t)
   for (const path of [
@@ -616,7 +812,7 @@ test("the route table is exactly six endpoints and old or unknown API paths are 
 })
 
 test("root redirect and static files use only the fixed generated/prototype/path-shape allowlists", async (t) => {
-  const repoRoot = await mkdtemp(join(tmpdir(), "local-server-static-"))
+  const repoRoot = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-")))
   t.after(() => rm(repoRoot, { recursive: true, force: true }))
   const hash = "a".repeat(64)
   assert.deepEqual(APPROVED_PROTOTYPE_FILES, EXPECTED_PROTOTYPE_FILES)
@@ -695,6 +891,74 @@ test("root redirect and static files use only the fixed generated/prototype/path
     const response = await rawRequest(fixture.origin, path, { headers: { host: new URL(fixture.origin).host } })
     assert.equal(response.status, 404, path)
   }
+})
+
+test("static serving rejects prototype, generated, data, and repository root aliases", async (t) => {
+  const repoRoot = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-roots-")))
+  const outsideRoot = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-outside-")))
+  const canonicalRepo = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-canonical-")))
+  const aliasParent = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-alias-parent-")))
+  const repoAlias = join(aliasParent, "repo-alias")
+  t.after(async () => {
+    await rm(repoRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
+    await rm(canonicalRepo, { recursive: true, force: true })
+    await rm(aliasParent, { recursive: true, force: true })
+  })
+
+  await mkdir(join(outsideRoot, "prototype"), { recursive: true })
+  await writeFile(join(outsideRoot, "prototype/index.html"), "outside prototype")
+  await mkdir(join(repoRoot, "prototype"), { recursive: true })
+  await symlink(join(outsideRoot, "prototype"), join(repoRoot, "prototype/desktop"))
+
+  await mkdir(join(outsideRoot, "output/desktop/assets"), { recursive: true })
+  await writeFile(join(outsideRoot, "output/desktop/assets/styles.css"), "outside generated")
+  await symlink(join(outsideRoot, "output"), join(repoRoot, "local_library_output"))
+
+  await mkdir(join(outsideRoot, "data"), { recursive: true })
+  await writeFile(join(outsideRoot, "data/paper-index.json"), "{}")
+  await symlink(join(outsideRoot, "data"), join(repoRoot, "local_library_data"))
+
+  const aliasedRoots = await listenHandler(t, { repoRoot })
+  for (const path of [
+    "/prototype/desktop/index.html",
+    "/local_library_output/desktop/assets/styles.css",
+    "/local_library_data/paper-index.json",
+  ]) assert.equal((await fetch(`${aliasedRoots.origin}${path}`)).status, 404, path)
+
+  await mkdir(join(canonicalRepo, "prototype/desktop"), { recursive: true })
+  await writeFile(join(canonicalRepo, "prototype/desktop/index.html"), "canonical")
+  await symlink(canonicalRepo, repoAlias)
+  const aliasedRepo = await listenHandler(t, { repoRoot: repoAlias })
+  assert.equal((await fetch(`${aliasedRepo.origin}/prototype/desktop/index.html`)).status, 404)
+})
+
+test("static serving rejects a terminal file swapped after its no-follow open", async (t) => {
+  const swapRepo = await realpath(await mkdtemp(join(tmpdir(), "local-server-static-swap-")))
+  t.after(() => rm(swapRepo, { recursive: true, force: true }))
+  const target = join(swapRepo, "prototype/desktop/index.html")
+  const displaced = join(swapRepo, "prototype/desktop/.displaced-index")
+  await mkdir(join(target, ".."), { recursive: true })
+  await writeFile(target, "owned bytes")
+  let swapped = false
+  const terminalSwap = await listenHandler(t, {
+    repoRoot: swapRepo,
+    staticFileSystem: {
+      open: async (path, flags, mode) => {
+        const handle = await openFile(path, flags, mode)
+        if (!swapped && path === target) {
+          swapped = true
+          await rename(target, displaced)
+          await writeFile(target, "replacement bytes")
+        }
+        return handle
+      },
+    },
+  })
+  const swappedResponse = await fetch(`${terminalSwap.origin}/prototype/desktop/index.html`)
+  assert.equal(swappedResponse.status, 404)
+  assert.equal(await swappedResponse.text(), "")
+  assert.equal(swapped, true)
 })
 
 test("inspect, source-path, and import return exact shapes while a locked import consumes its inspection first", async (t) => {

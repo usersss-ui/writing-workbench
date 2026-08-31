@@ -556,48 +556,46 @@ export async function verifyArchiveRecoveryProof({ proof, request, fileSystem = 
       if (typeof io[method] !== "function") throw new Error("invalid filesystem")
     }
     if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) throw new Error("invalid filesystem")
-    const rootInfo = await io.lstat(proof.source_root, { bigint: true })
-    const canonicalRoot = await io.realpath(proof.source_root)
-    if (
-      rootInfo.isSymbolicLink()
-      || !rootInfo.isDirectory()
-      || identityFingerprint(rootInfo) !== proof.source_root_identity
-      || canonicalRoot !== proof.source_root
-      || join(proof.source_root, proof.paper_id) !== proof.package_path
-    ) throw new Error("changed root")
-    const packageInfo = await io.lstat(proof.package_path, { bigint: true })
-    const canonicalPackage = await io.realpath(proof.package_path)
-    if (
-      packageInfo.isSymbolicLink()
-      || !packageInfo.isDirectory()
-      || identityFingerprint(packageInfo) !== proof.package_identity
-      || canonicalPackage !== proof.package_path
-      || !isInside(proof.source_root, canonicalPackage)
-    ) throw new Error("changed package")
-    const entries = (await io.readdir(proof.package_path)).sort((left, right) => left.localeCompare(right))
-    if (
-      entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
-      || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
-    ) throw new Error("changed entries")
-    for (const file of [proof.metadata, proof.commit]) {
+    for (let verificationPass = 0; verificationPass < 2; verificationPass += 1) {
+      const rootInfo = await io.lstat(proof.source_root, { bigint: true })
+      const canonicalRoot = await io.realpath(proof.source_root)
       if (
-        !file
-        || typeof file.path !== "string"
-        || typeof file.identity !== "string"
-        || !Number.isInteger(file.size)
-        || !/^[a-f0-9]{64}$/u.test(file.hash)
-      ) throw new Error("invalid file proof")
-      await verifyExpectedFile({
-        path: file.path,
-        expectedIdentity: file.identity,
-        expectedSize: file.size,
-        expectedHash: file.hash,
-        io,
-      })
-    }
-    const packageAfter = await io.lstat(proof.package_path, { bigint: true })
-    if (identityFingerprint(packageAfter) !== proof.package_identity || !packageAfter.isDirectory()) {
-      throw new Error("changed package")
+        rootInfo.isSymbolicLink()
+        || !rootInfo.isDirectory()
+        || identityFingerprint(rootInfo) !== proof.source_root_identity
+        || canonicalRoot !== proof.source_root
+        || join(proof.source_root, proof.paper_id) !== proof.package_path
+      ) throw new Error("changed root")
+      const packageInfo = await io.lstat(proof.package_path, { bigint: true })
+      const canonicalPackage = await io.realpath(proof.package_path)
+      if (
+        packageInfo.isSymbolicLink()
+        || !packageInfo.isDirectory()
+        || identityFingerprint(packageInfo) !== proof.package_identity
+        || canonicalPackage !== proof.package_path
+        || !isInside(proof.source_root, canonicalPackage)
+      ) throw new Error("changed package")
+      const entries = (await io.readdir(proof.package_path)).sort((left, right) => left.localeCompare(right))
+      if (
+        entries.length !== ARCHIVE_PACKAGE_ENTRIES.length
+        || !entries.every((entry, index) => entry === ARCHIVE_PACKAGE_ENTRIES[index])
+      ) throw new Error("changed entries")
+      for (const file of [proof.metadata, proof.commit]) {
+        if (
+          !file
+          || typeof file.path !== "string"
+          || typeof file.identity !== "string"
+          || !Number.isInteger(file.size)
+          || !/^[a-f0-9]{64}$/u.test(file.hash)
+        ) throw new Error("invalid file proof")
+        await verifyExpectedFile({
+          path: file.path,
+          expectedIdentity: file.identity,
+          expectedSize: file.size,
+          expectedHash: file.hash,
+          io,
+        })
+      }
     }
     return true
   } catch {

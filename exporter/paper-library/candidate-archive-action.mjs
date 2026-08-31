@@ -398,6 +398,11 @@ export async function rebuildArchivedCandidate({
   }
   const count = paperCount(result)
   if (count === null) throw actionError("ARCHIVE_RECOVERY_FAILED", "论文库恢复构建结果无效")
+  try {
+    await verifyArchiveRecoveryProof({ proof, request })
+  } catch {
+    throw actionError("ARCHIVE_CONFLICT", "归档资料包在恢复构建期间发生变化")
+  }
   if (typeof clearRecovery !== "function") throw actionError("INTERNAL_ERROR", "归档恢复依赖无效")
   await clearRecovery()
   recoveryStore.clear(recovery)

@@ -1,5 +1,6 @@
 import { createServer as createHttpServer } from "node:http"
-import { lstat, readFile, realpath } from "node:fs/promises"
+import { constants } from "node:fs"
+import { lstat, open, realpath } from "node:fs/promises"
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import { validateArchiveRequest } from "./candidate-archive.mjs"
@@ -75,6 +76,12 @@ export const APPROVED_PROTOTYPE_FILES = Object.freeze([
 ])
 
 const APPROVED_PROTOTYPE_SET = new Set(APPROVED_PROTOTYPE_FILES)
+const DEFAULT_STATIC_FILE_SYSTEM = Object.freeze({
+  lstat,
+  open,
+  realpath,
+  noFollowFlag: constants.O_NOFOLLOW,
+})
 const APPROVED_GENERATED_ASSET_SET = new Set([
   "styles.css",
   "library.mjs",
@@ -165,14 +172,15 @@ const ERROR_MESSAGE = Object.freeze({
 })
 
 class RequestError extends Error {
-  constructor(code) {
+  constructor(code, { closeConnection = false } = {}) {
     super(code)
     this.code = code
+    this.closeConnection = closeConnection
   }
 }
 
-function requestError(code) {
-  return new RequestError(code)
+function requestError(code, options) {
+  return new RequestError(code, options)
 }
 
 function isPlainObject(value) {
@@ -235,12 +243,13 @@ function baseHeaders(contentType) {
   }
 }
 
-function sendJson(response, status, value) {
+function sendJson(response, status, value, extraHeaders = {}) {
   const body = Buffer.from(`${JSON.stringify(value)}\n`, "utf8")
   response.writeHead(status, {
     ...baseHeaders("application/json; charset=utf-8"),
     "Cache-Control": "no-store",
     "Content-Length": body.length,
+    ...extraHeaders,
   })
   response.end(body)
 }
@@ -248,13 +257,15 @@ function sendJson(response, status, value) {
 function sendFailure(response, error, logger) {
   const failure = normalizedFailure(error)
   safeLog(logger, failure.code)
+  const closeConnection = error instanceof RequestError && error.closeConnection === true
+  if (closeConnection) response.shouldKeepAlive = false
   sendJson(response, ERROR_STATUS[failure.code], {
     error: {
       code: failure.code,
       message: ERROR_MESSAGE[failure.code],
       ...(failure.file_name ? { file_name: failure.file_name } : {}),
     },
-  })
+  }, closeConnection ? { Connection: "close" } : {})
 }
 
 function sendNotFound(request, response, api = false) {
@@ -307,27 +318,41 @@ function readBody(request, limit) {
     let total = 0
     let settled = false
     const chunks = []
+    const cleanup = () => {
+      request.removeListener("data", onData)
+      request.removeListener("end", onEnd)
+      request.removeListener("error", onError)
+    }
     const onData = (chunk) => {
       if (settled) return
       total += chunk.length
       if (total > limit) {
         settled = true
         chunks.length = 0
-        rejectBody(requestError("REQUEST_TOO_LARGE"))
+        cleanup()
+        request.pause()
+        rejectBody(requestError("REQUEST_TOO_LARGE", { closeConnection: true }))
         return
       }
       chunks.push(Buffer.from(chunk))
     }
-    request.on("data", onData)
-    request.once("end", () => {
-      if (!settled) resolveBody(Buffer.concat(chunks, total))
-    })
-    request.once("error", () => {
+    const onEnd = () => {
       if (!settled) {
         settled = true
+        cleanup()
+        resolveBody(Buffer.concat(chunks, total))
+      }
+    }
+    const onError = () => {
+      if (!settled) {
+        settled = true
+        cleanup()
         rejectBody(requestError("INVALID_JSON"))
       }
-    })
+    }
+    request.on("data", onData)
+    request.once("end", onEnd)
+    request.once("error", onError)
   })
 }
 
@@ -428,19 +453,77 @@ function mimeType(path) {
   })[extension] ?? "application/octet-stream"
 }
 
-async function serveStatic({ request, response, repoRoot, pathname }) {
+async function serveStatic({ request, response, repoRoot, pathname, fileSystem: io }) {
   const mapping = staticMapping(pathname)
   if (!mapping) return false
+  let handle = null
   try {
-    const lexicalRoot = resolve(repoRoot, mapping.root)
-    const canonicalRoot = await realpath(lexicalRoot)
+    for (const method of ["lstat", "open", "realpath"]) if (typeof io?.[method] !== "function") return false
+    if (!Number.isInteger(io.noFollowFlag) || io.noFollowFlag <= 0) return false
+    const lexicalRepoRoot = resolve(repoRoot)
+    const repoInfo = await io.lstat(lexicalRepoRoot, { bigint: true })
+    const canonicalRepoRoot = await io.realpath(lexicalRepoRoot)
+    if (
+      repoInfo.isSymbolicLink()
+      || !repoInfo.isDirectory()
+      || canonicalRepoRoot !== lexicalRepoRoot
+    ) return false
+    const repoIdentity = `${repoInfo.dev}:${repoInfo.ino}`
+    const lexicalRoot = resolve(canonicalRepoRoot, mapping.root)
+    if (!inside(canonicalRepoRoot, lexicalRoot)) return false
+    const rootInfo = await io.lstat(lexicalRoot, { bigint: true })
+    const canonicalRoot = await io.realpath(lexicalRoot)
+    if (
+      rootInfo.isSymbolicLink()
+      || !rootInfo.isDirectory()
+      || canonicalRoot !== lexicalRoot
+      || !inside(canonicalRepoRoot, canonicalRoot)
+    ) return false
+    const rootIdentity = `${rootInfo.dev}:${rootInfo.ino}`
     const lexicalFile = resolve(lexicalRoot, mapping.relativePath)
-    const expectedFile = resolve(canonicalRoot, mapping.relativePath)
-    const lexicalInfo = await lstat(lexicalFile)
-    if (lexicalInfo.isSymbolicLink() || !lexicalInfo.isFile()) return false
-    const canonicalFile = await realpath(lexicalFile)
-    if (canonicalFile !== expectedFile || !inside(canonicalRoot, canonicalFile)) return false
-    const bytes = await readFile(canonicalFile)
+    if (!inside(canonicalRoot, lexicalFile)) return false
+    const lexicalInfo = await io.lstat(lexicalFile, { bigint: true })
+    const canonicalFile = await io.realpath(lexicalFile)
+    if (
+      lexicalInfo.isSymbolicLink()
+      || !lexicalInfo.isFile()
+      || canonicalFile !== lexicalFile
+      || !inside(canonicalRoot, canonicalFile)
+    ) return false
+    const fileIdentity = `${lexicalInfo.dev}:${lexicalInfo.ino}`
+    const fileSize = Number(lexicalInfo.size)
+    handle = await io.open(canonicalFile, constants.O_RDONLY | io.noFollowFlag)
+    const openedBefore = await handle.stat({ bigint: true })
+    if (
+      !openedBefore.isFile()
+      || `${openedBefore.dev}:${openedBefore.ino}` !== fileIdentity
+      || Number(openedBefore.size) !== fileSize
+    ) return false
+    const bytes = await handle.readFile()
+    const openedAfter = await handle.stat({ bigint: true })
+    const lexicalAfter = await io.lstat(lexicalFile, { bigint: true })
+    const canonicalAfter = await io.realpath(lexicalFile)
+    const rootAfter = await io.lstat(lexicalRoot, { bigint: true })
+    const repoAfter = await io.lstat(lexicalRepoRoot, { bigint: true })
+    if (
+      !openedAfter.isFile()
+      || `${openedAfter.dev}:${openedAfter.ino}` !== fileIdentity
+      || Number(openedAfter.size) !== fileSize
+      || bytes.length !== fileSize
+      || lexicalAfter.isSymbolicLink()
+      || !lexicalAfter.isFile()
+      || `${lexicalAfter.dev}:${lexicalAfter.ino}` !== fileIdentity
+      || Number(lexicalAfter.size) !== fileSize
+      || canonicalAfter !== canonicalFile
+      || rootAfter.isSymbolicLink()
+      || !rootAfter.isDirectory()
+      || `${rootAfter.dev}:${rootAfter.ino}` !== rootIdentity
+      || await io.realpath(lexicalRoot) !== canonicalRoot
+      || repoAfter.isSymbolicLink()
+      || !repoAfter.isDirectory()
+      || `${repoAfter.dev}:${repoAfter.ino}` !== repoIdentity
+      || await io.realpath(lexicalRepoRoot) !== canonicalRepoRoot
+    ) return false
     response.writeHead(200, {
       ...baseHeaders(mimeType(canonicalFile)),
       "Content-Length": bytes.length,
@@ -449,6 +532,10 @@ async function serveStatic({ request, response, repoRoot, pathname }) {
     return true
   } catch {
     return false
+  } finally {
+    if (handle) {
+      try { await handle.close() } catch { /* static validation result remains authoritative */ }
+    }
   }
 }
 
@@ -466,11 +553,14 @@ function configuredArchiveSourceId(context) {
   return context.config.sources?.filter((source) => source?.source_id === value).length === 1 ? value : null
 }
 
-function capabilityResponse(context, coordinator) {
-  const archiveSourceId = configuredArchiveSourceId(context)
-  const recovery = coordinator.getState().recovery
+function capabilityResponse(context, recovery) {
   const candidateRecovery = recovery?.kind === "candidate_archive"
   const manualRecovery = recovery?.kind === "manual_note" || recovery?.kind === "manual_archive"
+  const archiveSourceId = candidateRecovery
+    ? recovery.archive_source_id
+    : recovery === null
+      ? configuredArchiveSourceId(context)
+      : null
   return {
     api_version: 1,
     note_import: recovery === null,
@@ -564,11 +654,13 @@ export function createPrivateLibraryRequestHandler({
   archiveAction = archiveCandidateAndRebuild,
   recoveryAction = rebuildArchivedCandidate,
   recoveryStore = createArchiveRecoveryStore(),
+  staticFileSystem = {},
   logger = () => {},
 } = {}) {
   if (typeof repoRoot !== "string" || repoRoot.length === 0 || typeof getOrigin !== "function") {
     throw new TypeError("本地论文库服务配置无效")
   }
+  const staticIo = { ...DEFAULT_STATIC_FILE_SYSTEM, ...staticFileSystem }
 
   return async function privateLibraryRequestHandler(request, response) {
     const target = requestPath(request)
@@ -581,8 +673,13 @@ export function createPrivateLibraryRequestHandler({
           return
         }
         if (request.method === "GET" && target === "/api/v1/capabilities") {
-          const context = await loadContext({ repoRoot })
-          sendJson(response, 200, capabilityResponse(context, coordinator))
+          let recovery = coordinator.getState().recovery
+          let context = null
+          if (recovery === null) {
+            context = await loadContext({ repoRoot })
+            recovery = coordinator.getState().recovery
+          }
+          sendJson(response, 200, capabilityResponse(recovery === null ? context : null, recovery))
           return
         }
         const route = new Map([
@@ -717,7 +814,7 @@ export function createPrivateLibraryRequestHandler({
         response.end()
         return
       }
-      if (!await serveStatic({ request, response, repoRoot, pathname: path.pathname })) {
+      if (!await serveStatic({ request, response, repoRoot, pathname: path.pathname, fileSystem: staticIo })) {
         sendNotFound(request, response)
       }
     } catch (error) {
