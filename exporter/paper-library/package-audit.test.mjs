@@ -10,7 +10,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises"
-import { join } from "node:path"
+import { join, posix } from "node:path"
 import { tmpdir } from "node:os"
 import {
   EXPECTED_PACKAGE_FILES,
@@ -26,10 +26,17 @@ const EXPECTED_FILES = [
   ".gitignore",
   "README.md",
   "exporter/config/github-package-files.json",
+  "exporter/config/institutions/nuist.json",
   "exporter/config/library.example.json",
+  "exporter/paper-library/archive-metadata.mjs",
+  "exporter/paper-library/archive-metadata.test.mjs",
   "exporter/paper-library/artifacts.mjs",
   "exporter/paper-library/build.mjs",
   "exporter/paper-library/build.test.mjs",
+  "exporter/paper-library/candidate-archive-action.mjs",
+  "exporter/paper-library/candidate-archive-action.test.mjs",
+  "exporter/paper-library/candidate-archive.mjs",
+  "exporter/paper-library/candidate-archive.test.mjs",
   "exporter/paper-library/catalog-adapter.mjs",
   "exporter/paper-library/catalog-adapter.test.mjs",
   "exporter/paper-library/config.mjs",
@@ -38,6 +45,13 @@ const EXPECTED_FILES = [
   "exporter/paper-library/frontmatter.mjs",
   "exporter/paper-library/ids.mjs",
   "exporter/paper-library/ids.test.mjs",
+  "exporter/paper-library/institution-config.mjs",
+  "exporter/paper-library/institution-config.test.mjs",
+  "exporter/paper-library/local-server.mjs",
+  "exporter/paper-library/local-server.test.mjs",
+  "exporter/paper-library/note-import-transaction.test.mjs",
+  "exporter/paper-library/note-import.mjs",
+  "exporter/paper-library/note-import.test.mjs",
   "exporter/paper-library/note-preview.mjs",
   "exporter/paper-library/note-preview.test.mjs",
   "exporter/paper-library/overrides.mjs",
@@ -45,22 +59,47 @@ const EXPECTED_FILES = [
   "exporter/paper-library/package-audit.test.mjs",
   "exporter/paper-library/paper-tag-migration.mjs",
   "exporter/paper-library/paper-tag-migration.test.mjs",
+  "exporter/paper-library/runtime.mjs",
+  "exporter/paper-library/runtime.test.mjs",
   "exporter/paper-library/scanner.mjs",
   "exporter/paper-library/scanner.test.mjs",
   "exporter/paper-library/status.mjs",
   "exporter/paper-library/status.test.mjs",
   "exporter/paper-library/tag-catalog.mjs",
   "exporter/paper-library/tag-catalog.test.mjs",
+  "exporter/paper-library/write-coordinator.mjs",
+  "exporter/paper-library/write-coordinator.test.mjs",
   "exporter/scripts/audit-github-package.mjs",
   "exporter/scripts/build-private-library.mjs",
   "exporter/scripts/migrate-paper-tags-v3.mjs",
+  "exporter/scripts/serve-private-library.mjs",
+  "exporter/scripts/serve-state-transfer.mjs",
+  "exporter/scripts/serve-state-transfer.test.mjs",
   "prototype/desktop/README.md",
+  "prototype/desktop/agent-task-input.mjs",
+  "prototype/desktop/agent-task-input.test.mjs",
+  "prototype/desktop/agent-tasks.css",
+  "prototype/desktop/agent-tasks.html",
+  "prototype/desktop/agent-tasks.mjs",
+  "prototype/desktop/agent-tasks.test.mjs",
   "prototype/desktop/app.mjs",
+  "prototype/desktop/candidate-storage.mjs",
+  "prototype/desktop/candidate-storage.test.mjs",
+  "prototype/desktop/desktop-pages.test.mjs",
+  "prototype/desktop/direction-snapshot.mjs",
+  "prototype/desktop/direction-snapshot.test.mjs",
   "prototype/desktop/directions.html",
   "prototype/desktop/directions.mjs",
+  "prototype/desktop/discovery-dom.test.mjs",
+  "prototype/desktop/discovery.mjs",
+  "prototype/desktop/discovery.template.html",
   "prototype/desktop/index.html",
+  "prototype/desktop/institution-access.mjs",
+  "prototype/desktop/institution-access.test.mjs",
   "prototype/desktop/library.mjs",
   "prototype/desktop/library.template.html",
+  "prototype/desktop/openalex-search.mjs",
+  "prototype/desktop/openalex-search.test.mjs",
   "prototype/desktop/p02.html",
   "prototype/desktop/paper-filter.mjs",
   "prototype/desktop/paper-inspector.mjs",
@@ -74,6 +113,10 @@ const EXPECTED_FILES = [
   "prototype/desktop/paper-user-tags.mjs",
   "prototype/desktop/paper-user-tags.test.mjs",
   "prototype/desktop/papers-data.mjs",
+  "prototype/desktop/state-transfer-dom.test.mjs",
+  "prototype/desktop/state-transfer.html",
+  "prototype/desktop/state-transfer.mjs",
+  "prototype/desktop/state-transfer.test.mjs",
   "prototype/desktop/styles.css",
   "prototype/desktop/vendor/katex/LICENSE",
   "prototype/desktop/vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
@@ -99,6 +142,142 @@ const EXPECTED_FILES = [
   "prototype/desktop/vendor/katex/katex.min.css",
   "prototype/desktop/vendor/katex/katex.mjs",
 ]
+
+const TASK_13_NET_NEW_FILES = Object.freeze([
+  "exporter/config/institutions/nuist.json",
+  "exporter/paper-library/archive-metadata.mjs",
+  "exporter/paper-library/archive-metadata.test.mjs",
+  "exporter/paper-library/candidate-archive-action.mjs",
+  "exporter/paper-library/candidate-archive-action.test.mjs",
+  "exporter/paper-library/candidate-archive.mjs",
+  "exporter/paper-library/candidate-archive.test.mjs",
+  "exporter/paper-library/institution-config.mjs",
+  "exporter/paper-library/institution-config.test.mjs",
+  "exporter/paper-library/local-server.mjs",
+  "exporter/paper-library/local-server.test.mjs",
+  "exporter/paper-library/note-import-transaction.test.mjs",
+  "exporter/paper-library/note-import.mjs",
+  "exporter/paper-library/note-import.test.mjs",
+  "exporter/paper-library/runtime.mjs",
+  "exporter/paper-library/runtime.test.mjs",
+  "exporter/paper-library/write-coordinator.mjs",
+  "exporter/paper-library/write-coordinator.test.mjs",
+  "exporter/scripts/serve-private-library.mjs",
+  "exporter/scripts/serve-state-transfer.mjs",
+  "exporter/scripts/serve-state-transfer.test.mjs",
+  "prototype/desktop/agent-task-input.mjs",
+  "prototype/desktop/agent-task-input.test.mjs",
+  "prototype/desktop/agent-tasks.css",
+  "prototype/desktop/agent-tasks.html",
+  "prototype/desktop/agent-tasks.mjs",
+  "prototype/desktop/agent-tasks.test.mjs",
+  "prototype/desktop/candidate-storage.mjs",
+  "prototype/desktop/candidate-storage.test.mjs",
+  "prototype/desktop/desktop-pages.test.mjs",
+  "prototype/desktop/direction-snapshot.mjs",
+  "prototype/desktop/direction-snapshot.test.mjs",
+  "prototype/desktop/discovery-dom.test.mjs",
+  "prototype/desktop/discovery.mjs",
+  "prototype/desktop/discovery.template.html",
+  "prototype/desktop/institution-access.mjs",
+  "prototype/desktop/institution-access.test.mjs",
+  "prototype/desktop/openalex-search.mjs",
+  "prototype/desktop/openalex-search.test.mjs",
+  "prototype/desktop/state-transfer-dom.test.mjs",
+  "prototype/desktop/state-transfer.html",
+  "prototype/desktop/state-transfer.mjs",
+  "prototype/desktop/state-transfer.test.mjs",
+])
+
+const TASK_14_DEFERRED_FILES = Object.freeze([
+  "exporter/paper-library/unified-local-server.e2e.test.mjs",
+  "exporter/verification/institution_access_e2e.py",
+  "exporter/verification/integrated-server-fixture.mjs",
+  "exporter/verification/integrated-server-fixture.test.mjs",
+  "exporter/verification/private_library_e2e.py",
+  "exporter/verification/workbench_integration_e2e.py",
+])
+
+const TASK_13_PRIVATE_SENTINEL_TEST_FILES = Object.freeze([
+  "exporter/paper-library/note-import.test.mjs",
+  "exporter/paper-library/write-coordinator.test.mjs",
+  "exporter/scripts/serve-state-transfer.test.mjs",
+  "prototype/desktop/discovery-dom.test.mjs",
+  "prototype/desktop/state-transfer-dom.test.mjs",
+])
+
+const REGULAR_DESKTOP_ASSET_SOURCES = Object.freeze([
+  "prototype/desktop/agent-task-input.mjs",
+  "prototype/desktop/candidate-storage.mjs",
+  "prototype/desktop/direction-snapshot.mjs",
+  "prototype/desktop/discovery.mjs",
+  "prototype/desktop/institution-access.mjs",
+  "prototype/desktop/library.mjs",
+  "prototype/desktop/openalex-search.mjs",
+  "prototype/desktop/paper-inspector.mjs",
+  "prototype/desktop/paper-library-model.mjs",
+  "prototype/desktop/paper-library-storage.mjs",
+  "prototype/desktop/paper-math-renderer.mjs",
+  "prototype/desktop/paper-user-tags.mjs",
+  "prototype/desktop/state-transfer.mjs",
+  "prototype/desktop/styles.css",
+])
+
+const GENERATED_PAGE_CLOSURES = Object.freeze([
+  Object.freeze({
+    name: "library",
+    template: "prototype/desktop/library.template.html",
+    regular: Object.freeze([
+      "prototype/desktop/candidate-storage.mjs",
+      "prototype/desktop/library.mjs",
+      "prototype/desktop/paper-inspector.mjs",
+      "prototype/desktop/paper-library-model.mjs",
+      "prototype/desktop/paper-library-storage.mjs",
+      "prototype/desktop/paper-math-renderer.mjs",
+      "prototype/desktop/paper-user-tags.mjs",
+      "prototype/desktop/styles.css",
+    ]),
+    vendor: Object.freeze([
+      "prototype/desktop/vendor/katex/katex.min.css",
+      "prototype/desktop/vendor/katex/katex.mjs",
+    ]),
+  }),
+  Object.freeze({
+    name: "discovery",
+    template: "prototype/desktop/discovery.template.html",
+    regular: Object.freeze([
+      "prototype/desktop/candidate-storage.mjs",
+      "prototype/desktop/discovery.mjs",
+      "prototype/desktop/institution-access.mjs",
+      "prototype/desktop/library.mjs",
+      "prototype/desktop/openalex-search.mjs",
+      "prototype/desktop/paper-inspector.mjs",
+      "prototype/desktop/paper-library-model.mjs",
+      "prototype/desktop/paper-library-storage.mjs",
+      "prototype/desktop/paper-math-renderer.mjs",
+      "prototype/desktop/paper-user-tags.mjs",
+      "prototype/desktop/styles.css",
+    ]),
+    vendor: Object.freeze([
+      "prototype/desktop/vendor/katex/katex.mjs",
+    ]),
+  }),
+  Object.freeze({
+    name: "state-transfer",
+    template: "prototype/desktop/state-transfer.html",
+    regular: Object.freeze([
+      "prototype/desktop/agent-task-input.mjs",
+      "prototype/desktop/candidate-storage.mjs",
+      "prototype/desktop/direction-snapshot.mjs",
+      "prototype/desktop/paper-library-model.mjs",
+      "prototype/desktop/paper-library-storage.mjs",
+      "prototype/desktop/paper-user-tags.mjs",
+      "prototype/desktop/state-transfer.mjs",
+      "prototype/desktop/styles.css",
+    ]),
+    vendor: Object.freeze([]),
+  }),
+])
 
 const manifestRelativePath = "exporter/config/github-package-files.json"
 const exampleRelativePath = "exporter/config/library.example.json"
@@ -126,7 +305,9 @@ async function createFixtureRepo({ files = EXPECTED_FILES, extra = {} } = {}) {
   const root = await mkdtemp(join(tmpdir(), "github-package-audit-"))
   for (const relativePath of EXPECTED_FILES) {
     if (relativePath === manifestRelativePath) continue
-    if (relativePath === exampleRelativePath) {
+    if (relativePath === "exporter/config/institutions/nuist.json") {
+      await writeFixtureFile(root, relativePath, "{}\n")
+    } else if (relativePath === exampleRelativePath) {
       await writeFixtureFile(root, relativePath, `${JSON.stringify({
         version: 1,
         sources: [{ source_id: "fixture", path: "REPLACE_WITH_ABSOLUTE_PATH" }],
@@ -151,12 +332,142 @@ async function captureBoundaryError(operation) {
   assert.fail("expected PackageBoundaryError")
 }
 
-test("exports the independent immutable exact package policy in lexical order", () => {
+function staticImportSpecifiers(text) {
+  const fromImports = [...text.matchAll(/\bfrom\s+(?:"([^"]+)"|'([^']+)')/gu)]
+    .map((match) => match[1] ?? match[2])
+  const bareImports = [...text.matchAll(/(?:^|\n)\s*import\s*(?:"([^"]+)"|'([^']+)')/gu)]
+    .map((match) => match[1] ?? match[2])
+  return [...fromImports, ...bareImports]
+}
+
+function templateAssetSpecifiers(text) {
+  const attributes = [...text.matchAll(/\b(?:href|src)\s*=\s*(?:"([^"]+)"|'([^']+)')/gu)]
+    .map((match) => match[1] ?? match[2])
+  return [...attributes, ...staticImportSpecifiers(text)].filter((specifier) => specifier.startsWith("./assets/"))
+}
+
+async function collectGeneratedPageSourceClosure(templatePath) {
+  const template = await readFile(new URL(`../../${templatePath}`, import.meta.url), "utf8")
+  const pending = templateAssetSpecifiers(template).map((specifier) => {
+    const assetPath = specifier.slice("./assets/".length).split(/[?#]/u, 1)[0]
+    return `prototype/desktop/${assetPath}`
+  })
+  const visited = new Set()
+  while (pending.length > 0) {
+    const sourcePath = pending.shift()
+    if (visited.has(sourcePath)) continue
+    visited.add(sourcePath)
+    if (!sourcePath.endsWith(".mjs")) continue
+    const source = await readFile(new URL(`../../${sourcePath}`, import.meta.url), "utf8")
+    for (const specifier of staticImportSpecifiers(source)) {
+      assert.match(specifier, /^\.\/[A-Za-z0-9_./-]+$/u, `${sourcePath}: ${specifier}`)
+      const dependency = posix.normalize(posix.join(posix.dirname(sourcePath), specifier))
+      assert.equal(dependency.startsWith("prototype/desktop/"), true, `${sourcePath}: ${specifier}`)
+      pending.push(dependency)
+    }
+  }
+  const paths = [...visited].sort()
+  return {
+    regular: paths.filter((path) => REGULAR_DESKTOP_ASSET_SOURCES.includes(path)),
+    vendor: paths.filter((path) => path.startsWith("prototype/desktop/vendor/katex/")),
+    unexpected: paths.filter((path) => (
+      !REGULAR_DESKTOP_ASSET_SOURCES.includes(path)
+      && !path.startsWith("prototype/desktop/vendor/katex/")
+    )),
+  }
+}
+
+test("keeps the manifest and both independent policies at the exact lexical 118-file Task 13 union", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../config/github-package-files.json", import.meta.url), "utf8"))
+  assert.equal(EXPECTED_FILES.length, 118)
+  assert.equal(TASK_13_NET_NEW_FILES.length, 43)
+  assert.deepEqual(TASK_13_NET_NEW_FILES, [...TASK_13_NET_NEW_FILES].sort())
+  assert.deepEqual(
+    EXPECTED_FILES.filter((path) => TASK_13_NET_NEW_FILES.includes(path)),
+    TASK_13_NET_NEW_FILES,
+  )
+  assert.deepEqual(manifest.files, EXPECTED_FILES)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, EXPECTED_FILES)
   assert.equal(Object.isFrozen(EXPECTED_PACKAGE_FILES), true)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, [...EXPECTED_FILES].sort())
   assert.throws(() => EXPECTED_PACKAGE_FILES.push("notes/innocent.md"), TypeError)
   assert.equal(EXPECTED_PACKAGE_FILES.includes("local_library_config/paper-tags.json"), false)
+})
+
+test("keeps private, generated, donor, legacy, artifact, and Task 14-only files outside the 118-file policy", () => {
+  const excluded = [
+    "local_library_config/library.local.json",
+    "local_library_data/paper-index.json",
+    "local_library_output/desktop/library.html",
+    "papers/paper.pdf",
+    "notes/paper-reading.md",
+    "private/audits/package.json",
+    "output/screenshots/library.png",
+    "donor/serve-private-library.mjs",
+    "prototype/paper-library-v2/library.mjs",
+    ...TASK_14_DEFERRED_FILES,
+  ]
+  assert.equal(EXPECTED_FILES.some((path) => excluded.includes(path)), false)
+  assert.equal(auditPackageCandidates(excluded.map((path) => ({ path, content: "fixture" }))).blocking.length, excluded.length)
+})
+
+for (const closure of GENERATED_PAGE_CLOSURES) {
+  test(`the generated ${closure.name} page closes independently through its exact packaged source dependencies`, async () => {
+    const actual = await collectGeneratedPageSourceClosure(closure.template)
+    assert.deepEqual(actual, {
+      regular: closure.regular,
+      vendor: closure.vendor,
+      unexpected: [],
+    })
+    const omittedMember = closure.regular[0]
+    const incompletePolicy = new Set(closure.regular.slice(1))
+    assert.deepEqual(actual.regular.filter((path) => !incompletePolicy.has(path)), [omittedMember])
+
+    const sourcePaths = [closure.template, ...closure.regular, ...closure.vendor]
+    assert.equal(sourcePaths.every((path) => EXPECTED_FILES.includes(path)), true)
+    const candidates = await Promise.all(sourcePaths.map(async (path) => ({
+      path,
+      content: await readFile(new URL(`../../${path}`, import.meta.url)),
+    })))
+    const result = auditPackageDependencyClosure(candidates)
+    assert.deepEqual(result.blocking, [])
+    assert.ok(result.checkedCount > 0)
+  })
+}
+
+test("the three generated pages use exactly the 14 regular desktop assets", () => {
+  const union = [...new Set(GENERATED_PAGE_CLOSURES.flatMap((closure) => closure.regular))].sort()
+  assert.deepEqual(union, REGULAR_DESKTOP_ASSET_SOURCES)
+})
+
+test("dynamic generated resources stay outside the 118-file and regular-asset maps", () => {
+  assert.equal(EXPECTED_FILES.includes("exporter/config/institutions/nuist.json"), true)
+  for (const generatedPath of [
+    "local_library_output/desktop/assets/nuist.institution.json",
+    "local_library_data/paper-index.json",
+  ]) {
+    assert.equal(EXPECTED_FILES.includes(generatedPath), false)
+    assert.equal(REGULAR_DESKTOP_ASSET_SOURCES.includes(generatedPath), false)
+    assert.equal(auditPackageCandidates([{ path: generatedPath, content: "fixture" }]).blocking.length, 1)
+  }
+})
+
+test("KaTeX font references remain an exact dedicated vendor closure", async () => {
+  const css = await readFile(new URL("../../prototype/desktop/vendor/katex/katex.min.css", import.meta.url), "utf8")
+  const referencedFonts = [...new Set([...css.matchAll(/url\(["']?(fonts\/[A-Za-z0-9_.-]+\.woff2)["']?\)/gu)]
+    .map((match) => `prototype/desktop/vendor/katex/${match[1]}`))].sort()
+  const packagedFonts = EXPECTED_FILES.filter((path) => path.startsWith("prototype/desktop/vendor/katex/fonts/"))
+  assert.ok(referencedFonts.length > 0)
+  assert.deepEqual(referencedFonts, packagedFonts)
+  assert.equal(referencedFonts.some((path) => REGULAR_DESKTOP_ASSET_SOURCES.includes(path)), false)
+})
+
+test("the five Task 13 test candidates preserve private-path assertions without shipping private signatures", async () => {
+  const candidates = await Promise.all(TASK_13_PRIVATE_SENTINEL_TEST_FILES.map(async (path) => ({
+    path,
+    content: await readFile(new URL(`../../${path}`, import.meta.url)),
+  })))
+  assert.deepEqual(auditPackageCandidates(candidates).blocking, [])
 })
 
 test("the exact policy includes all three back-navigation pages and their runtime dependencies", () => {
@@ -630,11 +941,11 @@ test("the CLI maps post-validation collector ordinals to fixed safe candidate pa
   const cases = [
     ["candidate_missing", 2, "README.md", "候选文件不存在"],
     ["candidate_symlink", 1, ".gitignore", "候选路径含符号链接"],
-    ["candidate_not_regular", 4, "exporter/config/library.example.json", "候选路径不是普通文件"],
-    ["candidate_read", 5, "exporter/paper-library/artifacts.mjs", "候选文件无法安全读取"],
-    ["candidate_changed", 6, "exporter/paper-library/build.mjs", "候选文件读取期间发生变化"],
-    ["candidate_escape", 7, "exporter/paper-library/build.test.mjs", "候选文件解析到项目边界之外"],
-    ["candidate_parent_invalid", 10, "exporter/paper-library/config.mjs", "候选路径的父级不是目录"],
+    ["candidate_not_regular", 5, "exporter/config/library.example.json", "候选路径不是普通文件"],
+    ["candidate_read", 8, "exporter/paper-library/artifacts.mjs", "候选文件无法安全读取"],
+    ["candidate_changed", 9, "exporter/paper-library/build.mjs", "候选文件读取期间发生变化"],
+    ["candidate_escape", 10, "exporter/paper-library/build.test.mjs", "候选文件解析到项目边界之外"],
+    ["candidate_parent_invalid", 17, "exporter/paper-library/config.mjs", "候选路径的父级不是目录"],
   ]
   for (const [errorCode, itemIndex, safePath, reason] of cases) {
     const output = []

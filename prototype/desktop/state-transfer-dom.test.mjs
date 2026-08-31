@@ -6,6 +6,7 @@ const pageUrl = new URL("./state-transfer.html", import.meta.url)
 const moduleUrl = new URL("./state-transfer.mjs", import.meta.url)
 const html = await readFile(pageUrl, "utf8")
 const source = await readFile(moduleUrl, "utf8")
+const absoluteUsersPath = (...parts) => ["", "Users", ...parts].join("/")
 
 const EXPECTED_IDS = Object.freeze([
   "state-transfer-app",
@@ -129,7 +130,7 @@ class ConditionalFailStorage extends MemoryStorage {
   setItem(key, value) {
     if (this.shouldFail(String(key), String(value))) {
       this.writes += 1
-      throw new Error("/Users/alice/private raw rollback failure")
+      throw new Error(`${absoluteUsersPath("alice", "private")} raw rollback failure`)
     }
     super.setItem(key, value)
   }
@@ -209,7 +210,7 @@ class FakeElement {
   click() { this.ownerDocument.anchorClicks += 1 }
 }
 
-function fakeDom({ origin = "http://127.0.0.1:4176", storage = new MemoryStorage() } = {}) {
+function fakeDom({ origin = "http://127.0.0.1:4176", storage = new MemoryStorage(), fetchImpl = null } = {}) {
   const documentRef = {
     readyState: "complete",
     activeElement: null,
@@ -241,6 +242,7 @@ function fakeDom({ origin = "http://127.0.0.1:4176", storage = new MemoryStorage
     },
     fetch: async (url) => {
       requests.push(String(url))
+      if (fetchImpl) return fetchImpl(url)
       return { ok: true, json: async () => ({ version: 3, papers: [{ paper_id: "Paper-01" }] }) }
     },
   }
@@ -299,7 +301,7 @@ function maliciousCandidate() {
   }
 }
 
-async function bootOperator(context, label) {
+async function bootOperator(context, label, { state = emptyState(), fetchImpl = null } = {}) {
   const previousDocument = globalThis.document
   const previousWindow = globalThis.window
   context.after(() => {
@@ -308,8 +310,8 @@ async function bootOperator(context, label) {
     if (previousWindow === undefined) delete globalThis.window
     else globalThis.window = previousWindow
   })
-  const storage = storageFor(emptyState())
-  const ui = fakeDom({ storage })
+  const storage = storageFor(state)
+  const ui = fakeDom({ storage, fetchImpl })
   globalThis.document = ui.documentRef
   globalThis.window = ui.windowRef
   const transfer = await import(`${moduleUrl.href}?${label}=${Date.now()}-${Math.random()}`)
@@ -405,6 +407,34 @@ test("a failed preview resets checked and enabled confirmation state", async (co
   assert.match(ui.documentRef.elements.get("state-transfer-confirmation").textContent, /尚未生成可应用/u)
 })
 
+test("a transitional 404 for the public index falls back to current-state paper IDs", async (context) => {
+  const currentState = emptyState()
+  currentState.paper_workspace = {
+    version: 1,
+    shelf: { "Paper-01": ["related_work"] },
+    personalReading: {},
+    selectedPaperId: "Paper-01",
+  }
+  const { transfer, ui } = await bootOperator(context, "index-404-fallback", {
+    state: currentState,
+    fetchImpl: async () => ({ ok: false }),
+  })
+  const incomingState = emptyState()
+  incomingState.personal_tags = { version: 1, papers: { "Paper-01": ["当前书架论文"] } }
+  const incoming = await transfer.exportStateBundle({
+    storage: storageFor(incomingState),
+    originLabel: "http://127.0.0.1:4177",
+    exportedAt: "2026-09-01T04:03:00.000Z",
+  })
+  ui.documentRef.elements.get("state-transfer-files").files = [bundleFile(incoming, "origin-4177.json")]
+
+  await ui.documentRef.elements.get("state-transfer-preview").dispatch("click")
+
+  assert.deepEqual(ui.requests, ["http://127.0.0.1:4176/local_library_data/paper-index.json"])
+  assert.equal(ui.documentRef.elements.get("state-transfer-exclusions").textContent, "")
+  assert.equal(ui.documentRef.elements.get("state-transfer-confirm").disabled, false)
+})
+
 test("operator behavior blocks unsupported origins, sanitizes failures and bodies, stays busy-safe, and applies once", async (context) => {
   const previousDocument = globalThis.document
   const previousWindow = globalThis.window
@@ -415,7 +445,7 @@ test("operator behavior blocks unsupported origins, sanitizes failures and bodie
     else globalThis.window = previousWindow
   })
 
-  const unsupportedFailure = new Error("/Users/alice/private Authorization: Bearer secret <img onerror=boom>")
+  const unsupportedFailure = new Error(`${absoluteUsersPath("alice", "private")} Authorization: Bearer secret <img onerror=boom>`)
   const unsupported = fakeDom({ origin: "http://localhost:4176", storage: new MemoryStorage({}, unsupportedFailure) })
   globalThis.document = unsupported.documentRef
   globalThis.window = unsupported.windowRef

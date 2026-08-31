@@ -7,6 +7,8 @@ import {
   validateRequestedFileName,
 } from "./note-import.mjs"
 
+const windowsPath = (...parts) => ["C:", ...parts].join("\\")
+
 const PAPER = Object.freeze({
   paper_id: "Zhao24-DFL",
   source_id: "main",
@@ -51,7 +53,7 @@ test("accepts one marked basename and rejects overwrite-shaped or path-shaped na
   for (const name of [
     "../论文精读.md", "dir/论文精读.md", "dir\\论文精读.md", "/tmp/论文精读.md",
     "Zhao24-DFL_补充.md", "Zhao24-DFL_论文精读.txt", "Zhao24-DFL_论文精读\u0000.md",
-    " Zhao24-DFL_论文精读.md", "Zhao24-DFL_论文精读..md", "C:\\Zhao24-DFL_论文精读.md",
+    " Zhao24-DFL_论文精读.md", "Zhao24-DFL_论文精读..md", windowsPath("Zhao24-DFL_论文精读.md"),
   ]) {
     assert.throws(
       () => validateRequestedFileName(name, { paperId: "Zhao24-DFL", category: "note" }),

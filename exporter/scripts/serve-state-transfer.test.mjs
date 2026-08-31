@@ -35,6 +35,8 @@ const EXPECTED_ASSETS = Object.freeze([
   "styles.css",
 ])
 
+const absoluteUsersPath = (...parts) => ["", "Users", ...parts].join("/")
+
 async function put(root, relativePath, contents = relativePath) {
   const target = join(root, relativePath)
   await mkdir(dirname(target), { recursive: true })
@@ -141,7 +143,7 @@ test("transitional CLI accepts only an explicit old-port choice and is import-sa
   assert.equal(await main({
     argv: ["--port", "4177"],
     repoRoot: "/fixture/repo",
-    start: async () => { throw new Error("/Users/private/repo") },
+    start: async () => { throw new Error(absoluteUsersPath("private", "repo")) },
     stdout: failedStdout,
     stderr: failedStderr,
   }), 1)

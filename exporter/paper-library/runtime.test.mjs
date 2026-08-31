@@ -12,10 +12,10 @@ import {
 const institution = Object.freeze({ institution_id: "nuist", providers: [] })
 const workspaceRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const DESKTOP_RESOURCES = Object.freeze([
-  "library.template.html", "discovery.template.html", "styles.css", "library.mjs", "paper-inspector.mjs",
+  "library.template.html", "discovery.template.html", "state-transfer.html", "styles.css", "library.mjs", "paper-inspector.mjs",
   "paper-math-renderer.mjs", "paper-library-model.mjs", "paper-library-storage.mjs", "paper-user-tags.mjs",
   "direction-snapshot.mjs", "agent-task-input.mjs",
-  "candidate-storage.mjs", "discovery.mjs", "institution-access.mjs", "openalex-search.mjs",
+  "candidate-storage.mjs", "discovery.mjs", "institution-access.mjs", "openalex-search.mjs", "state-transfer.mjs",
 ])
 
 test("loads one configured context and indexes one scan by stable paper id", async () => {
@@ -101,7 +101,7 @@ test("rebuild reuses exactly the loaded context, validated institution and appro
   }])
 })
 
-test("runtime rebuild emits the discovery page, complete resource union and a private-path-free validated institution asset", async () => {
+test("runtime rebuild emits the discovery and state-transfer pages, complete resource union and a private-path-free validated institution asset", async () => {
   const repoRoot = await mkdtemp(join(tmpdir(), "runtime-discovery-repo-"))
   const sourceRoot = await mkdtemp(join(tmpdir(), "runtime-discovery-source-"))
   const templateRoot = join(repoRoot, "prototype/desktop")
@@ -123,6 +123,7 @@ test("runtime rebuild emits the discovery page, complete resource union and a pr
   const result = await rebuildConfiguredLibrary({ repoRoot, context })
   const outputRoot = join(repoRoot, "local_library_output/desktop")
   await stat(join(outputRoot, "discovery.html"))
+  await stat(join(outputRoot, "state-transfer.html"))
   for (const resource of DESKTOP_RESOURCES.filter((resource) => resource.endsWith(".mjs") || resource === "styles.css")) {
     await stat(join(outputRoot, "assets", resource))
   }
@@ -130,9 +131,11 @@ test("runtime rebuild emits the discovery page, complete resource union and a pr
   await stat(join(outputRoot, "assets/vendor/katex/katex.min.css"))
   const institutionAsset = JSON.parse(await readFile(join(outputRoot, "assets/nuist.institution.json"), "utf8"))
   assert.deepEqual(institutionAsset, publicInstitution)
-  assert.equal(result.pageCount, 2)
+  assert.equal(result.pageCount, 3)
   for (const output of [
     await readFile(join(outputRoot, "discovery.html"), "utf8"),
+    await readFile(join(outputRoot, "state-transfer.html"), "utf8"),
+    await readFile(join(outputRoot, "assets/state-transfer.mjs"), "utf8"),
     await readFile(join(outputRoot, "assets/nuist.institution.json"), "utf8"),
     await readFile(join(repoRoot, "local_library_data/paper-index.json"), "utf8"),
   ]) {

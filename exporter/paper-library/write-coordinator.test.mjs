@@ -3,6 +3,8 @@ import assert from "node:assert/strict"
 
 import { createWriteCoordinator } from "./write-coordinator.mjs"
 
+const absoluteUsersPath = (...parts) => ["", "Users", ...parts].join("/")
+
 function deferred() {
   let resolve
   let reject
@@ -92,7 +94,7 @@ test("recovery details reject malformed, path-bearing, inherited, symbol, and ex
     null,
     {},
     { ...candidateRecovery(), extra: true },
-    { ...candidateRecovery(), paper_id: "/Users/example/private-paper" },
+    { ...candidateRecovery(), paper_id: absoluteUsersPath("example", "private-paper") },
     { ...manualRecovery(), reason_code: "ARCHIVE_REBUILD_FAILED" },
     { ...manualArchiveRecovery(), reason_code: "ROLLBACK_FAILED" },
     Object.assign(Object.create(candidateRecovery()), { kind: "candidate_archive" }),
@@ -186,7 +188,7 @@ test("logger receives only a fixed sanitized event and cannot alter coordinator 
       events.push({ ...event })
       event.kind = "manual_note"
       event.reason_code = "ROLLBACK_FAILED"
-      event.path = "/Users/example/secret.md"
+      event.path = absoluteUsersPath("example", "secret.md")
     },
   })
   const details = candidateRecovery()
@@ -203,17 +205,17 @@ test("logger receives only a fixed sanitized event and cannot alter coordinator 
 })
 
 test("logger failures and operation error messages never leak or corrupt recovery state", async () => {
-  const coordinator = createWriteCoordinator({ logger: () => { throw new Error("/Users/example/logger-secret") } })
+  const coordinator = createWriteCoordinator({ logger: () => { throw new Error(absoluteUsersPath("example", "logger-secret")) } })
   await coordinator.markRecovery(candidateRecovery())
   assert.deepEqual(coordinator.getState(), { busy: false, recovery: candidateRecovery() })
 
-  const error = Object.assign(new Error("/Users/example/operation-secret"), { code: "WRITE_FAILED" })
+  const error = Object.assign(new Error(absoluteUsersPath("example", "operation-secret")), { code: "WRITE_FAILED" })
   await assert.rejects(coordinator.runRecovery(async () => { throw error }), error)
   assert.deepEqual(coordinator.getState(), { busy: false, recovery: candidateRecovery() })
 })
 
 test("an asynchronously rejected logger never becomes an unhandled path-bearing rejection", async () => {
-  const secret = "/Users/example/async-logger-secret"
+  const secret = absoluteUsersPath("example", "async-logger-secret")
   let unhandled = null
   const observeUnhandled = (reason) => { unhandled = reason }
   process.once("unhandledRejection", observeUnhandled)

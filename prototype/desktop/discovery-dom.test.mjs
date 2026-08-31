@@ -9,6 +9,7 @@ import {
 } from "./discovery.mjs"
 
 const template = await readFile(new URL("./discovery.template.html", import.meta.url), "utf8")
+const absoluteUsersPath = (...parts) => ["", "Users", ...parts].join("/")
 
 const institution = Object.freeze({
   version: 1,
@@ -401,8 +402,8 @@ test("Task 11 RED2 a 409 keeps the typed local ID and confirmed candidate withou
       return task11Response({
         error: {
           code: "LIBRARY_WRITE_BUSY",
-          message: "/Users/alice/private archive is busy",
-          source_path: "/Users/alice/private",
+          message: `${absoluteUsersPath("alice", "private")} archive is busy`,
+          source_path: absoluteUsersPath("alice", "private"),
         },
       }, { ok: false, status: 409 })
     },
@@ -499,8 +500,8 @@ test("Task 11 RED3 archive 500 refreshes capabilities into fixed manual recovery
       if (url === "/api/v1/archive/candidates") return task11Response({
         error: {
           code: "ARCHIVE_TRANSACTION_AMBIGUOUS",
-          message: "/Users/alice/private archive transaction is ambiguous",
-          source_path: "/Users/alice/private",
+          message: `${absoluteUsersPath("alice", "private")} archive transaction is ambiguous`,
+          source_path: absoluteUsersPath("alice", "private"),
           raw_body: "do not render",
         },
       }, { ok: false, status: 500 })

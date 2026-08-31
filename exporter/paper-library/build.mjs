@@ -64,6 +64,25 @@ const CONTROLLED_PREVIEW_FILES = Object.freeze({
   simulation: "simulation.html",
   code_compare: "code_compare.html",
 })
+const GENERATED_DESKTOP_TEMPLATES = new Map([
+  ["library.template.html", "library.html"],
+  ["discovery.template.html", "discovery.html"],
+  ["state-transfer.html", "state-transfer.html"],
+])
+const DESKTOP_TEMPLATE_MESSAGES = new Map([
+  ["library.template.html", Object.freeze({
+    missing: "固定论文库模板不存在",
+    invalid: "论文库模板必须是项目内普通非符号链接文件",
+  })],
+  ["discovery.template.html", Object.freeze({
+    missing: "固定论文发现模板不存在",
+    invalid: "论文发现模板必须是项目内普通非符号链接文件",
+  })],
+  ["state-transfer.html", Object.freeze({
+    missing: "固定浏览器状态迁移模板不存在",
+    invalid: "浏览器状态迁移模板必须是项目内普通非符号链接文件",
+  })],
+])
 const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "styles.css",
   "state-transfer.mjs",
@@ -458,27 +477,18 @@ async function loadApprovedKaTeXBundle(repoRoot, templateRoot) {
 
 async function loadApprovedDesktopBundle(repoRoot, templateRoot) {
   const canonicalTemplateRoot = await resolveApprovedTemplateRoot(repoRoot, templateRoot)
-  const templateBytes = await loadApprovedDesktopFile({
-    repoRoot,
-    templateRoot: canonicalTemplateRoot,
-    fileName: "library.template.html",
-    missingMessage: "固定论文库模板不存在",
-    invalidMessage: "论文库模板必须是项目内普通非符号链接文件",
-  })
-  const discoveryTemplateBytes = await loadApprovedDesktopFile({
-    repoRoot,
-    templateRoot: canonicalTemplateRoot,
-    fileName: "discovery.template.html",
-    missingMessage: "固定论文发现模板不存在",
-    invalidMessage: "论文发现模板必须是项目内普通非符号链接文件",
-  })
-  const stateTransferTemplateBytes = await loadApprovedDesktopFile({
-    repoRoot,
-    templateRoot: canonicalTemplateRoot,
-    fileName: "state-transfer.html",
-    missingMessage: "固定浏览器状态迁移模板不存在",
-    invalidMessage: "浏览器状态迁移模板必须是项目内普通非符号链接文件",
-  })
+  const templates = new Map()
+  for (const [sourceName, runtimeName] of GENERATED_DESKTOP_TEMPLATES) {
+    const messages = DESKTOP_TEMPLATE_MESSAGES.get(sourceName)
+    const bytes = await loadApprovedDesktopFile({
+      repoRoot,
+      templateRoot: canonicalTemplateRoot,
+      fileName: sourceName,
+      missingMessage: messages.missing,
+      invalidMessage: messages.invalid,
+    })
+    templates.set(runtimeName, bytes)
+  }
   const assets = new Map()
   for (const fileName of REQUIRED_DESKTOP_ASSETS) {
     const bytes = await loadApprovedDesktopFile({
@@ -492,7 +502,7 @@ async function loadApprovedDesktopBundle(repoRoot, templateRoot) {
   }
   const katexAssets = await loadApprovedKaTeXBundle(repoRoot, canonicalTemplateRoot)
   for (const [relativePath, bytes] of katexAssets) assets.set(relativePath, bytes)
-  return { templateBytes, discoveryTemplateBytes, stateTransferTemplateBytes, assets }
+  return { templates, assets }
 }
 
 function cloneArtifactEntry(artifact) {
@@ -1007,9 +1017,7 @@ function aggregateWarningCount(audit) {
 export async function buildPrivateLibrary({ repoRoot, config, overrides, catalogs = {}, tagCatalog = null, institution, templateRoot, scan = scanPaperSources }) {
   const canonicalRoot = canonicalRepositoryRoot(repoRoot)
   const {
-    templateBytes,
-    discoveryTemplateBytes,
-    stateTransferTemplateBytes,
+    templates: desktopTemplates,
     assets: desktopAssets,
   } = await loadApprovedDesktopBundle(canonicalRoot, templateRoot)
   const validatedInstitution = validateInstitutionConfig(institution)
@@ -1189,9 +1197,9 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
           const desktopDirectory = join(stage, "desktop")
           const assetDirectory = join(desktopDirectory, "assets")
           await mkdir(assetDirectory, { recursive: true })
-          await writeFile(join(desktopDirectory, "library.html"), templateBytes)
-          await writeFile(join(desktopDirectory, "discovery.html"), discoveryTemplateBytes)
-          await writeFile(join(desktopDirectory, "state-transfer.html"), stateTransferTemplateBytes)
+          for (const [runtimeName, bytes] of desktopTemplates) {
+            await writeFile(join(desktopDirectory, runtimeName), bytes)
+          }
           await writeFile(join(assetDirectory, "nuist.institution.json"), prettyJson(validatedInstitution), "utf8")
           for (const [fileName, bytes] of desktopAssets) {
             const assetPath = join(assetDirectory, fileName)

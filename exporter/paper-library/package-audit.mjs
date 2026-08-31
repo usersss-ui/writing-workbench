@@ -16,10 +16,17 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   ".gitignore",
   "README.md",
   "exporter/config/github-package-files.json",
+  "exporter/config/institutions/nuist.json",
   "exporter/config/library.example.json",
+  "exporter/paper-library/archive-metadata.mjs",
+  "exporter/paper-library/archive-metadata.test.mjs",
   "exporter/paper-library/artifacts.mjs",
   "exporter/paper-library/build.mjs",
   "exporter/paper-library/build.test.mjs",
+  "exporter/paper-library/candidate-archive-action.mjs",
+  "exporter/paper-library/candidate-archive-action.test.mjs",
+  "exporter/paper-library/candidate-archive.mjs",
+  "exporter/paper-library/candidate-archive.test.mjs",
   "exporter/paper-library/catalog-adapter.mjs",
   "exporter/paper-library/catalog-adapter.test.mjs",
   "exporter/paper-library/config.mjs",
@@ -28,6 +35,13 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   "exporter/paper-library/frontmatter.mjs",
   "exporter/paper-library/ids.mjs",
   "exporter/paper-library/ids.test.mjs",
+  "exporter/paper-library/institution-config.mjs",
+  "exporter/paper-library/institution-config.test.mjs",
+  "exporter/paper-library/local-server.mjs",
+  "exporter/paper-library/local-server.test.mjs",
+  "exporter/paper-library/note-import-transaction.test.mjs",
+  "exporter/paper-library/note-import.mjs",
+  "exporter/paper-library/note-import.test.mjs",
   "exporter/paper-library/note-preview.mjs",
   "exporter/paper-library/note-preview.test.mjs",
   "exporter/paper-library/overrides.mjs",
@@ -35,22 +49,47 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   "exporter/paper-library/package-audit.test.mjs",
   "exporter/paper-library/paper-tag-migration.mjs",
   "exporter/paper-library/paper-tag-migration.test.mjs",
+  "exporter/paper-library/runtime.mjs",
+  "exporter/paper-library/runtime.test.mjs",
   "exporter/paper-library/scanner.mjs",
   "exporter/paper-library/scanner.test.mjs",
   "exporter/paper-library/status.mjs",
   "exporter/paper-library/status.test.mjs",
   "exporter/paper-library/tag-catalog.mjs",
   "exporter/paper-library/tag-catalog.test.mjs",
+  "exporter/paper-library/write-coordinator.mjs",
+  "exporter/paper-library/write-coordinator.test.mjs",
   "exporter/scripts/audit-github-package.mjs",
   "exporter/scripts/build-private-library.mjs",
   "exporter/scripts/migrate-paper-tags-v3.mjs",
+  "exporter/scripts/serve-private-library.mjs",
+  "exporter/scripts/serve-state-transfer.mjs",
+  "exporter/scripts/serve-state-transfer.test.mjs",
   "prototype/desktop/README.md",
+  "prototype/desktop/agent-task-input.mjs",
+  "prototype/desktop/agent-task-input.test.mjs",
+  "prototype/desktop/agent-tasks.css",
+  "prototype/desktop/agent-tasks.html",
+  "prototype/desktop/agent-tasks.mjs",
+  "prototype/desktop/agent-tasks.test.mjs",
   "prototype/desktop/app.mjs",
+  "prototype/desktop/candidate-storage.mjs",
+  "prototype/desktop/candidate-storage.test.mjs",
+  "prototype/desktop/desktop-pages.test.mjs",
+  "prototype/desktop/direction-snapshot.mjs",
+  "prototype/desktop/direction-snapshot.test.mjs",
   "prototype/desktop/directions.html",
   "prototype/desktop/directions.mjs",
+  "prototype/desktop/discovery-dom.test.mjs",
+  "prototype/desktop/discovery.mjs",
+  "prototype/desktop/discovery.template.html",
   "prototype/desktop/index.html",
+  "prototype/desktop/institution-access.mjs",
+  "prototype/desktop/institution-access.test.mjs",
   "prototype/desktop/library.mjs",
   "prototype/desktop/library.template.html",
+  "prototype/desktop/openalex-search.mjs",
+  "prototype/desktop/openalex-search.test.mjs",
   "prototype/desktop/p02.html",
   "prototype/desktop/paper-filter.mjs",
   "prototype/desktop/paper-inspector.mjs",
@@ -64,6 +103,10 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   "prototype/desktop/paper-user-tags.mjs",
   "prototype/desktop/paper-user-tags.test.mjs",
   "prototype/desktop/papers-data.mjs",
+  "prototype/desktop/state-transfer-dom.test.mjs",
+  "prototype/desktop/state-transfer.html",
+  "prototype/desktop/state-transfer.mjs",
+  "prototype/desktop/state-transfer.test.mjs",
   "prototype/desktop/styles.css",
   "prototype/desktop/vendor/katex/LICENSE",
   "prototype/desktop/vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
@@ -141,7 +184,12 @@ const WINDOWS_ABSOLUTE_CONTENT_RE = /(?<![A-Za-z0-9_-])[A-Za-z]:[\\/]/u
 // to reject actual network-share roots.
 const WINDOWS_UNC_CONTENT_RE = /(?<!\\)\\\\[A-Za-z0-9._$-]+\\(?![bBdDsSwW](?:[+*?{|()[\].^$]|$))[A-Za-z0-9._$-]+/u
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true })
-const GENERATED_LIBRARY_PATH = "local_library_output/desktop/library.html"
+const GENERATED_TEMPLATE_RUNTIME = new Map([
+  ["prototype/desktop/library.template.html", "local_library_output/desktop/library.html"],
+  ["prototype/desktop/discovery.template.html", "local_library_output/desktop/discovery.html"],
+  ["prototype/desktop/state-transfer.html", "local_library_output/desktop/state-transfer.html"],
+])
+const GENERATED_RUNTIME_PATHS = new Set(GENERATED_TEMPLATE_RUNTIME.values())
 const KATEX_FONT_PREFIX = "prototype/desktop/vendor/katex/fonts/"
 const KATEX_WOFF2_MAGIC = Buffer.from("wOF2", "ascii")
 const GENERATED_ASSET_SOURCE = new Map([
@@ -152,6 +200,13 @@ const GENERATED_ASSET_SOURCE = new Map([
   ["local_library_output/desktop/assets/paper-library-model.mjs", "prototype/desktop/paper-library-model.mjs"],
   ["local_library_output/desktop/assets/paper-library-storage.mjs", "prototype/desktop/paper-library-storage.mjs"],
   ["local_library_output/desktop/assets/paper-user-tags.mjs", "prototype/desktop/paper-user-tags.mjs"],
+  ["local_library_output/desktop/assets/candidate-storage.mjs", "prototype/desktop/candidate-storage.mjs"],
+  ["local_library_output/desktop/assets/discovery.mjs", "prototype/desktop/discovery.mjs"],
+  ["local_library_output/desktop/assets/institution-access.mjs", "prototype/desktop/institution-access.mjs"],
+  ["local_library_output/desktop/assets/openalex-search.mjs", "prototype/desktop/openalex-search.mjs"],
+  ["local_library_output/desktop/assets/state-transfer.mjs", "prototype/desktop/state-transfer.mjs"],
+  ["local_library_output/desktop/assets/direction-snapshot.mjs", "prototype/desktop/direction-snapshot.mjs"],
+  ["local_library_output/desktop/assets/agent-task-input.mjs", "prototype/desktop/agent-task-input.mjs"],
   ["local_library_output/desktop/assets/vendor/katex/katex.min.css", "prototype/desktop/vendor/katex/katex.min.css"],
   ["local_library_output/desktop/assets/vendor/katex/katex.mjs", "prototype/desktop/vendor/katex/katex.mjs"],
 ])
@@ -328,12 +383,10 @@ function localReferenceTarget(sourcePath, rawReference) {
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(rawReference) || rawReference.startsWith("//")) return null
   const reference = rawReference.split(/[?#]/u, 1)[0]
   if (reference === "") return null
-  const runtimeSource = sourcePath === "prototype/desktop/library.template.html"
-    ? GENERATED_LIBRARY_PATH
-    : sourcePath
+  const runtimeSource = GENERATED_TEMPLATE_RUNTIME.get(sourcePath) ?? sourcePath
   const resolved = posix.normalize(posix.join(posix.dirname(runtimeSource), reference))
   if (posix.isAbsolute(resolved) || resolved === ".." || resolved.startsWith("../")) return false
-  if (resolved === GENERATED_LIBRARY_PATH) return GENERATED_LIBRARY_PATH
+  if (GENERATED_RUNTIME_PATHS.has(resolved)) return resolved
   return GENERATED_ASSET_SOURCE.get(resolved) ?? resolved
 }
 
@@ -358,7 +411,7 @@ export function auditPackageDependencyClosure(candidates) {
       if (target === null) continue
       checkedCount += 1
       const allowed = target !== false
-        && (target === GENERATED_LIBRARY_PATH || EXPECTED_PACKAGE_FILE_SET.has(target))
+        && (GENERATED_RUNTIME_PATHS.has(target) || EXPECTED_PACKAGE_FILE_SET.has(target))
       if (!allowed && !blockedSources.has(candidate.path)) {
         blockedSources.add(candidate.path)
         blocking.push({ path: candidate.path, code: "dependency_unlisted" })

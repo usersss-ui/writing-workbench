@@ -253,6 +253,10 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
   await stat(pagePath)
   await stat(discoveryPath)
   await stat(transferPath)
+  assert.deepEqual(
+    (await readdir(join(fixture.repoRoot, "local_library_output/desktop"))).filter((name) => name.endsWith(".html")).sort(),
+    ["discovery.html", "library.html", "state-transfer.html"],
+  )
   assert.equal(result.paperCount, 1)
   assert.equal(result.previewCount, 1)
   assert.equal(result.pageCount, 4)
@@ -265,6 +269,15 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
       `approved:${asset}`,
     )
   }
+  assert.deepEqual(
+    (await readdir(join(fixture.repoRoot, "local_library_output/desktop/assets"), { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name !== "nuist.institution.json")
+      .map((entry) => entry.name)
+      .sort(),
+    [...REQUIRED_DESKTOP_ASSETS].sort(),
+  )
+  assert.deepEqual(await readFile(pagePath), await readFile(join(fixture.templateRoot, "library.template.html")))
+  assert.deepEqual(await readFile(discoveryPath), await readFile(join(fixture.templateRoot, "discovery.template.html")))
   assert.equal(
     await readFile(transferPath, "utf8"),
     "<!doctype html><html lang=\"zh-CN\"><main id=\"state-transfer-app\"></main></html>",
