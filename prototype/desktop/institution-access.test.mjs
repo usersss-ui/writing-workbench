@@ -20,6 +20,18 @@ function credentialQueryUrl(keyParts) {
   return url.href
 }
 
+function obfuscatedCredentialQueryUrl(keyParts) {
+  const url = new URL("https://example.org/paper")
+  url.searchParams.set(keyParts.join(""), SENSITIVE_MARKER)
+  return url.href
+}
+
+function credentialFragmentUrl(keyParts) {
+  const url = new URL("https://example.org/paper")
+  url.hash = `${keyParts.join("_")}=${SENSITIVE_MARKER}`
+  return url.href
+}
+
 function userInfoUrl() {
   const url = new URL("https://example.org/paper")
   url.username = "reader"
@@ -107,6 +119,8 @@ test("rejects malformed DOI values instead of normalizing them", () => {
     "10.1109/a\u0000b", `10.1109/${"a".repeat(248)}`, "10.1109/a!",
     "10.1234/../../admin", "doi:10.1234/../x", "10.1234//admin",
     "10.1234/x?next=1", "10.1234/x#part",
+    ["https://doi.org/10.1234/a", "..", "b"].join("\\"),
+    "https://doi.org/10.1234/a\n", "https://doi.org/10.1234/a\u2029",
   ]) assert.equal(normalizeDoi(value), null)
 })
 
@@ -124,6 +138,19 @@ test("accepts only credential-free public HTTPS article URLs", () => {
     "https://127.0.0.1/paper", "https://2130706433/paper", "https://10.0.0.8/paper",
     "https://169.254.169.254/paper", "https://[::1]/paper",
     credentialQueryUrl(["access", "token"]), credentialQueryUrl(["api", "key"]),
+    credentialFragmentUrl(["access", "token"]),
+    obfuscatedCredentialQueryUrl(["oauth", "_", "token"]),
+    obfuscatedCredentialQueryUrl(["token", "[", "]"]),
+    obfuscatedCredentialQueryUrl(["api", "[", "key", "]"]),
+    obfuscatedCredentialQueryUrl(["api", "key", "[", "]"]),
+    obfuscatedCredentialQueryUrl(["oauth", "2_", "token"]),
+    obfuscatedCredentialQueryUrl(["my", "_", "token"]),
+    obfuscatedCredentialQueryUrl(["service", "_", "api", "_", "key"]),
+    obfuscatedCredentialQueryUrl(["x", "-", "amz", "-", "signa", "ture"]),
+    obfuscatedCredentialQueryUrl(["j", "wt"]),
+    ["https://example.org", "..", "paper"].join("\\"),
+    "https://exa\nmple.org/paper", "https://example.org/pa\tper",
+    "https://\texample.org/paper", "https://example.org/pa\u2028per",
     "https://0/paper", "https://127.1/paper", "https://0x7f000001/paper",
     "https://0177.0.0.1/paper", "https://172.16.0.1/paper", "https://192.168.1.1/paper",
     "https://100.64.0.1/paper", "https://[::]/paper", "https://[::ffff:127.0.0.1]/paper",
@@ -132,15 +159,18 @@ test("accepts only credential-free public HTTPS article URLs", () => {
   ]) assert.equal(normalizeExternalHttpsUrl(value), null)
 })
 
-test("does not inspect query or fragment text as raw URL paths", () => {
+test("does not inspect query values as raw URL paths", () => {
   assert.equal(
     normalizeExternalHttpsUrl("https://example.org?next=/../paper"),
     "https://example.org/?next=/../paper",
   )
-  assert.equal(
-    normalizeExternalHttpsUrl("https://example.org#next=/../paper"),
-    "https://example.org/#next=/../paper",
-  )
+})
+
+test("keeps ordinary public query metadata distinct from credential aliases", () => {
+  const url = new URL("https://example.org/paper")
+  url.searchParams.set(["conference", "session"].join("_"), "2026")
+  url.searchParams.set(["citation", "style"].join("_"), "numeric")
+  assert.equal(normalizeExternalHttpsUrl(url.href), url.href)
 })
 
 test("parses reliable inputs and refuses unsafe values as titles", () => {
@@ -157,8 +187,23 @@ test("parses reliable inputs and refuses unsafe values as titles", () => {
     "10.1109/no space", "https://bad.example/../paper", "//bad.example/paper",
     "ftp://bad.example/paper", "https://localhost/paper", POSIX_FILE,
     "../paper.pdf", "~/paper.pdf", WINDOWS_FILE, UNC_FILE,
+    ["..", "paper.pdf"].join("\\"), [".", "paper.pdf"].join("\\"),
+    ["~", "paper.pdf"].join("\\"), ["folder", "paper.pdf"].join("\\"),
+    "\nSafe title", "Safe title\t",
     "bad\u0000title", "bad\ttitle", "bad\u007ftitle", "bad\u2028title", "bad\u2029title",
   ]) assert.throws(() => parsePaperInput(value), /请输入|格式|安全|DOI|HTTPS|题名|单行/u)
+})
+
+test("rejects obvious local paper filenames without rejecting ordinary slash titles", () => {
+  for (const value of ["paper.pdf", "folder/paper.pdf", "notes.md"]) {
+    assert.throws(() => parsePaperInput(value), /格式|安全|DOI|HTTPS/u)
+  }
+  assert.deepEqual(parsePaperInput("Primal/Dual Methods for Optimization"), {
+    kind: "title",
+    doi: null,
+    sourceUrl: null,
+    title: "Primal/Dual Methods for Optimization",
+  })
 })
 
 test("does not downgrade malformed DOI resolver forms to article URLs or titles", () => {

@@ -26,6 +26,7 @@ const CREDENTIAL_QUERY_KEYS = new Set([
   ["authori", "zation"].join(""), ["bearer", "token"].join(""),
   ["client", "secret"].join(""), ["coo", "kie"].join(""), ["creden", "tials"].join(""),
   ["id", "token"].join(""), ["pass", "phrase"].join(""), ["pass", "word"].join(""),
+  ["oauth", "token"].join(""),
   ["private", "key"].join(""), ["refresh", "token"].join(""), ["sec", "ret"].join(""),
   ["secret", "key"].join(""), "session", ["session", "id"].join(""),
   ["to", "ken"].join(""), ["xapi", "key"].join(""),
@@ -63,7 +64,17 @@ function isCanonicalTextList(value, { maximumItems, maximumText }) {
 }
 
 function normalizedQueryKey(value) {
-  return value.toLowerCase().replace(/[\s_.-]/gu, "")
+  return value.toLowerCase().replace(/[^a-z0-9]/gu, "")
+}
+
+function isCredentialQueryKey(value) {
+  const key = normalizedQueryKey(value)
+  return CREDENTIAL_QUERY_KEYS.has(key) || [
+    ["to", "ken"].join(""), ["sec", "ret"].join(""), ["pass", "word"].join(""),
+    ["pass", "phrase"].join(""), ["api", "key"].join(""), ["private", "key"].join(""),
+    ["signa", "ture"].join(""), ["j", "wt"].join(""),
+    ["creden", "tial"].join(""), ["coo", "kie"].join(""),
+  ].some((marker) => key.includes(marker))
 }
 
 function isPrivateIpv4(hostname) {
@@ -91,15 +102,15 @@ function isPublicHostname(hostname) {
 
 function isSafeCanonicalHttpsUrl(value, nullable = false) {
   if (value === null && nullable) return true
-  if (!isCanonicalText(value, 2_048)) return false
+  if (!isCanonicalText(value, 2_048) || value.includes("\\")) return false
   try {
     const url = new URL(value)
     if (
       url.protocol !== "https:" || url.username || url.password || url.port ||
-      !isPublicHostname(url.hostname) || url.href !== value
+      url.hash || !isPublicHostname(url.hostname) || url.href !== value
     ) return false
     for (const key of url.searchParams.keys()) {
-      if (CREDENTIAL_QUERY_KEYS.has(normalizedQueryKey(key))) return false
+      if (isCredentialQueryKey(key)) return false
     }
     return true
   } catch {
@@ -236,6 +247,7 @@ export function createCandidateStore(storage) {
     if (serialized.length > MAX_RAW_LENGTH) throw new RangeError("候选队列存储大小超限")
     if (!storage || typeof storage.setItem !== "function" || loadStatus === "unavailable") {
       persistedState = false
+      loadStatus = "unavailable"
       detachedFromStorage = true
       detachedBase ??= cloneState(baseState)
       return false
@@ -249,6 +261,7 @@ export function createCandidateStore(storage) {
       return true
     } catch {
       persistedState = false
+      loadStatus = "unavailable"
       detachedFromStorage = true
       detachedBase ??= cloneState(baseState)
       return false

@@ -25,12 +25,22 @@ function credentialKeyCases() {
     ["secret", "key"].join("_"), ["session", "id"].join("_"),
     ["pass", "phrase"].join(""), ["authori", "zation"].join(""),
     ["x-api", "key"].join("-"),
+    ["my", "_", "token"].join(""),
+    ["service", "_", "api", "_", "key"].join(""),
+    ["x", "-", "amz", "-", "signa", "ture"].join(""),
+    ["j", "wt"].join(""),
   ]
 }
 
 function credentialQueryUrl(keyParts) {
   const url = new URL("https://example.com/page")
   url.searchParams.set(keyParts.join("_"), SENSITIVE_MARKER)
+  return url.href
+}
+
+function obfuscatedCredentialQueryUrl(keyParts) {
+  const url = new URL("https://example.com/page")
+  url.searchParams.set(keyParts.join(""), SENSITIVE_MARKER)
   return url.href
 }
 
@@ -200,6 +210,18 @@ test("rejects malformed, local, private-host, or credential-bearing URLs", () =>
       "https://2130706433/page", "https://10.0.0.8/page", "https://169.254.169.254/page",
       "https://[::1]/page", "https://intranet/page", credentialQueryUrl(["access", "token"]),
       credentialQueryUrl(["api", "key"]),
+      obfuscatedCredentialQueryUrl(["oauth", "_", "token"]),
+      obfuscatedCredentialQueryUrl(["token", "[", "]"]),
+      obfuscatedCredentialQueryUrl(["api", "[", "key", "]"]),
+      obfuscatedCredentialQueryUrl(["api", "key", "[", "]"]),
+      obfuscatedCredentialQueryUrl(["oauth", "2_", "token"]),
+      obfuscatedCredentialQueryUrl(["my", "_", "token"]),
+      obfuscatedCredentialQueryUrl(["service", "_", "api", "_", "key"]),
+      obfuscatedCredentialQueryUrl(["x", "-", "amz", "-", "signa", "ture"]),
+      obfuscatedCredentialQueryUrl(["j", "wt"]),
+      ["https://example.com", "..", "page"].join("\\"),
+      "https://exa\nmple.com/page", "https://example.com/pa\tge",
+      "https://\texample.com/page", "https://example.com/pa\u2029ge",
     ]) {
       assertConfigRejected((fixture) => {
         if (field.startsWith("providers.")) fixture.providers[0][field.split(".").at(-1)] = value

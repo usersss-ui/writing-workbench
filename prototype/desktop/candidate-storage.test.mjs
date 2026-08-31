@@ -13,6 +13,18 @@ function credentialQueryUrl(keyParts, path = "/paper") {
   return url.href
 }
 
+function obfuscatedCredentialQueryUrl(keyParts, path = "/paper") {
+  const url = new URL(`https://public.example${path}`)
+  url.searchParams.set(keyParts.join(""), SENSITIVE_MARKER)
+  return url.href
+}
+
+function credentialFragmentUrl(keyParts, path = "/paper") {
+  const url = new URL(`https://public.example${path}`)
+  url.hash = `${keyParts.join("_")}=${SENSITIVE_MARKER}`
+  return url.href
+}
+
 function userInfoUrl(path) {
   const url = new URL(`https://example.org${path}`)
   url.username = "reader"
@@ -176,6 +188,8 @@ test("malformed, unknown-version, extra-field, duplicate, or unsafe persisted st
     JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: "https://2130706433/paper" }] }),
     JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: "https://service.local/paper" }] }),
     JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: credentialQueryUrl(["access", "token"]) }] }),
+    JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: credentialFragmentUrl(["access", "token"]) }] }),
+    JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: obfuscatedCredentialQueryUrl(["oauth", "_", "token"]) }] }),
     " ".repeat(2_500_001),
   ]
 
@@ -209,6 +223,16 @@ test("add accepts only the strict bounded OpenAlex work shape and preserves prio
     { ...OPENALEX_WORK, landingPageUrl: "https://2130706433/work" },
     { ...OPENALEX_WORK, landingPageUrl: "https://service.local/work" },
     { ...OPENALEX_WORK, landingPageUrl: credentialQueryUrl(["api", "key"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: credentialFragmentUrl(["access", "token"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["oauth", "_", "token"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["token", "[", "]"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["api", "[", "key", "]"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["api", "key", "[", "]"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["oauth", "2_", "token"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["my", "_", "token"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["service", "_", "api", "_", "key"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["x", "-", "amz", "-", "signa", "ture"], "/work") },
+    { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["j", "wt"], "/work") },
     { ...OPENALEX_WORK, landingPageUrl: "https://0/work" },
     { ...OPENALEX_WORK, landingPageUrl: "https://127.1/work" },
     { ...OPENALEX_WORK, landingPageUrl: "https://0x7f000001/work" },
@@ -302,14 +326,17 @@ test("unavailable or full localStorage keeps mutations in memory and reports per
     { changed: failedConfirm.changed, persisted: failedConfirm.persisted, reason: failedConfirm.reason },
     { changed: false, persisted: false, reason: "persistence_failed" },
   )
+  assert.equal(quotaStore.getLoadStatus(), "unavailable")
   assert.equal(quotaStore.read().candidates[0].stage, "pending_screening")
 
   failWrites = false
   assert.equal(quotaStore.confirm(OPENALEX_WORK.paperId).persisted, true)
+  assert.equal(quotaStore.getLoadStatus(), "ready")
   failWrites = true
   const failedArchive = quotaStore.markMetadataArchived(OPENALEX_WORK.paperId)
   assert.equal(failedArchive.changed, false)
   assert.equal(failedArchive.persisted, false)
+  assert.equal(quotaStore.getLoadStatus(), "unavailable")
   assert.equal(quotaStore.read().candidates[0].stage, "confirmed_for_archive")
   const failedRemove = quotaStore.remove(OPENALEX_WORK.paperId)
   assert.equal(failedRemove.changed, false)

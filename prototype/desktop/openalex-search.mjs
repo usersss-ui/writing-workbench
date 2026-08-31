@@ -1,6 +1,8 @@
 const OPENALEX_WORKS_ENDPOINT = "https://api.openalex.org/works"
 const MAX_QUERY_CHARACTERS = 1_000
 const MAX_TOTAL = 100_000_000
+const MAX_ABSTRACT_ENTRIES = 5_000
+const MAX_ABSTRACT_POSITIONS = 5_000
 
 const SELECT_FIELDS = [
   "id",
@@ -26,6 +28,7 @@ const CREDENTIAL_QUERY_KEYS = new Set([
   ["access", "token"].join(""), ["api", "key"].join(""), ["auth", "token"].join(""),
   ["authori", "zation"].join(""), ["bearer", "token"].join(""), ["xapi", "key"].join(""),
   ["client", "secret"].join(""), ["coo", "kie"].join(""), ["creden", "tials"].join(""),
+  ["oauth", "token"].join(""),
   ["pass", "word"].join(""), ["private", "key"].join(""), ["refresh", "token"].join(""),
   ["sec", "ret"].join(""), ["secret", "key"].join(""), "session",
   ["session", "id"].join(""), ["to", "ken"].join(""),
@@ -71,7 +74,17 @@ function rawPathHasDotSegment(value) {
 }
 
 function normalizedQueryKey(value) {
-  return value.toLowerCase().replace(/[\s_.-]/gu, "")
+  return value.toLowerCase().replace(/[^a-z0-9]/gu, "")
+}
+
+function isCredentialQueryKey(value) {
+  const key = normalizedQueryKey(value)
+  return CREDENTIAL_QUERY_KEYS.has(key) || [
+    ["to", "ken"].join(""), ["sec", "ret"].join(""), ["pass", "word"].join(""),
+    ["pass", "phrase"].join(""), ["api", "key"].join(""), ["private", "key"].join(""),
+    ["signa", "ture"].join(""), ["j", "wt"].join(""),
+    ["creden", "tial"].join(""), ["coo", "kie"].join(""),
+  ].some((marker) => key.includes(marker))
 }
 
 function isPrivateIpv4(hostname) {
@@ -99,17 +112,18 @@ function isPublicHostname(hostname) {
 }
 
 function safeHttpsUrl(value) {
-  if (typeof value !== "string") return null
+  if (typeof value !== "string" || value.length > 2_048) return null
+  if (/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)) return null
   const text = value.trim()
-  if (!text || text.length > 2_048 || rawPathHasDotSegment(text)) return null
+  if (!text || text.length > 2_048 || text.includes("\\") || rawPathHasDotSegment(text)) return null
   try {
     const url = new URL(text)
     if (
       url.protocol !== "https:" || url.username || url.password || url.port ||
-      !isPublicHostname(url.hostname)
+      url.hash || !isPublicHostname(url.hostname)
     ) return null
     for (const key of url.searchParams.keys()) {
-      if (CREDENTIAL_QUERY_KEYS.has(normalizedQueryKey(key))) return null
+      if (isCredentialQueryKey(key)) return null
     }
     return url.href
   } catch {
@@ -118,11 +132,16 @@ function safeHttpsUrl(value) {
 }
 
 function normalizePaperId(value) {
+  if (typeof value !== "string" || value.length > 100) return null
   const match = cleanText(value, 100).match(/^https:\/\/openalex\.org\/(W\d+)\/?$/iu)
   return match ? match[1].toUpperCase() : null
 }
 
 function normalizeDoi(value) {
+  if (
+    typeof value !== "string" || value.length > 512 || value.includes("\\") ||
+    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
+  ) return null
   let doi = cleanText(value, 512)
   if (!doi) return null
   doi = doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu, "").replace(/^doi:\s*/iu, "").toLowerCase()
@@ -167,21 +186,46 @@ function reconstructAbstract(index) {
 }
 
 function hasAbusiveNestedFields(work) {
-  if (typeof work.title === "string" && [...work.title].length > 1_000) return true
+  if (typeof work.id === "string" && work.id.length > 100) return true
+  if (typeof work.doi === "string" && work.doi.length > 512) return true
+  if (typeof work.title === "string" && work.title.length > 1_000) return true
   if (Array.isArray(work.authorships) && work.authorships.length > 50) return true
+  if (Array.isArray(work.authorships) && work.authorships.some((authorship) => (
+    typeof authorship?.author?.display_name === "string" && authorship.author.display_name.length > 300
+  ))) return true
   if (Array.isArray(work.topics) && work.topics.length > 20) return true
+  if (Array.isArray(work.topics) && work.topics.some((topic) => (
+    typeof topic?.display_name === "string" && topic.display_name.length > 300
+  ))) return true
+  if (
+    typeof work.primary_location?.source?.display_name === "string" &&
+    work.primary_location.source.display_name.length > 500
+  ) return true
+  for (const url of [
+    work.primary_location?.landing_page_url,
+    work.open_access?.oa_url,
+    work.best_oa_location?.pdf_url,
+    work.best_oa_location?.landing_page_url,
+  ]) {
+    if (typeof url === "string" && url.length > 2_048) return true
+  }
   const index = work.abstract_inverted_index
   if (index === null || index === undefined) return false
   if (typeof index !== "object" || Array.isArray(index)) return true
-  let positions = 0
-  for (const [word, values] of Object.entries(index)) {
-    if ([...word].length > 300) return true
+  let entries = 0
+  let rawPositions = 0
+  for (const word in index) {
+    if (!Object.hasOwn(index, word)) continue
+    entries += 1
+    if (entries > MAX_ABSTRACT_ENTRIES || word.length > 300) return true
+    const values = index[word]
     if (!Array.isArray(values)) continue
+    if (values.length > MAX_ABSTRACT_POSITIONS) return true
+    rawPositions += values.length
+    if (rawPositions > MAX_ABSTRACT_POSITIONS) return true
     for (const position of values) {
       if (!Number.isInteger(position)) continue
       if (position < 0 || position > 10_000) return true
-      positions += 1
-      if (positions > 5_000) return true
     }
   }
   return false

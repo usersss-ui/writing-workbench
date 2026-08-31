@@ -2,11 +2,13 @@ const DOI_PATTERN = /^10\.\d{4,9}\/[\-._;()/:a-z0-9]+$/u
 const OPEN_ACCESS_HOSTS = ["arxiv.org", "export.arxiv.org", "openreview.net", "pmc.ncbi.nlm.nih.gov"]
 const DOI_RESOLVER_HOSTS = new Set(["doi.org", "dx.doi.org"])
 const SUBSCRIPTION_WARNING = "学校入口不代表目标论文已订购"
+const LOCAL_DOCUMENT_SUFFIX = /\.(?:docx?|html?|markdown|md|pdf|rtf|tex|txt)$/iu
 const CREDENTIAL_QUERY_KEYS = new Set([
   ["access", "token"].join(""), ["api", "key"].join(""), ["auth", "token"].join(""),
   ["authori", "zation"].join(""), ["bearer", "token"].join(""),
   ["client", "secret"].join(""), ["coo", "kie"].join(""), ["creden", "tials"].join(""),
   ["id", "token"].join(""), ["pass", "phrase"].join(""), ["pass", "word"].join(""),
+  ["oauth", "token"].join(""),
   ["private", "key"].join(""), ["refresh", "token"].join(""), ["sec", "ret"].join(""),
   ["secret", "key"].join(""), "session", ["session", "id"].join(""),
   ["to", "ken"].join(""), ["xapi", "key"].join(""),
@@ -58,20 +60,31 @@ function isPublicHostname(hostname) {
 }
 
 function normalizedQueryKey(value) {
-  return value.toLowerCase().replace(/[\s_.-]/gu, "")
+  return value.toLowerCase().replace(/[^a-z0-9]/gu, "")
+}
+
+function isCredentialQueryKey(value) {
+  const key = normalizedQueryKey(value)
+  return CREDENTIAL_QUERY_KEYS.has(key) || [
+    ["to", "ken"].join(""), ["sec", "ret"].join(""), ["pass", "word"].join(""),
+    ["pass", "phrase"].join(""), ["api", "key"].join(""), ["private", "key"].join(""),
+    ["signa", "ture"].join(""), ["j", "wt"].join(""),
+    ["creden", "tial"].join(""), ["coo", "kie"].join(""),
+  ].some((marker) => key.includes(marker))
 }
 
 function hasCredentialQuery(url) {
   for (const key of url.searchParams.keys()) {
-    if (CREDENTIAL_QUERY_KEYS.has(normalizedQueryKey(key))) return true
+    if (isCredentialQueryKey(key)) return true
   }
   return false
 }
 
 function looksPathLike(value) {
-  return value.startsWith("/") || value.startsWith("\\") || value.startsWith("~/") ||
+  return value.includes("\\") || value.startsWith("/") || value.startsWith("~/") ||
     value === "." || value === ".." || value.startsWith("./") || value.startsWith("../") ||
-    /^[a-z]:[\\/]/iu.test(value)
+    value.startsWith(".\\") || value.startsWith("..\\") || value.startsWith("~\\") ||
+    /^[a-z]:[\\/]/iu.test(value) || LOCAL_DOCUMENT_SUFFIX.test(value)
 }
 
 function matchesHost(hostname, configuredHost) {
@@ -123,6 +136,10 @@ function conflictWarning(selected, source, inferred) {
 
 export function normalizeDoi(rawValue) {
   if (typeof rawValue !== "string") return null
+  if (
+    rawValue.length > 255 || rawValue.includes("\\") ||
+    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(rawValue)
+  ) return null
   let value = rawValue.trim()
   if (
     value.length === 0 || value.length > 255 ||
@@ -154,8 +171,12 @@ export function normalizeDoi(rawValue) {
 
 export function normalizeExternalHttpsUrl(rawValue) {
   if (typeof rawValue !== "string") return null
+  if (
+    rawValue.length > 2_048 || rawValue.includes("\\") ||
+    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(rawValue)
+  ) return null
   const value = rawValue.trim()
-  if (!value || value.length > 2_048 || rawPathHasDotSegment(value)) return null
+  if (!value || value.length > 2_048 || value.includes("\\") || rawPathHasDotSegment(value)) return null
 
   let parsed
   try {
@@ -165,13 +186,16 @@ export function normalizeExternalHttpsUrl(rawValue) {
   }
   if (
     parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password ||
-    parsed.port || !isPublicHostname(parsed.hostname) || hasCredentialQuery(parsed)
+    parsed.port || parsed.hash || !isPublicHostname(parsed.hostname) || hasCredentialQuery(parsed)
   ) return null
   return parsed.href
 }
 
 export function parsePaperInput(rawValue) {
   if (typeof rawValue !== "string") throw new Error("请输入 DOI、英文题名或 HTTPS 原文网址")
+  if (/[\u0000-\u001f\u007f\u2028\u2029]/u.test(rawValue)) {
+    throw new Error("题名必须是 4 至 500 个字符的单行文本")
+  }
   const value = rawValue.trim()
   if (!value) throw new Error("请输入 DOI、英文题名或 HTTPS 原文网址")
 

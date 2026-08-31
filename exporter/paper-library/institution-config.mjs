@@ -22,6 +22,7 @@ const CREDENTIAL_KEYS = new Set([
   ["creden", "tials"].join(""), ["access", "token"].join(""),
   ["refresh", "token"].join(""), ["id", "token"].join(""),
   ["auth", "token"].join(""), ["bearer", "token"].join(""),
+  ["oauth", "token"].join(""),
   ["secret", "key"].join(""), ["session", "id"].join(""),
   ["pass", "phrase"].join(""), ["authori", "zation"].join(""),
   ["xapi", "key"].join(""),
@@ -32,7 +33,17 @@ const DOI_PREFIX_PATTERN = /^10\.[0-9]{4,9}$/u
 const HOST_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u
 
 function credentialKey(key) {
-  return key.toLowerCase().replace(/[\s_.-]/gu, "")
+  return key.toLowerCase().replace(/[^a-z0-9]/gu, "")
+}
+
+function isCredentialKey(value) {
+  const key = credentialKey(value)
+  return CREDENTIAL_KEYS.has(key) || [
+    ["to", "ken"].join(""), ["sec", "ret"].join(""), ["pass", "word"].join(""),
+    ["pass", "phrase"].join(""), ["api", "key"].join(""), ["private", "key"].join(""),
+    ["signa", "ture"].join(""), ["j", "wt"].join(""),
+    ["creden", "tial"].join(""), ["coo", "kie"].join(""),
+  ].some((marker) => key.includes(marker))
 }
 
 function rejectCredentialFields(value, seen = new WeakSet()) {
@@ -43,7 +54,7 @@ function rejectCredentialFields(value, seen = new WeakSet()) {
     return
   }
   for (const [key, child] of Object.entries(value)) {
-    if (CREDENTIAL_KEYS.has(credentialKey(key))) throw new Error("配置包含凭据字段")
+    if (isCredentialKey(key)) throw new Error("配置包含凭据字段")
     rejectCredentialFields(child, seen)
   }
 }
@@ -89,7 +100,7 @@ function rejectPathLikeString(value, label) {
   if (
     value.startsWith("/") || value.startsWith("\\") || value.startsWith("~/") ||
     value.startsWith("../") || value.startsWith("./") || /^[a-z]:[\\/]/iu.test(value) ||
-    rawPathHasDotSegment(value)
+    value.includes("\\") || rawPathHasDotSegment(value)
   ) throw new Error(`${label} 不能是本地路径或包含路径穿越段`)
 }
 
@@ -118,14 +129,17 @@ function isPublicHostname(hostname) {
 
 function hasCredentialQuery(parsed) {
   for (const key of parsed.searchParams.keys()) {
-    if (CREDENTIAL_KEYS.has(credentialKey(key))) return true
+    if (isCredentialKey(key)) return true
   }
   return false
 }
 
 function validateHttpsUrl(value, label, { nullable = false } = {}) {
   if (nullable && value === null) return null
-  if (typeof value !== "string" || value.trim() === "" || value.length > MAX_URL_CHARACTERS) {
+  if (
+    typeof value !== "string" || value.trim() === "" || value.length > MAX_URL_CHARACTERS ||
+    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
+  ) {
     throw new Error(`${label} 必须是长度受限的 HTTPS URL`)
   }
   rejectPathLikeString(value, label)

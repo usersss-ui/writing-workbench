@@ -11,6 +11,18 @@ function credentialQueryUrl(keyParts, path = "/paper") {
   return url.href
 }
 
+function obfuscatedCredentialQueryUrl(keyParts, path = "/paper") {
+  const url = new URL(`https://public.example${path}`)
+  url.searchParams.set(keyParts.join(""), SENSITIVE_MARKER)
+  return url.href
+}
+
+function credentialFragmentUrl(keyParts, path = "/paper") {
+  const url = new URL(`https://public.example${path}`)
+  url.hash = `${keyParts.join("_")}=${SENSITIVE_MARKER}`
+  return url.href
+}
+
 function userInfoUrl(path = "/work") {
   const url = new URL(`https://example.org${path}`)
   url.username = "reader"
@@ -263,7 +275,11 @@ test("searchOpenAlexWorks represents missing or unsafe optional metadata conserv
 })
 
 test("searchOpenAlexWorks never accepts traversal or double-separator DOI identities", async () => {
-  for (const doi of ["10.1234/../../admin", "doi:10.1234/../x", "10.1234//admin"]) {
+  for (const doi of [
+    "10.1234/../../admin", "doi:10.1234/../x", "10.1234//admin",
+    ["https://doi.org/10.1234/a", "..", "b"].join("\\"),
+    "https://doi.org/10.1234/a\n",
+  ]) {
     const result = await searchOpenAlexWorks({
       query: "privacy",
       fetchImpl: async () => jsonResponse({
@@ -298,9 +314,23 @@ test("searchOpenAlexWorks never exposes private, credential-like, or token-beari
     "https://169.254.169.254/paper",
     "https://[::1]/paper",
     "https://intranet/paper",
+    "https://exa\nmple.org/paper",
+    "https://example.org/pa\tper",
+    "https://\texample.org/paper",
+    "https://example.org/pa\u2028per",
     credentialQueryUrl(["access", "token"]),
     credentialQueryUrl(["api", "key"]),
     credentialQueryUrl(["x-api", "key"]),
+    credentialFragmentUrl(["access", "token"]),
+    obfuscatedCredentialQueryUrl(["oauth", "_", "token"]),
+    obfuscatedCredentialQueryUrl(["token", "[", "]"]),
+    obfuscatedCredentialQueryUrl(["api", "[", "key", "]"]),
+    obfuscatedCredentialQueryUrl(["api", "key", "[", "]"]),
+    obfuscatedCredentialQueryUrl(["oauth", "2_", "token"]),
+    obfuscatedCredentialQueryUrl(["my", "_", "token"]),
+    obfuscatedCredentialQueryUrl(["service", "_", "api", "_", "key"]),
+    obfuscatedCredentialQueryUrl(["x", "-", "amz", "-", "signa", "ture"]),
+    obfuscatedCredentialQueryUrl(["j", "wt"]),
   ]) {
     const result = await searchOpenAlexWorks({
       query: "privacy",
@@ -342,11 +372,48 @@ test("searchOpenAlexWorks rejects abusive nested work fields instead of truncati
     abstract_inverted_index: null,
   }
   const invalidWorks = [
+    { ...baseWork, id: `${baseWork.id}${" ".repeat(100_000)}` },
+    { ...baseWork, doi: `https://doi.org/10.1234/a${" ".repeat(100_000)}` },
     { ...baseWork, title: "x".repeat(1_001) },
     { ...baseWork, authorships: Array.from({ length: 51 }, () => ({ author: { display_name: "A" } })) },
+    { ...baseWork, authorships: [{ author: { display_name: "x".repeat(301) } }] },
+    { ...baseWork, primary_location: { ...baseWork.primary_location, source: { display_name: "x".repeat(501) } } },
+    {
+      ...baseWork,
+      primary_location: { ...baseWork.primary_location, landing_page_url: `https://example.org/paper${" ".repeat(100_000)}` },
+    },
+    {
+      ...baseWork,
+      open_access: { is_oa: true, oa_url: `https://example.org/paper${" ".repeat(100_000)}` },
+    },
+    {
+      ...baseWork,
+      open_access: { is_oa: true, oa_url: null },
+      best_oa_location: { pdf_url: `https://example.org/paper.pdf${" ".repeat(100_000)}` },
+    },
+    {
+      ...baseWork,
+      open_access: { is_oa: true, oa_url: null },
+      best_oa_location: { landing_page_url: `https://example.org/paper${" ".repeat(100_000)}` },
+    },
     { ...baseWork, topics: Array.from({ length: 21 }, () => ({ display_name: "T" })) },
+    { ...baseWork, topics: [{ display_name: "x".repeat(301) }] },
     { ...baseWork, abstract_inverted_index: { word: [20_001] } },
     { ...baseWork, abstract_inverted_index: { ["x".repeat(301)]: [0] } },
+    {
+      ...baseWork,
+      abstract_inverted_index: Object.fromEntries(
+        Array.from({ length: 10_001 }, (_, index) => [`word-${index}`, []]),
+      ),
+    },
+    { ...baseWork, abstract_inverted_index: { word: Array.from({ length: 20_000 }, () => "invalid") } },
+    {
+      ...baseWork,
+      abstract_inverted_index: {
+        first: Array.from({ length: 3_000 }, (_, index) => index),
+        second: Array.from({ length: 3_000 }, (_, index) => index + 3_000),
+      },
+    },
   ]
   for (const work of invalidWorks) {
     await rejectsWithCode(searchOpenAlexWorks({
