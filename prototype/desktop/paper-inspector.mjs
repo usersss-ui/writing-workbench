@@ -317,7 +317,7 @@ function appendResearchProfile(document, parent, paper, facetSchema) {
 }
 
 export function renderInspector({
-  document, paper, workspaceState, facetSchema, userTags = [], userTagNotice = "",
+  document, paper, workspaceState, facetSchema, userTags = [], userTagNotice = "", sourcePathAvailable = false,
 }) {
   const root = document.createElement("div")
   root.className = "library-inspector-paper"
@@ -341,6 +341,8 @@ export function renderInspector({
   copyButton.className = "button button--secondary button--full"
   copyButton.dataset.action = "copy-private-path"
   copyButton.textContent = "复制原始路径"
+  copyButton.disabled = sourcePathAvailable !== true
+  if (copyButton.disabled) copyButton.setAttribute("title", "需使用本地论文库服务启动")
   root.append(copyButton)
   return root
 }

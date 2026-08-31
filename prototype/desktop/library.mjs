@@ -21,7 +21,24 @@ import {
 } from "./paper-inspector.mjs"
 
 const INDEX_URL = "../../local_library_data/paper-index.json"
-const PRIVATE_AUDIT_URL = "../../local_library_data/paper-library-audit.json"
+const LOCAL_CAPABILITY_FIELDS = Object.freeze([
+  "note_import", "source_path", "candidate_archive", "archive_rebuild", "discovery", "agent_task_center",
+])
+const LOCAL_CAPABILITY_CATEGORIES = Object.freeze([
+  Object.freeze({ value: "note", label: "论文精读", target_tab: "note" }),
+  Object.freeze({ value: "derivation", label: "推导过程", target_tab: "derivation" }),
+  Object.freeze({ value: "source_map", label: "来源映射", target_tab: "derivation" }),
+  Object.freeze({ value: "modeling", label: "建模复盘", target_tab: "simulation" }),
+  Object.freeze({ value: "simulation", label: "仿真描述", target_tab: "simulation" }),
+  Object.freeze({ value: "code_compare", label: "代码对照", target_tab: "code_compare" }),
+  Object.freeze({ value: "reproduction_report", label: "复现报告", target_tab: "simulation" }),
+])
+const LOCAL_CAPABILITY_ROOT_FIELDS = Object.freeze([
+  "api_version", ...LOCAL_CAPABILITY_FIELDS, "archive_source_id", "categories", "recovery",
+])
+const LOCAL_RECOVERY_FIELDS = Object.freeze([
+  "required", "kind", "reason_code", "archive_source_id", "paper_id", "openalex_id",
+])
 const MATERIAL_FILTER_AXES = Object.freeze([
   "personalReadingMarkers",
   "sourceStatuses",
@@ -642,36 +659,290 @@ export function paperActionLabel({ action, paper } = {}) {
   return ""
 }
 
+export class LocalLibraryApiError extends Error {
+  constructor(code, message, { fileName = null } = {}) {
+    super(message)
+    this.name = "LocalLibraryApiError"
+    this.code = code
+    this.fileName = fileName
+  }
+}
+
+function validApiText(value, { maxLength = 240 } = {}) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maxLength
+    && value === value.trim()
+    && !/[\u0000-\u001f\u007f]/u.test(value)
+    && !containsPrivateLocator(value)
+}
+
+function validLocalFileName(value) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 1024
+    && value === value.trim()
+    && /\.md$/iu.test(value)
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !value.includes("..")
+    && !/[\u0000-\u001f\u007f]/u.test(value)
+}
+
+function validInspectionId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9._-]{1,200}$/u.test(value)
+}
+
+function validIsoInstant(value) {
+  if (typeof value !== "string") return false
+  const parsed = new Date(value)
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value
+}
+
+function validRecovery(value, root) {
+  if (!exactStringKeys(value, LOCAL_RECOVERY_FIELDS) || typeof value.required !== "boolean") return false
+  if (value.required === false) {
+    return value.kind === null
+      && value.reason_code === null
+      && value.archive_source_id === null
+      && value.paper_id === null
+      && value.openalex_id === null
+  }
+  if (value.kind === "candidate_archive") {
+    return value.reason_code === "ARCHIVE_REBUILD_FAILED"
+      && SOURCE_ID.test(value.archive_source_id ?? "")
+      && value.archive_source_id === root.archive_source_id
+      && validPaperId(value.paper_id)
+      && /^W[1-9]\d*$/u.test(value.openalex_id ?? "")
+      && root.note_import === false
+      && root.candidate_archive === false
+      && root.archive_rebuild === true
+  }
+  if (value.kind === "manual_note") {
+    return ["ROLLBACK_FAILED", "BUILD_OUTPUT_INVALID"].includes(value.reason_code)
+      && value.archive_source_id === null
+      && value.paper_id === null
+      && value.openalex_id === null
+      && root.note_import === false
+      && root.candidate_archive === false
+      && root.archive_rebuild === false
+  }
+  return false
+}
+
+function validateCapabilitiesResponse(value) {
+  if (!exactStringKeys(value, LOCAL_CAPABILITY_ROOT_FIELDS) || value.api_version !== 1) {
+    throw new Error("本地服务响应格式无效")
+  }
+  if (!LOCAL_CAPABILITY_FIELDS.every((field) => typeof value[field] === "boolean")) {
+    throw new Error("本地服务响应格式无效")
+  }
+  if (value.archive_source_id !== null && !SOURCE_ID.test(value.archive_source_id)) {
+    throw new Error("本地服务响应格式无效")
+  }
+  if ((value.candidate_archive || value.archive_rebuild) && value.archive_source_id === null) {
+    throw new Error("本地服务响应格式无效")
+  }
+  if (!Array.isArray(value.categories) || value.categories.length !== LOCAL_CAPABILITY_CATEGORIES.length) {
+    throw new Error("本地服务响应格式无效")
+  }
+  for (const [index, category] of value.categories.entries()) {
+    if (!exactStringKeys(category, ["value", "label", "target_tab"])) throw new Error("本地服务响应格式无效")
+    const expected = LOCAL_CAPABILITY_CATEGORIES[index]
+    if (category.value !== expected.value || category.label !== expected.label || category.target_tab !== expected.target_tab) {
+      throw new Error("本地服务响应格式无效")
+    }
+  }
+  if (!validRecovery(value.recovery, value) || containsPrivateLocatorDeep(value)) {
+    throw new Error("本地服务响应格式无效")
+  }
+  return structuredClone(value)
+}
+
+function validateChecks(value) {
+  if (!exactStringKeys(value, ["items", "blocking_codes", "warning_codes", "can_import"])) return false
+  if (!Array.isArray(value.items) || typeof value.can_import !== "boolean") return false
+  if (!value.items.every((item) => (
+    exactStringKeys(item, ["code", "severity", "message"])
+    && /^[A-Z][A-Z0-9_]*$/u.test(item.code)
+    && ["pass", "warning", "blocking"].includes(item.severity)
+    && validApiText(item.message)
+  ))) return false
+  const blocking = value.items.filter((item) => item.severity === "blocking").map((item) => item.code)
+  const warnings = value.items.filter((item) => item.severity === "warning").map((item) => item.code)
+  return Array.isArray(value.blocking_codes)
+    && Array.isArray(value.warning_codes)
+    && JSON.stringify(value.blocking_codes) === JSON.stringify(blocking)
+    && JSON.stringify(value.warning_codes) === JSON.stringify(warnings)
+    && value.can_import === (blocking.length === 0)
+}
+
+function validateInspectionResponse(value, { paperId, category }) {
+  const contract = LOCAL_CAPABILITY_CATEGORIES.find((item) => item.value === category)
+  if (
+    !contract
+    || !exactStringKeys(value, ["inspection_id", "suggested_file_name", "checks", "target_tab", "expires_at"])
+    || !validInspectionId(value.inspection_id)
+    || !validLocalFileName(value.suggested_file_name)
+    || !value.suggested_file_name.includes(`${paperId}_`)
+    || value.target_tab !== contract.target_tab
+    || !validIsoInstant(value.expires_at)
+    || !validateChecks(value.checks)
+    || containsPrivateLocatorDeep(value)
+  ) throw new Error("本地服务响应格式无效")
+  return structuredClone(value)
+}
+
+function validImportedPreviewUrl(value) {
+  return typeof value === "string"
+    && /^\.\.\/\.\.\/local_library_data\/notes\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:note|derivation|source_map|modeling|simulation|code_compare|reproduction_report)\/[a-f0-9]{64}\.html$/u.test(value)
+}
+
+function validateImportResponse(value, { requestedFileName }) {
+  const extension = ".md"
+  const stem = requestedFileName.toLowerCase().endsWith(extension)
+    ? requestedFileName.slice(0, -extension.length)
+    : requestedFileName
+  const expectedVersion = new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}_v[2-9][0-9]*\\.md$`, "u")
+  if (
+    !exactStringKeys(value, ["paper_id", "actual_file_name", "target_tab", "new_preview_url", "index_version"])
+    || !validPaperId(value.paper_id)
+    || !validLocalFileName(value.actual_file_name)
+    || (value.actual_file_name !== requestedFileName && !expectedVersion.test(value.actual_file_name))
+    || !["note", "derivation", "simulation", "code_compare"].includes(value.target_tab)
+    || !validImportedPreviewUrl(value.new_preview_url)
+    || !/^[a-f0-9]{64}$/u.test(value.index_version ?? "")
+    || containsPrivateLocatorDeep(value)
+  ) throw new Error("本地服务响应格式无效")
+  return structuredClone(value)
+}
+
+function validateSourcePathResponse(value, { paperId }) {
+  if (
+    !exactStringKeys(value, ["paper_id", "source_path"])
+    || value.paper_id !== paperId
+    || typeof value.source_path !== "string"
+    || value.source_path.length === 0
+    || value.source_path.length > 32_768
+    || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/u.test(value.source_path)
+    || /[\u0000\r\n]/u.test(value.source_path)
+  ) throw new Error("本地服务响应格式无效")
+  return { paper_id: value.paper_id, source_path: value.source_path }
+}
+
+async function parseLocalJsonResponse(response, validator) {
+  let payload
+  try { payload = await response?.json?.() } catch { throw new Error("本地服务响应格式无效") }
+  if (!response?.ok) {
+    const error = isPlainObject(payload?.error) ? payload.error : {}
+    const code = typeof error.code === "string" && /^[A-Z][A-Z0-9_]*$/u.test(error.code)
+      ? error.code
+      : "LOCAL_LIBRARY_REQUEST_FAILED"
+    const message = validApiText(error.message) ? error.message : "本地论文库请求失败"
+    const fileName = validLocalFileName(error.file_name) ? error.file_name : null
+    throw new LocalLibraryApiError(code, message, { fileName })
+  }
+  return validator(payload)
+}
+
+function requestLocalJson(fetchImpl, url, body, validator) {
+  if (typeof fetchImpl !== "function") return Promise.reject(new Error("本地服务不可用"))
+  return Promise.resolve(fetchImpl(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    credentials: "same-origin",
+  })).then((response) => parseLocalJsonResponse(response, validator))
+}
+
+export async function loadLocalLibraryCapabilities(fetchImpl = globalThis.fetch) {
+  if (typeof fetchImpl !== "function") throw new Error("本地服务不可用")
+  const response = await fetchImpl("/api/v1/capabilities", {
+    cache: "no-store",
+    credentials: "same-origin",
+  })
+  return parseLocalJsonResponse(response, validateCapabilitiesResponse)
+}
+
+export function inspectLocalMarkdownNote({ fetchImpl = globalThis.fetch, paperId, category, originalFileName, markdown }) {
+  return requestLocalJson(fetchImpl, "/api/v1/notes/inspect", {
+    paper_id: paperId,
+    category,
+    original_file_name: originalFileName,
+    markdown,
+  }, (value) => validateInspectionResponse(value, { paperId, category }))
+}
+
+export function importLocalMarkdownNote({ fetchImpl = globalThis.fetch, inspectionId, requestedFileName }) {
+  return requestLocalJson(fetchImpl, "/api/v1/notes/import", {
+    inspection_id: inspectionId,
+    requested_file_name: requestedFileName,
+    conflict_policy: "version",
+  }, (value) => validateImportResponse(value, { requestedFileName }))
+}
+
+export function loadPrivateSourcePath({ fetchImpl = globalThis.fetch, paperId }) {
+  return requestLocalJson(
+    fetchImpl,
+    "/api/v1/papers/source-path",
+    { paper_id: paperId },
+    (value) => validateSourcePathResponse(value, { paperId }),
+  ).then((result) => result.source_path)
+}
+
+export async function decodeUtf8MarkdownFile(file) {
+  if (!file || !/\.(?:md|markdown)$/iu.test(file.name ?? "")) throw new Error("请选择 Markdown 文件")
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+  } catch {
+    throw new Error("Markdown 文件不是有效 UTF-8")
+  }
+}
+
 export function createRetryableLoader(load) {
   if (typeof load !== "function") throw new TypeError("加载函数无效")
   let state = "idle"
   let value = null
   let inFlight = null
+  let generation = 0
+
+  function invalidate() {
+    generation += 1
+    state = "idle"
+    value = null
+    inFlight = null
+  }
 
   function run() {
     if (state === "ready") return Promise.resolve({ ok: true, value })
     if (inFlight) return inFlight
+    const token = generation
     state = "loading"
     const operation = Promise.resolve()
       .then(() => load())
       .then((loaded) => {
+        if (token !== generation) return { ok: false, value: null }
         value = loaded
         state = "ready"
         return { ok: true, value }
       })
       .catch(() => {
-        value = null
-        state = "error"
+        if (token === generation) {
+          value = null
+          state = "error"
+        }
         return { ok: false, value: null }
       })
       .finally(() => {
-        if (inFlight === operation) inFlight = null
+        if (token === generation && inFlight === operation) inFlight = null
       })
     inFlight = operation
     return operation
   }
 
-  return { getState: () => state, run }
+  return { getState: () => state, invalidate, run }
 }
 
 export function computeLoadVisibility({ loadState, viewEmpty }) {
@@ -1204,6 +1475,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   let papers = []
   let facetSchema = null
   let warningCount = null
+  let localCapabilities = null
   let filters = resetLibraryFilters()
   let openFacetPanel = null
   let sortMode = "default"
@@ -1258,6 +1530,10 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       readerWriting: document.querySelector("[data-reader-writing-content]"),
       readerToc: document.getElementById("library-reader-toc"),
       readerTocToggle: document.getElementById("library-reader-toc-toggle"),
+      addNote: document.getElementById("library-add-note"),
+      noteImportHelp: document.getElementById("library-note-import-help"),
+      indexReloadStatus: document.querySelector("[data-index-reload-status]"),
+      indexReload: document.getElementById("library-index-reload"),
       readerTocLinks: document.querySelector("#library-reader-toc [data-reader-toc-links]"),
       inspectorTitle: document.getElementById("library-inspector-title"),
       notePreview: document.getElementById("library-note-preview"),
@@ -1621,6 +1897,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       facetSchema,
       userTags: userTagState.papers[paper.paper_id] ?? [],
       userTagNotice,
+      sourcePathAvailable: localCapabilities?.source_path === true,
     }))
   }
 
@@ -1677,6 +1954,8 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     if (ui.coverage) ui.coverage.textContent = summarizeMetadataCoverage(papers).text
     if (ui.warning) ui.warning.textContent = warningSummary(warningCount)
     if (ui.contextTitle) ui.contextTitle.textContent = readerContextLabel({ detailOpen, paper: activePaper })
+    if (ui.addNote) ui.addNote.disabled = localCapabilities?.note_import !== true
+    if (ui.noteImportHelp) ui.noteImportHelp.hidden = localCapabilities?.note_import === true
     const visibility = computeLoadVisibility({ loadState, viewEmpty: view.empty })
     if (ui.empty) ui.empty.hidden = visibility.emptyHidden
     if (ui.error) ui.error.hidden = visibility.errorHidden
@@ -1708,22 +1987,19 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   async function copyPrivatePath(paperId) {
     const ui = elements()
     const request = privatePathCopyGuard.begin(paperId)
-    let privatePath = null
+    let sourcePath = null
     try {
-      const response = await fetchImpl(PRIVATE_AUDIT_URL, { cache: "no-store" })
-      if (!response?.ok || typeof response.json !== "function") throw new Error("audit unavailable")
-      const audit = await response.json()
-      if (!isPlainObject(audit?.private_path_lookup)) throw new Error("audit unavailable")
+      if (localCapabilities?.source_path !== true) throw new Error("source path unavailable")
+      sourcePath = await loadPrivateSourcePath({ fetchImpl, paperId })
       if (!privatePathCopyGuard.isCurrent(request)) return
-      privatePath = audit.private_path_lookup[paperId]
       const clipboard = document.defaultView?.navigator?.clipboard
-      if (typeof privatePath !== "string" || typeof clipboard?.writeText !== "function") throw new Error("clipboard unavailable")
-      await clipboard.writeText(privatePath)
+      if (typeof clipboard?.writeText !== "function") throw new Error("clipboard unavailable")
+      await clipboard.writeText(sourcePath)
       if (privatePathCopyGuard.isCurrent(request) && ui.inspectorStatus) ui.inspectorStatus.textContent = "原始路径已复制"
     } catch {
       if (privatePathCopyGuard.isCurrent(request) && ui.inspectorStatus) ui.inspectorStatus.textContent = "原始路径暂不可用"
     } finally {
-      privatePath = null
+      sourcePath = null
     }
   }
 
@@ -2030,8 +2306,10 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       eventsBound = true
     }
     const loadOperation = indexLoader.run()
+    const capabilityOperation = loadLocalLibraryCapabilities(fetchImpl).catch(() => null)
     loadState = indexLoader.getState()
-    const outcome = await loadOperation
+    const [outcome, capabilities] = await Promise.all([loadOperation, capabilityOperation])
+    localCapabilities = capabilities
     loadState = indexLoader.getState()
     if (outcome.ok) {
       const index = outcome.value

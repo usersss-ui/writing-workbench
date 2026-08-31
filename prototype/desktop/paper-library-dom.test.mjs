@@ -1088,6 +1088,13 @@ test("inspector renders the schema-ordered research profile and plain source ter
   assert.equal(root.querySelectorAll('[data-action="set-reading"]').length, 3)
   assert.equal(root.querySelectorAll('[data-action="toggle-shelf"]').length, 4)
   assert.equal(root.querySelectorAll('[data-action="copy-private-path"]').length, 1)
+  assert.equal(root.querySelector('[data-action="copy-private-path"]').disabled, true)
+  assert.equal(root.querySelector('[data-action="copy-private-path"]').getAttribute("title"), "需使用本地论文库服务启动")
+
+  const available = renderInspector({
+    document, paper, workspaceState: {}, facetSchema: validFacetSchema(2), sourcePathAvailable: true,
+  })
+  assert.equal(available.querySelector('[data-action="copy-private-path"]').disabled, false)
 })
 
 test("personal tag editor renders safe add, remove, import, and export controls", async () => {
@@ -1781,6 +1788,190 @@ test("retryable loader keeps explicit error state and performs a real retry", as
   assert.deepEqual(await retry, { ok: true, value: "ready" })
   assert.equal(loader.getState(), "ready")
   assert.equal(calls, 2)
+})
+
+test("invalidating a ready or in-flight loader forces one fresh fetch", async () => {
+  const { createRetryableLoader } = await import("./library.mjs")
+  const releases = []
+  const loader = createRetryableLoader(() => new Promise((resolve) => releases.push(resolve)))
+  const stale = loader.run()
+  loader.invalidate()
+  const fresh = loader.run()
+  await Promise.resolve()
+  await Promise.resolve()
+  releases[0]("old")
+  assert.deepEqual(await stale, { ok: false, value: null })
+  releases[1]("new")
+  assert.deepEqual(await fresh, { ok: true, value: "new" })
+  assert.equal(loader.getState(), "ready")
+})
+
+test("local API client validates final capabilities and sends only stable ids and Markdown content", async () => {
+  const {
+    importLocalMarkdownNote,
+    inspectLocalMarkdownNote,
+    loadLocalLibraryCapabilities,
+    loadPrivateSourcePath,
+  } = await import("./library.mjs")
+  const categories = [
+    ["note", "论文精读", "note"],
+    ["derivation", "推导过程", "derivation"],
+    ["source_map", "来源映射", "derivation"],
+    ["modeling", "建模复盘", "simulation"],
+    ["simulation", "仿真描述", "simulation"],
+    ["code_compare", "代码对照", "code_compare"],
+    ["reproduction_report", "复现报告", "simulation"],
+  ].map(([value, label, target_tab]) => ({ value, label, target_tab }))
+  const noRecovery = {
+    required: false, kind: null, reason_code: null, archive_source_id: null, paper_id: null, openalex_id: null,
+  }
+  const capabilities = {
+    api_version: 1,
+    note_import: true,
+    source_path: true,
+    candidate_archive: true,
+    archive_rebuild: true,
+    discovery: true,
+    agent_task_center: true,
+    archive_source_id: "main_papers",
+    categories,
+    recovery: noRecovery,
+  }
+  const calls = []
+  const response = (payload, ok = true, status = 200) => ({ ok, status, json: async () => payload })
+
+  assert.deepEqual(await loadLocalLibraryCapabilities(async (url, options) => {
+    calls.push([url, options])
+    return response(capabilities)
+  }), capabilities)
+
+  const inspected = await inspectLocalMarkdownNote({
+    fetchImpl: async (url, options) => {
+      calls.push([url, options])
+      return response({
+        inspection_id: "i-1",
+        suggested_file_name: "Paper-01_论文精读.md",
+        checks: { items: [], blocking_codes: [], warning_codes: [], can_import: true },
+        target_tab: "note",
+        expires_at: "2030-01-01T00:00:00.000Z",
+      })
+    },
+    paperId: "Paper-01",
+    category: "note",
+    originalFileName: "local.md",
+    markdown: "# note",
+  })
+  assert.equal(inspected.inspection_id, "i-1")
+
+  const imported = await importLocalMarkdownNote({
+    fetchImpl: async (url, options) => {
+      calls.push([url, options])
+      return response({
+        paper_id: "Paper-01",
+        actual_file_name: "Paper-01_论文精读.md",
+        target_tab: "note",
+        new_preview_url: `../../local_library_data/notes/paper-01/note/${"a".repeat(64)}.html`,
+        index_version: "b".repeat(64),
+      })
+    },
+    inspectionId: "i-1",
+    requestedFileName: "Paper-01_论文精读.md",
+  })
+  assert.equal(imported.target_tab, "note")
+
+  const sourcePath = rootedValue("private", "papers", "Paper")
+  assert.equal(await loadPrivateSourcePath({
+    fetchImpl: async (url, options) => {
+      calls.push([url, options])
+      return response({ paper_id: "Paper-01", source_path: sourcePath })
+    },
+    paperId: "Paper-01",
+  }), sourcePath)
+
+  assert.deepEqual(calls.map(([url]) => url), [
+    "/api/v1/capabilities", "/api/v1/notes/inspect", "/api/v1/notes/import", "/api/v1/papers/source-path",
+  ])
+  assert.equal(calls[0][1].cache, "no-store")
+  assert.equal(calls[0][1].credentials, "same-origin")
+  for (const [, options] of calls.slice(1)) {
+    assert.equal(options.cache, "no-store")
+    assert.equal(options.credentials, "same-origin")
+    assert.equal(options.headers["Content-Type"], "application/json")
+  }
+  assert.deepEqual(JSON.parse(calls[1][1].body), {
+    paper_id: "Paper-01", category: "note", original_file_name: "local.md", markdown: "# note",
+  })
+  assert.deepEqual(JSON.parse(calls[2][1].body), {
+    inspection_id: "i-1", requested_file_name: "Paper-01_论文精读.md", conflict_policy: "version",
+  })
+  assert.deepEqual(JSON.parse(calls[3][1].body), { paper_id: "Paper-01" })
+  assert.equal(JSON.stringify(calls.slice(1).map(([, options]) => JSON.parse(options.body))).includes("source_path"), false)
+})
+
+test("final capability validator rejects contradictions and all local errors retain safe fields only", async () => {
+  const { importLocalMarkdownNote, loadLocalLibraryCapabilities } = await import("./library.mjs")
+  const categories = [
+    ["note", "论文精读", "note"], ["derivation", "推导过程", "derivation"],
+    ["source_map", "来源映射", "derivation"], ["modeling", "建模复盘", "simulation"],
+    ["simulation", "仿真描述", "simulation"], ["code_compare", "代码对照", "code_compare"],
+    ["reproduction_report", "复现报告", "simulation"],
+  ].map(([value, label, target_tab]) => ({ value, label, target_tab }))
+  const base = {
+    api_version: 1, note_import: true, source_path: true, candidate_archive: false,
+    archive_rebuild: false, discovery: true, agent_task_center: true, archive_source_id: null, categories,
+    recovery: { required: false, kind: null, reason_code: null, archive_source_id: null, paper_id: null, openalex_id: null },
+  }
+  const invalid = [
+    { ...base, candidate_archive: true },
+    { ...base, categories: [...categories].reverse() },
+    { ...base, extra: true },
+    { ...base, recovery: { ...base.recovery, required: true, kind: "manual_note", reason_code: "ROLLBACK_FAILED", paper_id: "Paper-01" } },
+  ]
+  for (const payload of invalid) {
+    await assert.rejects(
+      () => loadLocalLibraryCapabilities(async () => ({ ok: true, status: 200, json: async () => payload })),
+      /响应格式无效/u,
+    )
+  }
+
+  let caught
+  try {
+    await importLocalMarkdownNote({
+      fetchImpl: async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            code: "LIBRARY_WRITE_BUSY",
+            message: "正在重建，请稍后重试",
+            file_name: "Paper-01_论文精读.md",
+            source_path: rootedValue("private", "papers"),
+          },
+        }),
+      }),
+      inspectionId: "i-1",
+      requestedFileName: "Paper-01_论文精读.md",
+    })
+  } catch (error) {
+    caught = error
+  }
+  assert.equal(caught.code, "LIBRARY_WRITE_BUSY")
+  assert.equal(caught.fileName, "Paper-01_论文精读.md")
+  assert.equal(JSON.stringify(caught).includes("private"), false)
+  assert.equal(Object.hasOwn(caught, "response"), false)
+  assert.equal(Object.hasOwn(caught, "body"), false)
+})
+
+test("file decoding uses fatal UTF-8 before inspection", async () => {
+  const { decodeUtf8MarkdownFile } = await import("./library.mjs")
+  const valid = { name: "note.md", arrayBuffer: async () => new TextEncoder().encode("# 中文").buffer }
+  assert.equal(await decodeUtf8MarkdownFile(valid), "# 中文")
+  const invalid = { name: "bad.md", arrayBuffer: async () => Uint8Array.from([0xff]).buffer }
+  await assert.rejects(() => decodeUtf8MarkdownFile(invalid), /UTF-8/u)
+  await assert.rejects(
+    () => decodeUtf8MarkdownFile({ name: "note.txt", arrayBuffer: async () => new ArrayBuffer() }),
+    /Markdown/u,
+  )
 })
 
 test("load visibility preserves a failure instead of replacing it with empty results", async () => {
@@ -2510,6 +2701,22 @@ test("paper-library CSS is page-scoped and provides the desktop three-column bre
   assert.match(styles, /\.paper-library-page \.note-table-scroll[^}]*overflow-x:\s*auto/u)
   assert.match(styles, /\.paper-library-page \.math-display[^}]*overflow-x:\s*auto/u)
   assert.doesNotMatch(styles, /^[ \t]*(?:header|section)\b/mu)
+})
+
+test("detail reader owns one centered native note-import dialog with no path input", () => {
+  for (const id of [
+    "library-add-note", "library-index-reload", "library-note-import-dialog",
+    "library-note-import-form", "library-note-import-category", "library-note-import-file",
+    "library-note-import-checks", "library-note-import-file-name", "library-note-import-close",
+    "library-note-import-cancel", "library-note-import-submit",
+  ]) assert.equal(countMatches(html, new RegExp(`id="${id}"`, "gu")), 1, id)
+  assert.match(html, /library-reader-toolbar[\s\S]*id="library-add-note"[\s\S]*library-reader-tabs/u)
+  assert.match(html, /<dialog[^>]*id="library-note-import-dialog"/u)
+  assert.doesNotMatch(html, /library-note-import-form[^>]*method="dialog"/u)
+  assert.doesNotMatch(html, /note-import[^>]*(?:source-path|target-path|directory)/u)
+  assert.match(styles, /\.paper-library-page \.library-note-import-dialog\s*\{[^}]*margin:\s*auto/isu)
+  assert.match(styles, /\.paper-library-page \.library-note-import-body\s*\{[^}]*overflow-y:\s*auto/isu)
+  assert.doesNotMatch(styles, /^[ \t]*\.library-note-import-dialog\b/mu)
 })
 
 test("material selectors reuse compact source-version styling and truncate only the visible long label", () => {

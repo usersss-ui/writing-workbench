@@ -217,6 +217,12 @@
                 <button class="text-button library-detail-back" id="library-detail-back" type="button">← 返回论文列表</button>
                 <div class="library-reader-toolbar-trailing">
                   <p class="library-reader-load-status" data-reader-load-status role="status" aria-live="polite"></p>
+                  <button class="text-button library-add-note" id="library-add-note" type="button" disabled>添加笔记</button>
+                  <span class="library-note-import-help" id="library-note-import-help">需使用本地论文库服务启动</span>
+                  <span class="library-index-reload-status" data-index-reload-status role="status" aria-live="polite" hidden>
+                    笔记已导入，但索引刷新失败。
+                    <button class="text-button" id="library-index-reload" type="button">重新载入索引</button>
+                  </span>
                   <button class="text-button library-reader-toc-toggle" id="library-reader-toc-toggle" type="button" aria-controls="library-reader-toc" aria-expanded="true">隐藏目录</button>
                 </div>
               </div>
@@ -371,6 +377,48 @@
       hidden
       aria-label="导入个人标签 JSON"
     >
+
+    <dialog class="library-note-import-dialog" id="library-note-import-dialog" aria-labelledby="library-note-import-title">
+      <form class="library-note-import-shell" id="library-note-import-form">
+        <header class="library-note-import-heading">
+          <div>
+            <p class="eyebrow">本地材料</p>
+            <h2 id="library-note-import-title">添加 Markdown 笔记</h2>
+          </div>
+          <button class="text-button" id="library-note-import-close" type="button" aria-label="关闭添加笔记对话框">关闭</button>
+        </header>
+        <div class="library-note-import-body">
+          <p>当前论文 ID：<code data-note-import-paper-id></code></p>
+          <label>材料类型
+            <select id="library-note-import-category" required>
+              <option value="note">论文精读</option>
+              <option value="derivation">推导过程</option>
+              <option value="source_map">来源映射</option>
+              <option value="modeling">建模复盘</option>
+              <option value="simulation">仿真描述</option>
+              <option value="code_compare">代码对照</option>
+              <option value="reproduction_report">复现报告</option>
+            </select>
+          </label>
+          <label>Markdown 文件
+            <input id="library-note-import-file" type="file" accept=".md,.markdown,text/markdown" required>
+          </label>
+          <section aria-labelledby="library-note-import-checks-title">
+            <h3 id="library-note-import-checks-title">格式检查</h3>
+            <ul id="library-note-import-checks"></ul>
+          </section>
+          <label>保存名
+            <input id="library-note-import-file-name" type="text" autocomplete="off" spellcheck="false" required>
+          </label>
+          <p>同名文件不会覆盖；服务会自动使用 <code>_v2</code>、<code>_v3</code> 递增名称。</p>
+          <p data-note-import-status role="status" aria-live="polite"></p>
+        </div>
+        <footer class="library-note-import-actions">
+          <button class="text-button" id="library-note-import-cancel" type="button">取消</button>
+          <button class="button primary" id="library-note-import-submit" type="submit" disabled>导入并重建论文库</button>
+        </footer>
+      </form>
+    </dialog>
 
     <dialog class="library-image-lightbox" id="library-image-lightbox" aria-labelledby="library-image-lightbox-title">
       <div class="library-image-lightbox-shell">
