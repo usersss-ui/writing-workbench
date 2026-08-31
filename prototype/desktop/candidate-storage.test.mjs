@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import {
   DISCOVERY_CANDIDATE_STORAGE_KEY,
   createCandidateStore,
+  isValidCandidateState,
 } from "./candidate-storage.mjs"
 import { searchOpenAlexWorks } from "./openalex-search.mjs"
 
@@ -533,4 +534,193 @@ test("reload atomically replaces memory with empty recovery state when storage b
   unavailable = true
   assert.deepEqual(toggledStore.reload(), { status: "unavailable", state: { version: 1, candidates: [] } })
   assert.equal(toggledStore.getLoadStatus(), "unavailable")
+})
+
+test("candidate owner exposes a strict validator and four-state cloned reader", () => {
+  const valid = {
+    version: 1,
+    candidates: [{
+      ...OPENALEX_WORK,
+      authors: [...OPENALEX_WORK.authors],
+      topics: [...OPENALEX_WORK.topics],
+      stage: "confirmed_for_archive",
+    }],
+  }
+  assert.equal(isValidCandidateState(valid), true)
+  assert.equal(isValidCandidateState({ ...valid, extra: true }), false)
+  assert.equal(isValidCandidateState({ ...valid, candidates: [...valid.candidates, valid.candidates[0]] }), false)
+
+  assert.deepEqual(createCandidateStore(fakeStorage()).readValidatedState(), {
+    status: "missing",
+    state: { version: 1, candidates: [] },
+  })
+  const validStore = createCandidateStore(fakeStorage(new Map([
+    [DISCOVERY_CANDIDATE_STORAGE_KEY, JSON.stringify(valid)],
+  ])))
+  const inspected = validStore.readValidatedState()
+  assert.deepEqual(inspected, { status: "valid", state: valid })
+  inspected.state.candidates[0].authors.push("Mallory")
+  assert.deepEqual(validStore.readValidatedState(), { status: "valid", state: valid })
+  assert.deepEqual(createCandidateStore(fakeStorage(new Map([
+    [DISCOVERY_CANDIDATE_STORAGE_KEY, "{"],
+  ]))).readValidatedState(), {
+    status: "invalid",
+    state: { version: 1, candidates: [] },
+  })
+  assert.deepEqual(createCandidateStore({ getItem() { throw new Error("denied") } }).readValidatedState(), {
+    status: "unavailable",
+    state: { version: 1, candidates: [] },
+  })
+})
+
+test("candidate replaceValidated clones, proves readback, and restores prior memory plus bytes", () => {
+  const previous = {
+    version: 1,
+    candidates: [{
+      ...OPENALEX_WORK,
+      authors: [...OPENALEX_WORK.authors],
+      topics: [...OPENALEX_WORK.topics],
+      stage: "pending_screening",
+    }],
+  }
+  const replacement = {
+    version: 1,
+    candidates: [{
+      ...previous.candidates[0],
+      stage: "confirmed_for_archive",
+    }],
+  }
+  const storage = fakeStorage(new Map([[DISCOVERY_CANDIDATE_STORAGE_KEY, JSON.stringify(previous)]]))
+  const store = createCandidateStore(storage)
+  const result = store.replaceValidated(replacement)
+  assert.deepEqual(result, { replaced: true, state: replacement })
+  replacement.candidates[0].authors.push("Mallory")
+  result.state.candidates[0].topics.push("Injected")
+  assert.deepEqual(store.read().candidates[0].authors, [...OPENALEX_WORK.authors])
+  assert.deepEqual(store.read().candidates[0].topics, [...OPENALEX_WORK.topics])
+
+  const bytes = new Map([[DISCOVERY_CANDIDATE_STORAGE_KEY, JSON.stringify(previous)]])
+  let failWrite = true
+  const blockedStorage = {
+    getItem(key) { return bytes.has(key) ? bytes.get(key) : null },
+    setItem(key, value) {
+      if (failWrite) {
+        failWrite = false
+        throw new Error("quota")
+      }
+      bytes.set(key, String(value))
+    },
+    removeItem(key) { bytes.delete(key) },
+  }
+  const blocked = createCandidateStore(blockedStorage)
+  const next = { version: 1, candidates: [] }
+  assert.deepEqual(blocked.replaceValidated(next), {
+    replaced: false,
+    status: "persistence_failed",
+    state: previous,
+  })
+  assert.deepEqual(blocked.read(), previous)
+  assert.equal(bytes.get(DISCOVERY_CANDIDATE_STORAGE_KEY), JSON.stringify(previous))
+  assert.throws(() => blocked.replaceValidated({ version: 1 }), /候选队列状态/u)
+})
+
+test("candidate replaceValidated preserves detached memory and reports stale on cross-tab divergence", () => {
+  const bytes = new Map()
+  let failWrites = false
+  const storage = {
+    getItem(key) { return bytes.has(key) ? bytes.get(key) : null },
+    setItem(key, value) {
+      if (failWrites) throw new Error("quota")
+      bytes.set(key, String(value))
+    },
+    removeItem(key) { bytes.delete(key) },
+  }
+  const detached = createCandidateStore(storage)
+  assert.equal(detached.add({ ...OPENALEX_WORK, paperId: "W1", doi: null }).persisted, true)
+  failWrites = true
+  assert.equal(detached.add({ ...OPENALEX_WORK, paperId: "W2", doi: null }).persisted, false)
+  const detachedBefore = detached.read()
+
+  failWrites = false
+  const newerTab = createCandidateStore(storage)
+  assert.equal(newerTab.add({ ...OPENALEX_WORK, paperId: "W3", doi: null }).persisted, true)
+  const durableBefore = bytes.get(DISCOVERY_CANDIDATE_STORAGE_KEY)
+
+  assert.deepEqual(detached.replaceValidated({ version: 1, candidates: [] }), {
+    replaced: false,
+    status: "stale",
+    state: detachedBefore,
+  })
+  assert.deepEqual(detached.read(), detachedBefore)
+  assert.equal(bytes.get(DISCOVERY_CANDIDATE_STORAGE_KEY), durableBefore)
+})
+
+test("candidate replacement compares exact committed raw baseline and refreshes it for reverse replacement", () => {
+  const previous = {
+    version: 1,
+    candidates: [{
+      ...OPENALEX_WORK,
+      authors: [...OPENALEX_WORK.authors],
+      topics: [...OPENALEX_WORK.topics],
+      stage: "pending_screening",
+    }],
+  }
+  const replacement = {
+    version: 1,
+    candidates: [{ ...previous.candidates[0], stage: "confirmed_for_archive" }],
+  }
+  const compact = JSON.stringify(previous)
+  const concurrentBytes = JSON.stringify(previous, null, 2)
+  const storage = fakeStorage(new Map([[DISCOVERY_CANDIDATE_STORAGE_KEY, compact]]))
+  const store = createCandidateStore(storage)
+
+  storage.setItem(DISCOVERY_CANDIDATE_STORAGE_KEY, concurrentBytes)
+  assert.deepEqual(store.replaceValidated(replacement), {
+    replaced: false,
+    status: "stale",
+    state: previous,
+  })
+  assert.equal(storage.raw(DISCOVERY_CANDIDATE_STORAGE_KEY), concurrentBytes)
+
+  assert.deepEqual(store.readValidatedState(), { status: "valid", state: previous })
+  assert.deepEqual(store.replaceValidated(replacement), { replaced: true, state: replacement })
+  assert.deepEqual(store.replaceValidated(previous), { replaced: true, state: previous })
+  assert.equal(storage.raw(DISCOVERY_CANDIDATE_STORAGE_KEY), compact)
+})
+
+test("candidate replacement reports rollback_failed when rollback throws before restoring pre-bytes", () => {
+  const previous = {
+    version: 1,
+    candidates: [{
+      ...OPENALEX_WORK,
+      authors: [...OPENALEX_WORK.authors],
+      topics: [...OPENALEX_WORK.topics],
+      stage: "pending_screening",
+    }],
+  }
+  const replacement = { version: 1, candidates: [] }
+  const previousRaw = JSON.stringify(previous)
+  const bytes = new Map([[DISCOVERY_CANDIDATE_STORAGE_KEY, previousRaw]])
+  let writeCount = 0
+  const storage = {
+    getItem(key) { return bytes.has(key) ? bytes.get(key) : null },
+    setItem(key, value) {
+      writeCount += 1
+      if (writeCount === 1) {
+        bytes.set(key, `${String(value)} `)
+        throw new Error("forward write-then-throw")
+      }
+      throw new Error("rollback throw-before")
+    },
+    removeItem(key) { bytes.delete(key) },
+  }
+  const store = createCandidateStore(storage)
+
+  assert.deepEqual(store.replaceValidated(replacement), {
+    replaced: false,
+    status: "rollback_failed",
+    state: previous,
+  })
+  assert.deepEqual(store.read(), previous)
+  assert.equal(bytes.get(DISCOVERY_CANDIDATE_STORAGE_KEY), `${JSON.stringify(replacement)} `)
 })

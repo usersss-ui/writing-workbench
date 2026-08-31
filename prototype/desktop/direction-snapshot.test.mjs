@@ -12,6 +12,7 @@ function fakeStorage(initial = new Map()) {
   return {
     getItem(key) { return initial.has(key) ? initial.get(key) : null },
     setItem(key, value) { initial.set(key, value) },
+    removeItem(key) { initial.delete(key) },
     raw(key) { return initial.get(key) },
   }
 }
@@ -137,4 +138,140 @@ test("方向快照拒绝自定义原型、symbol、不可枚举字段和访问�
   for (const candidate of [customPrototype, symbolField, nonEnumerable, accessor]) {
     assert.equal(module.isValidDirectionSnapshot(candidate), false)
   }
+})
+
+test("方向 owner strict reader 区分 valid、missing、invalid 与 unavailable 并返回克隆", async () => {
+  const module = await import("./direction-snapshot.mjs")
+  const snapshot = module.createDirectionSnapshot(defaultDirectionSelection, {
+    savedAt: "2026-08-29T11:00:00.000Z",
+  })
+
+  assert.deepEqual(module.createDirectionSnapshotStore(fakeStorage()).readValidatedState(), {
+    status: "missing",
+    state: null,
+  })
+
+  const validStore = module.createDirectionSnapshotStore(fakeStorage(new Map([
+    [module.DIRECTION_STORAGE_KEY, JSON.stringify(snapshot)],
+  ])))
+  const inspected = validStore.readValidatedState()
+  assert.deepEqual(inspected, { status: "valid", state: snapshot })
+  inspected.state.axes.problem.push("在线优化")
+  assert.deepEqual(validStore.readValidatedState(), { status: "valid", state: snapshot })
+
+  assert.deepEqual(module.createDirectionSnapshotStore(fakeStorage(new Map([
+    [module.DIRECTION_STORAGE_KEY, "{"],
+  ]))).readValidatedState(), { status: "invalid", state: null })
+  assert.deepEqual(module.createDirectionSnapshotStore({
+    getItem() { throw new Error("denied") },
+  }).readValidatedState(), { status: "unavailable", state: null })
+})
+
+test("方向 owner replacement 验证克隆、持久化 readback、null 删除与失败回滚", async () => {
+  const module = await import("./direction-snapshot.mjs")
+  const previous = module.createDirectionSnapshot(defaultDirectionSelection, {
+    savedAt: "2026-08-29T12:00:00.000Z",
+  })
+  const replacement = module.createDirectionSnapshot({
+    ...defaultDirectionSelection,
+    feedback: ["零阶反馈"],
+  }, { savedAt: "2026-08-29T13:00:00.000Z" })
+
+  const storage = fakeStorage(new Map([[module.DIRECTION_STORAGE_KEY, JSON.stringify(previous)]]))
+  const store = module.createDirectionSnapshotStore(storage)
+  const replaced = store.replaceValidated(replacement)
+  assert.deepEqual(replaced, { replaced: true, state: replacement })
+  replacement.axes.feedback.push("一阶反馈")
+  replaced.state.axes.feedback.length = 0
+  assert.deepEqual(store.readValidatedState().state.axes.feedback, ["零阶反馈"])
+
+  assert.deepEqual(store.replaceValidated(null), { replaced: true, state: null })
+  assert.equal(storage.raw(module.DIRECTION_STORAGE_KEY), undefined)
+
+  const durable = new Map([[module.DIRECTION_STORAGE_KEY, JSON.stringify(previous)]])
+  let failReplacement = true
+  const blockedStorage = {
+    getItem(key) { return durable.has(key) ? durable.get(key) : null },
+    setItem(key, value) {
+      if (failReplacement) {
+        failReplacement = false
+        throw new Error("quota")
+      }
+      durable.set(key, String(value))
+    },
+    removeItem(key) { durable.delete(key) },
+  }
+  const blocked = module.createDirectionSnapshotStore(blockedStorage)
+  assert.deepEqual(blocked.replaceValidated(module.createDirectionSnapshot({
+    ...defaultDirectionSelection,
+    privacy: ["隐私保护"],
+  }, { savedAt: "2026-08-29T14:00:00.000Z" })), {
+    replaced: false,
+    status: "persistence_failed",
+    state: previous,
+  })
+  assert.equal(durable.get(module.DIRECTION_STORAGE_KEY), JSON.stringify(previous))
+  assert.throws(() => blocked.replaceValidated({ version: 1 }), /方向快照/u)
+})
+
+test("方向 replacement 对创建时的 exact raw baseline 做 CAS，strict read 与成功写入都会刷新 baseline", async () => {
+  const module = await import("./direction-snapshot.mjs")
+  const previous = module.createDirectionSnapshot(defaultDirectionSelection, {
+    savedAt: "2026-08-29T15:00:00.000Z",
+  })
+  const replacement = module.createDirectionSnapshot({
+    ...defaultDirectionSelection,
+    communication: ["每轮通信"],
+  }, { savedAt: "2026-08-29T15:01:00.000Z" })
+  const compact = JSON.stringify(previous)
+  const concurrentBytes = JSON.stringify(previous, null, 2)
+  const storage = fakeStorage(new Map([[module.DIRECTION_STORAGE_KEY, compact]]))
+  const store = module.createDirectionSnapshotStore(storage)
+
+  storage.setItem(module.DIRECTION_STORAGE_KEY, concurrentBytes)
+  assert.deepEqual(store.replaceValidated(replacement), {
+    replaced: false,
+    status: "stale",
+    state: previous,
+  })
+  assert.equal(storage.raw(module.DIRECTION_STORAGE_KEY), concurrentBytes)
+
+  assert.deepEqual(store.readValidatedState(), { status: "valid", state: previous })
+  assert.deepEqual(store.replaceValidated(replacement), { replaced: true, state: replacement })
+  assert.deepEqual(store.replaceValidated(previous), { replaced: true, state: previous })
+  assert.equal(storage.raw(module.DIRECTION_STORAGE_KEY), compact)
+})
+
+test("方向 replacement 无法恢复并精确读回 pre-bytes 时报告 rollback_failed", async () => {
+  const module = await import("./direction-snapshot.mjs")
+  const previous = module.createDirectionSnapshot(defaultDirectionSelection, {
+    savedAt: "2026-08-29T16:00:00.000Z",
+  })
+  const replacement = module.createDirectionSnapshot({
+    ...defaultDirectionSelection,
+    privacy: ["隐私保护"],
+  }, { savedAt: "2026-08-29T16:01:00.000Z" })
+  const previousRaw = JSON.stringify(previous)
+  const bytes = new Map([[module.DIRECTION_STORAGE_KEY, previousRaw]])
+  let writeCount = 0
+  const storage = {
+    getItem(key) { return bytes.has(key) ? bytes.get(key) : null },
+    setItem(key, value) {
+      writeCount += 1
+      if (writeCount === 1) {
+        bytes.set(key, `${String(value)} `)
+        throw new Error("forward write-then-throw")
+      }
+      throw new Error("rollback throw-before")
+    },
+    removeItem(key) { bytes.delete(key) },
+  }
+  const store = module.createDirectionSnapshotStore(storage)
+
+  assert.deepEqual(store.replaceValidated(replacement), {
+    replaced: false,
+    status: "rollback_failed",
+    state: previous,
+  })
+  assert.equal(bytes.get(module.DIRECTION_STORAGE_KEY), `${JSON.stringify(replacement)} `)
 })

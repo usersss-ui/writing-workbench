@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   USER_TAG_STORAGE_KEY,
   createUserTagStore,
+  isValidUserTagState,
 } from "./paper-user-tags.mjs"
 
 function fakeStorage(initial = new Map()) {
@@ -222,4 +223,121 @@ test("Unicode line separators reject merge imports atomically", () => {
     assert.deepEqual(store.read(), beforeState)
     assert.equal(storage.raw(USER_TAG_STORAGE_KEY), beforeBytes)
   }
+})
+
+test("personal-tag owner exposes a strict validator and four-state cloned reader", () => {
+  const valid = { version: 1, papers: { "Paper-01": ["必读", "可作基线"] } }
+  assert.equal(isValidUserTagState(valid), true)
+  assert.equal(isValidUserTagState({ ...valid, papers: { "Paper-01": ["必读", "必读"] } }), false)
+  assert.equal(isValidUserTagState({ ...valid, extra: true }), false)
+
+  assert.deepEqual(createUserTagStore(fakeStorage()).readValidatedState(), {
+    status: "missing",
+    state: { version: 1, papers: {} },
+  })
+  const validStore = createUserTagStore(fakeStorage(new Map([[USER_TAG_STORAGE_KEY, JSON.stringify(valid)]])))
+  const inspected = validStore.readValidatedState()
+  assert.deepEqual(inspected, { status: "valid", state: valid })
+  inspected.state.papers["Paper-01"].push("泄漏")
+  assert.deepEqual(validStore.readValidatedState(), { status: "valid", state: valid })
+  assert.deepEqual(createUserTagStore(fakeStorage(new Map([[USER_TAG_STORAGE_KEY, "{"]]))).readValidatedState(), {
+    status: "invalid",
+    state: { version: 1, papers: {} },
+  })
+  assert.deepEqual(createUserTagStore({ getItem() { throw new Error("denied") } }).readValidatedState(), {
+    status: "unavailable",
+    state: { version: 1, papers: {} },
+  })
+})
+
+test("personal-tag replaceValidated clones, proves readback, and restores prior memory plus bytes", () => {
+  const previous = { version: 1, papers: { "Paper-01": ["保留"] } }
+  const replacement = { version: 1, papers: { "Paper-02": ["必读"] } }
+  const storage = fakeStorage(new Map([[USER_TAG_STORAGE_KEY, JSON.stringify(previous)]]))
+  const store = createUserTagStore(storage)
+  const result = store.replaceValidated(replacement)
+  assert.deepEqual(result, { replaced: true, state: replacement })
+  replacement.papers["Paper-02"].push("泄漏")
+  result.state.papers["Paper-02"].length = 0
+  assert.deepEqual(store.read(), { version: 1, papers: { "Paper-02": ["必读"] } })
+
+  const bytes = new Map([[USER_TAG_STORAGE_KEY, JSON.stringify(previous)]])
+  let failWrite = true
+  const blockedStorage = {
+    getItem(key) { return bytes.has(key) ? bytes.get(key) : null },
+    setItem(key, value) {
+      if (failWrite) {
+        failWrite = false
+        throw new Error("quota")
+      }
+      bytes.set(key, String(value))
+    },
+    removeItem(key) { bytes.delete(key) },
+  }
+  const blocked = createUserTagStore(blockedStorage)
+  assert.deepEqual(blocked.replaceValidated(replacement), {
+    replaced: false,
+    status: "persistence_failed",
+    state: previous,
+  })
+  assert.deepEqual(blocked.read(), previous)
+  assert.equal(bytes.get(USER_TAG_STORAGE_KEY), JSON.stringify(previous))
+  assert.throws(() => blocked.replaceValidated({ version: 1 }), /个人标签状态/u)
+})
+
+test("personal-tag replacement refuses an exact-raw baseline change and supports same-store reverse replacement", () => {
+  const previous = { version: 1, papers: { "Paper-01": ["保留"] } }
+  const replacement = { version: 1, papers: { "Paper-02": ["必读"] } }
+  const compact = JSON.stringify(previous)
+  const concurrentBytes = JSON.stringify(previous, null, 2)
+  const storage = fakeStorage(new Map([[USER_TAG_STORAGE_KEY, compact]]))
+  const store = createUserTagStore(storage)
+
+  storage.setItem(USER_TAG_STORAGE_KEY, concurrentBytes)
+  assert.deepEqual(store.replaceValidated(replacement), {
+    replaced: false,
+    status: "stale",
+    state: previous,
+  })
+  assert.equal(storage.raw(USER_TAG_STORAGE_KEY), concurrentBytes)
+
+  assert.deepEqual(store.readValidatedState(), { status: "valid", state: previous })
+  assert.deepEqual(store.replaceValidated(replacement), { replaced: true, state: replacement })
+  assert.deepEqual(store.replaceValidated(previous), { replaced: true, state: previous })
+  assert.equal(storage.raw(USER_TAG_STORAGE_KEY), compact)
+})
+
+test("personal-tag recovery without an exact pre-bytes readback reports rollback_failed even if bytes happen to match", () => {
+  const previous = { version: 1, papers: { "Paper-01": ["保留"] } }
+  const replacement = { version: 1, papers: { "Paper-02": ["必读"] } }
+  const previousRaw = JSON.stringify(previous)
+  const bytes = new Map([[USER_TAG_STORAGE_KEY, previousRaw]])
+  let writeCount = 0
+  let denyRecoveryProof = false
+  const storage = {
+    getItem(key) {
+      if (denyRecoveryProof) throw new Error("readback denied")
+      return bytes.has(key) ? bytes.get(key) : null
+    },
+    setItem(key, value) {
+      writeCount += 1
+      if (writeCount === 1) {
+        bytes.set(key, `${String(value)} `)
+        throw new Error("forward write-then-throw")
+      }
+      bytes.set(key, String(value))
+      denyRecoveryProof = true
+      throw new Error("rollback write-then-throw")
+    },
+    removeItem(key) { bytes.delete(key) },
+  }
+  const store = createUserTagStore(storage)
+
+  assert.deepEqual(store.replaceValidated(replacement), {
+    replaced: false,
+    status: "rollback_failed",
+    state: previous,
+  })
+  assert.deepEqual(store.read(), previous)
+  assert.equal(bytes.get(USER_TAG_STORAGE_KEY), previousRaw)
 })

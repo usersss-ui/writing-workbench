@@ -97,6 +97,7 @@ const EXPECTED_PROTOTYPE_FILES = [
 ]
 const EXPECTED_GENERATED_ASSETS = [
   "styles.css",
+  "state-transfer.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -820,6 +821,7 @@ test("root redirect and static files use only the fixed generated/prototype/path
   const files = new Map([
     ["local_library_output/desktop/library.html", "<h1>Library</h1>"],
     ["local_library_output/desktop/discovery.html", "<h1>Discovery</h1>"],
+    ["local_library_output/desktop/state-transfer.html", "<h1>State transfer</h1>"],
     ["local_library_data/paper-index.json", "{\"version\":4}"],
     [`local_library_data/notes/paper-01/note/${hash}.html`, "<h1>Note</h1>"],
     [`local_library_data/notes/paper-01/assets/${hash}.png`, "image"],
@@ -841,9 +843,11 @@ test("root redirect and static files use only the fixed generated/prototype/path
     ["local_library_config/library.local.json", "PRIVATE"],
     ["local_library_data/paper-library-audit.json", "PRIVATE"],
     ["local_library_output/desktop/assets/unlisted.mjs", "PRIVATE"],
+    ["local_library_output/desktop/assets/state-transfer.test.mjs", "PRIVATE"],
     ["prototype/desktop/README.md", "PRIVATE"],
     ["prototype/desktop/library.template.html", "PRIVATE"],
     ["prototype/desktop/state-transfer.html", "PRIVATE"],
+    ["prototype/desktop/state-transfer.mjs", "PRIVATE"],
     ["prototype/desktop/vendor/katex/LICENSE", "PRIVATE"],
     ["local_library_output/desktop/assets/vendor/katex/LICENSE", "PRIVATE"],
     ["exporter/paper-library/local-server.test.mjs", "PRIVATE"],
@@ -868,6 +872,21 @@ test("root redirect and static files use only the fixed generated/prototype/path
   assert.equal(head.status, 200)
   assert.equal(await head.text(), "")
   assert.equal((await fetch(`${fixture.origin}/prototype/desktop/index.html?v=1`)).status, 200)
+  for (const fileName of [
+    "state-transfer.mjs",
+    "direction-snapshot.mjs",
+    "agent-task-input.mjs",
+    "paper-library-storage.mjs",
+    "paper-user-tags.mjs",
+    "candidate-storage.mjs",
+    "paper-library-model.mjs",
+    "styles.css",
+  ]) {
+    const pathname = `/local_library_output/desktop/assets/${fileName}`
+    const transferHead = await fetch(`${fixture.origin}${pathname}`, { method: "HEAD" })
+    assert.equal(transferHead.status, 200, pathname)
+    assert.equal(await transferHead.text(), "", pathname)
+  }
 
   await unlink(join(repoRoot, "prototype/desktop/p02.html"))
   await symlink(join(repoRoot, "arbitrary.txt"), join(repoRoot, "prototype/desktop/p02.html"))
@@ -876,9 +895,11 @@ test("root redirect and static files use only the fixed generated/prototype/path
     "/local_library_config/library.local.json",
     "/local_library_data/paper-library-audit.json",
     "/local_library_output/desktop/assets/unlisted.mjs",
+    "/local_library_output/desktop/assets/state-transfer.test.mjs",
     "/prototype/desktop/README.md",
     "/prototype/desktop/library.template.html",
     "/prototype/desktop/state-transfer.html",
+    "/prototype/desktop/state-transfer.mjs",
     "/prototype/desktop/vendor/katex/LICENSE",
     "/local_library_output/desktop/assets/vendor/katex/LICENSE",
     "/prototype/desktop/p02.html",
@@ -1175,6 +1196,8 @@ test("a temporary workbench completes archive-build-index then note inspect-impo
   })
   await mkdir(join(repoRoot, "prototype"), { recursive: true })
   await cp(join(workspaceRoot, "prototype/desktop"), join(repoRoot, "prototype/desktop"), { recursive: true })
+  await writeFile(join(repoRoot, "prototype/desktop/state-transfer.html"), "<!doctype html><title>State transfer fixture</title>")
+  await writeFile(join(repoRoot, "prototype/desktop/state-transfer.mjs"), "export const fixture = true\n")
   await mkdir(join(sourceRoot, "Seed-Paper"), { recursive: true })
   await writeFile(join(sourceRoot, "Seed-Paper/paper.pdf"), "%PDF-1.7\nfixture\n%%EOF\n")
   const institution = JSON.parse(await readFile(

@@ -84,6 +84,7 @@ const DEFAULT_STATIC_FILE_SYSTEM = Object.freeze({
 })
 const APPROVED_GENERATED_ASSET_SET = new Set([
   "styles.css",
+  "state-transfer.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -393,6 +394,9 @@ function staticMapping(pathname) {
   }
   if (pathname === "/local_library_output/desktop/discovery.html") {
     return { root: "local_library_output/desktop", relativePath: "discovery.html" }
+  }
+  if (pathname === "/local_library_output/desktop/state-transfer.html") {
+    return { root: "local_library_output/desktop", relativePath: "state-transfer.html" }
   }
   if (pathname.startsWith(outputPrefix)) {
     const relativePath = pathname.slice(outputPrefix.length)

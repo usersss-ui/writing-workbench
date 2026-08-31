@@ -782,3 +782,214 @@ test("任务快照拒绝自定义原型、symbol、不可枚举字段和访问�
     assert.equal(module.isValidTaskInputSnapshot(candidate), false)
   }
 })
+
+test("Agent owner strict reader validates one cloned whole state and excludes recoverable pending", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const empty = { version: 1, current_snapshot_id: null, snapshots: [] }
+  assert.equal(module.isValidTaskInputStoreState(empty), true)
+  assert.equal(module.isValidTaskInputStoreState({ ...empty, extra: true }), false)
+  assert.equal(module.isValidTaskInputStoreState({ ...empty, current_snapshot_id: "UNKNOWN" }), false)
+  assert.deepEqual(module.createTaskInputSnapshotStore(fakeStorage()).readValidatedState(), {
+    status: "missing",
+    state: empty,
+  })
+
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const first = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T13:00:00.000Z", snapshotNonce: "AAAAAAAAAAAAAAAA",
+  })
+  const pending = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T13:01:00.000Z", snapshotNonce: "BBBBBBBBBBBBBBBB",
+  })
+  assert.equal(store.append(first), true)
+  storage.failOnce("setItem", `${module.TASK_INPUT_STORAGE_KEY}.snapshot.${pending.snapshot_id}`, "before")
+  assert.equal(store.append(pending), false)
+
+  const inspected = store.readValidatedState()
+  assert.deepEqual(inspected, {
+    status: "valid",
+    state: { version: 1, current_snapshot_id: first.snapshot_id, snapshots: [first] },
+  })
+  inspected.state.snapshots[0].papers[0].authors.push("Mallory")
+  assert.deepEqual(store.readValidatedState().state.snapshots[0].papers[0].authors, first.papers[0].authors)
+  assert.equal([...storage.values.keys()].some((key) => key.includes(".pending.")), true)
+
+  assert.deepEqual(module.createTaskInputSnapshotStore(fakeStorage(new Map([
+    [module.TASK_INPUT_STORAGE_KEY, "{"],
+  ]))).readValidatedState(), { status: "invalid", state: empty })
+  assert.deepEqual(module.createTaskInputSnapshotStore({
+    get length() { throw new Error("denied") },
+    getItem() { throw new Error("denied") },
+  }).readValidatedState(), { status: "unavailable", state: empty })
+})
+
+test("Agent whole state permits committed history with an intentionally empty current pointer", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const snapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T13:30:00.000Z", snapshotNonce: "GGGGGGGGGGGGGGGG",
+  })
+  const state = { version: 1, current_snapshot_id: null, snapshots: [snapshot] }
+  const storage = fakeStorage(new Map([
+    [module.TASK_INPUT_STORAGE_KEY, JSON.stringify(state)],
+    [`${module.TASK_INPUT_STORAGE_KEY}.snapshot.${snapshot.snapshot_id}`, JSON.stringify(snapshot)],
+  ]))
+
+  assert.equal(module.isValidTaskInputStoreState(state), true)
+  assert.deepEqual(module.createTaskInputSnapshotStore(storage).readValidatedState(), {
+    status: "valid",
+    state,
+  })
+  assert.equal(storage.raw(`${module.TASK_INPUT_STORAGE_KEY}.current`), undefined)
+})
+
+test("Agent replaceAllValidated replaces committed whole state while preserving pending and unrelated bytes", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const first = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T14:00:00.000Z", snapshotNonce: "CCCCCCCCCCCCCCCC",
+  })
+  const second = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T14:01:00.000Z", snapshotNonce: "DDDDDDDDDDDDDDDD",
+  })
+  assert.equal(store.append(first), true)
+  assert.equal(store.append(second), true)
+  const orphanPendingKey = `${module.TASK_INPUT_STORAGE_KEY}.pending.ORPHAN`
+  const unrelatedKey = "research-console.unrelated"
+  storage.setItem(orphanPendingKey, "opaque-pending-bytes")
+  storage.setItem(unrelatedKey, "opaque-unrelated-bytes")
+  const replacement = { version: 1, current_snapshot_id: first.snapshot_id, snapshots: [first] }
+  const expected = structuredClone(replacement)
+
+  const result = store.replaceAllValidated(replacement)
+  assert.deepEqual(result, { replaced: true, state: expected })
+  replacement.snapshots[0].papers[0].authors.push("Mallory")
+  result.state.snapshots[0].papers[0].title_en = "Changed"
+  assert.deepEqual(store.readValidatedState(), {
+    status: "valid",
+    state: expected,
+  })
+  assert.equal(storage.raw(`${module.TASK_INPUT_STORAGE_KEY}.snapshot.${second.snapshot_id}`), undefined)
+  assert.equal(storage.raw(orphanPendingKey), "opaque-pending-bytes")
+  assert.equal(storage.raw(unrelatedKey), "opaque-unrelated-bytes")
+})
+
+test("Agent replaceAllValidated rolls every committed key and memory back after a partial write failure", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const storage = adversarialStorage()
+  const store = module.createTaskInputSnapshotStore(storage)
+  const previous = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T15:00:00.000Z", snapshotNonce: "EEEEEEEEEEEEEEEE",
+  })
+  const incoming = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T15:01:00.000Z", snapshotNonce: "FFFFFFFFFFFFFFFF",
+  })
+  assert.equal(store.append(previous), true)
+  const beforeBytes = new Map(storage.values)
+  const beforeState = { version: 1, current_snapshot_id: previous.snapshot_id, snapshots: [previous] }
+  const replacement = { version: 1, current_snapshot_id: incoming.snapshot_id, snapshots: [incoming] }
+  storage.failOnce("setItem", module.TASK_INPUT_STORAGE_KEY, "before")
+
+  assert.deepEqual(store.replaceAllValidated(replacement), {
+    replaced: false,
+    status: "persistence_failed",
+    state: beforeState,
+  })
+  assert.deepEqual(storage.values, beforeBytes)
+  assert.deepEqual(store.readValidatedState(), { status: "valid", state: beforeState })
+  assert.throws(() => store.replaceAllValidated({ version: 1 }), /Agent 任务输入状态/u)
+})
+
+test("Agent replacement CASes exact committed bytes and refreshes baseline for same-store reverse replacement", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const snapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T16:00:00.000Z", snapshotNonce: "HHHHHHHHHHHHHHHH",
+  })
+  const previous = { version: 1, current_snapshot_id: snapshot.snapshot_id, snapshots: [snapshot] }
+  const replacement = { version: 1, current_snapshot_id: null, snapshots: [snapshot] }
+  const rootKey = module.TASK_INPUT_STORAGE_KEY
+  const currentKey = `${rootKey}.current`
+  const snapshotStorageKey = `${rootKey}.snapshot.${snapshot.snapshot_id}`
+  const compact = JSON.stringify(previous)
+  const concurrentBytes = JSON.stringify(previous, null, 2)
+  const storage = adversarialStorage(new Map([
+    [rootKey, compact],
+    [currentKey, snapshot.snapshot_id],
+    [snapshotStorageKey, JSON.stringify(snapshot)],
+  ]))
+  const store = module.createTaskInputSnapshotStore(storage)
+
+  storage.setItem(rootKey, concurrentBytes)
+  assert.deepEqual(store.replaceAllValidated(replacement), {
+    replaced: false,
+    status: "stale",
+    state: previous,
+  })
+  assert.equal(storage.raw(rootKey), concurrentBytes)
+  assert.equal(storage.raw(currentKey), snapshot.snapshot_id)
+
+  assert.deepEqual(store.readValidatedState(), { status: "valid", state: previous })
+  assert.deepEqual(store.replaceAllValidated(replacement), { replaced: true, state: replacement })
+  assert.deepEqual(store.replaceAllValidated(previous), { replaced: true, state: previous })
+  assert.equal(storage.raw(rootKey), compact)
+  assert.equal(storage.raw(currentKey), snapshot.snapshot_id)
+})
+
+test("Agent rollback status requires exact committed and excluded-byte proof under throw-before/after faults", async () => {
+  const module = await import("./agent-task-input.mjs")
+  const previousSnapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T17:00:00.000Z", snapshotNonce: "IIIIIIIIIIIIIIII",
+  })
+  const incomingSnapshot = module.createTaskInputSnapshot(readyPreview(module), {
+    createdAt: "2026-08-29T17:01:00.000Z", snapshotNonce: "JJJJJJJJJJJJJJJJ",
+  })
+  const previous = {
+    version: 1,
+    current_snapshot_id: previousSnapshot.snapshot_id,
+    snapshots: [previousSnapshot],
+  }
+  const replacement = {
+    version: 1,
+    current_snapshot_id: incomingSnapshot.snapshot_id,
+    snapshots: [incomingSnapshot],
+  }
+  const rootKey = module.TASK_INPUT_STORAGE_KEY
+  const currentKey = `${rootKey}.current`
+  const previousSnapshotKey = `${rootKey}.snapshot.${previousSnapshot.snapshot_id}`
+  const incomingSnapshotKey = `${rootKey}.snapshot.${incomingSnapshot.snapshot_id}`
+  const pendingKey = `${rootKey}.pending.OPAQUE`
+  const unrelatedKey = "research-console.unrelated"
+
+  for (const [rollbackPhase, expectedStatus] of [
+    ["after", "persistence_failed"],
+    ["before", "rollback_failed"],
+  ]) {
+    const storage = adversarialStorage(new Map([
+      [rootKey, JSON.stringify(previous)],
+      [currentKey, previousSnapshot.snapshot_id],
+      [previousSnapshotKey, JSON.stringify(previousSnapshot)],
+      [pendingKey, "opaque-pending-bytes"],
+      [unrelatedKey, "opaque-unrelated-bytes"],
+    ]))
+    const store = module.createTaskInputSnapshotStore(storage)
+    storage.failOnce("setItem", rootKey, "before")
+    storage.failOnce("setItem", currentKey, rollbackPhase, 1)
+
+    assert.deepEqual(store.replaceAllValidated(replacement), {
+      replaced: false,
+      status: expectedStatus,
+      state: previous,
+    }, rollbackPhase)
+    assert.equal(storage.raw(pendingKey), "opaque-pending-bytes", rollbackPhase)
+    assert.equal(storage.raw(unrelatedKey), "opaque-unrelated-bytes", rollbackPhase)
+    if (rollbackPhase === "after") {
+      assert.equal(storage.raw(rootKey), JSON.stringify(previous))
+      assert.equal(storage.raw(currentKey), previousSnapshot.snapshot_id)
+      assert.equal(storage.raw(previousSnapshotKey), JSON.stringify(previousSnapshot))
+      assert.equal(storage.raw(incomingSnapshotKey), undefined)
+    } else {
+      assert.equal(storage.raw(currentKey), incomingSnapshot.snapshot_id)
+    }
+  }
+})

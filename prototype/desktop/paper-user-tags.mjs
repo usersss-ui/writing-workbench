@@ -16,13 +16,43 @@ function emptyState() {
 }
 
 function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  try {
+    return Object.getPrototypeOf(value) === Object.prototype
+  } catch {
+    return false
+  }
 }
 
 function hasExactKeys(value, expected) {
-  const actual = Object.keys(value).sort()
+  if (!isPlainObject(value)) return false
+  let ownKeys
+  let descriptors
+  try {
+    ownKeys = Reflect.ownKeys(value)
+    descriptors = Object.getOwnPropertyDescriptors(value)
+  } catch {
+    return false
+  }
+  if (ownKeys.some((key) => typeof key !== "string")) return false
+  const actual = ownKeys.sort()
   const keys = [...expected].sort()
-  return actual.length === keys.length && actual.every((key, index) => key === keys[index])
+  return actual.length === keys.length
+    && actual.every((key, index) => key === keys[index])
+    && actual.every((key) => descriptors[key]?.enumerable === true && "value" in descriptors[key])
+}
+
+function isPlainDataRecord(value) {
+  if (!isPlainObject(value)) return false
+  try {
+    const keys = Reflect.ownKeys(value)
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    return keys.every((key) => typeof key === "string"
+      && descriptors[key]?.enumerable === true
+      && "value" in descriptors[key])
+  } catch {
+    return false
+  }
 }
 
 function validPaperId(value) {
@@ -58,8 +88,8 @@ function cloneState(state) {
   }
 }
 
-function validateCanonicalState(value) {
-  if (!isPlainObject(value) || !hasExactKeys(value, STATE_KEYS) || value.version !== 1 || !isPlainObject(value.papers)) return false
+export function isValidUserTagState(value) {
+  if (!isPlainObject(value) || !hasExactKeys(value, STATE_KEYS) || value.version !== 1 || !isPlainDataRecord(value.papers)) return false
   let total = 0
   for (const [paperId, labels] of Object.entries(value.papers)) {
     if (!validPaperId(paperId) || !Array.isArray(labels) || labels.length === 0 || labels.length > MAX_TAGS_PER_PAPER) return false
@@ -75,15 +105,51 @@ function validateCanonicalState(value) {
   return total <= MAX_LIBRARY_ASSIGNMENTS
 }
 
-function loadInitialState(storage) {
-  try {
-    const raw = storage?.getItem?.(USER_TAG_STORAGE_KEY)
-    if (raw === null || raw === undefined) return emptyState()
-    const parsed = JSON.parse(raw)
-    return validateCanonicalState(parsed) ? cloneState(parsed) : emptyState()
-  } catch {
-    return emptyState()
+function getUserTagRaw(storage, attempts = 1) {
+  if (!storage || typeof storage.getItem !== "function") return { known: false, raw: null }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return { known: true, raw: storage.getItem(USER_TAG_STORAGE_KEY) }
+    } catch {
+      // Retry once when a storage implementation reports a transient read fault.
+    }
   }
+  return { known: false, raw: null }
+}
+
+function inspectUserTagState(storage) {
+  const stored = getUserTagRaw(storage)
+  if (!stored.known) return { status: "unavailable", state: emptyState(), raw: null }
+  if (stored.raw === null) return { status: "missing", state: emptyState(), raw: null }
+  if (typeof stored.raw !== "string") return { status: "invalid", state: emptyState(), raw: stored.raw }
+  try {
+    const parsed = JSON.parse(stored.raw)
+    return isValidUserTagState(parsed)
+      ? { status: "valid", state: cloneState(parsed), raw: stored.raw }
+      : { status: "invalid", state: emptyState(), raw: stored.raw }
+  } catch {
+    return { status: "invalid", state: emptyState(), raw: stored.raw }
+  }
+}
+
+function writeUserTagRaw(storage, raw) {
+  try {
+    if (raw === null) {
+      if (!storage || typeof storage.removeItem !== "function") return false
+      storage.removeItem(USER_TAG_STORAGE_KEY)
+    } else {
+      if (!storage || typeof storage.setItem !== "function") return false
+      storage.setItem(USER_TAG_STORAGE_KEY, raw)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function userTagRawMatches(storage, raw) {
+  const stored = getUserTagRaw(storage, 2)
+  return stored.known && stored.raw === raw
 }
 
 function normalizeImportDocument(text) {
@@ -104,12 +170,30 @@ function normalizeImportDocument(text) {
 }
 
 export function createUserTagStore(storage) {
-  let state = loadInitialState(storage)
+  const initial = inspectUserTagState(storage)
+  let state = cloneState(initial.state)
+  let committedBaseline = {
+    known: initial.status !== "unavailable",
+    raw: initial.raw,
+  }
+
+  function rememberBaseline(inspected) {
+    committedBaseline = {
+      known: inspected.status !== "unavailable",
+      raw: inspected.raw,
+    }
+  }
 
   function persist(nextState) {
-    if (!validateCanonicalState(nextState)) throw new TypeError("个人标签状态无效")
+    if (!isValidUserTagState(nextState)) throw new TypeError("个人标签状态无效")
     state = cloneState(nextState)
-    try { storage?.setItem?.(USER_TAG_STORAGE_KEY, JSON.stringify(state)) } catch {}
+    try {
+      if (typeof storage?.setItem === "function") {
+        const raw = JSON.stringify(state)
+        storage.setItem(USER_TAG_STORAGE_KEY, raw)
+        rememberBaseline({ status: "valid", raw })
+      }
+    } catch {}
   }
 
   function findExisting(labels, label) {
@@ -119,6 +203,53 @@ export function createUserTagStore(storage) {
 
   return {
     read: () => cloneState(state),
+
+    readValidatedState() {
+      const inspected = inspectUserTagState(storage)
+      rememberBaseline(inspected)
+      return { status: inspected.status, state: cloneState(inspected.state) }
+    },
+
+    replaceValidated(nextState) {
+      if (!isValidUserTagState(nextState)) throw new TypeError("个人标签状态无效")
+      const replacement = cloneState(nextState)
+      const memoryBefore = cloneState(state)
+      const before = inspectUserTagState(storage)
+      if (before.status === "invalid" || before.status === "unavailable") {
+        return { replaced: false, status: before.status, state: cloneState(memoryBefore) }
+      }
+      if (!committedBaseline.known || before.raw !== committedBaseline.raw) {
+        return { replaced: false, status: "stale", state: cloneState(memoryBefore) }
+      }
+      if (!storage || typeof storage.setItem !== "function") {
+        return { replaced: false, status: "unavailable", state: cloneState(memoryBefore) }
+      }
+
+      const nextRaw = JSON.stringify(replacement)
+      if (before.raw === nextRaw) {
+        state = cloneState(replacement)
+        rememberBaseline({ status: "valid", raw: nextRaw })
+        return { replaced: true, state: cloneState(state) }
+      }
+      writeUserTagRaw(storage, nextRaw)
+      if (userTagRawMatches(storage, nextRaw)) {
+        state = cloneState(replacement)
+        rememberBaseline({ status: "valid", raw: nextRaw })
+        return { replaced: true, state: cloneState(state) }
+      }
+
+      let restored = userTagRawMatches(storage, before.raw)
+      if (!restored) {
+        writeUserTagRaw(storage, before.raw)
+        restored = userTagRawMatches(storage, before.raw)
+      }
+      state = cloneState(memoryBefore)
+      return {
+        replaced: false,
+        status: restored ? "persistence_failed" : "rollback_failed",
+        state: cloneState(state),
+      }
+    },
 
     tagsFor(paperId) {
       validatePaperId(paperId)
@@ -191,7 +322,12 @@ export function createUserTagStore(storage) {
 
     clear() {
       state = emptyState()
-      try { storage?.removeItem?.(USER_TAG_STORAGE_KEY) } catch {}
+      try {
+        if (typeof storage?.removeItem === "function") {
+          storage.removeItem(USER_TAG_STORAGE_KEY)
+          rememberBaseline({ status: "missing", raw: null })
+        }
+      } catch {}
       return cloneState(state)
     },
   }

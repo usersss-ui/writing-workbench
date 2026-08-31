@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="一次性迁移旧端口浏览器研究状态的本地操作页。" />
+    <title>浏览器状态迁移 · 学术研究工作台</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231677ff'/%3E%3Cpath d='M16 21h32v8H16zm0 14h32v8H16z' fill='white'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body class="state-transfer-page">
+    <main
+      class="state-transfer-shell"
+      id="state-transfer-app"
+      aria-labelledby="state-transfer-title"
+      aria-busy="false"
+    >
+      <header class="state-transfer-hero">
+        <p class="eyebrow">一次性本地工具</p>
+        <h1 id="state-transfer-title">浏览器研究状态迁移</h1>
+        <p>
+          只处理研究方向、论文工作区、个人标签、发现候选与 Agent 输入快照。
+          不读取论文正文、笔记、原始路径、凭据或其他网站状态。
+        </p>
+        <div class="state-transfer-origin-line">
+          <span>当前来源</span>
+          <code id="state-transfer-origin">正在确认</code>
+        </div>
+      </header>
+
+      <section class="state-transfer-grid" aria-label="状态导出与导入">
+        <section class="panel state-transfer-panel" id="state-transfer-export-panel" aria-labelledby="state-transfer-export-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">步骤一</p>
+              <h2 id="state-transfer-export-title">导出当前来源</h2>
+              <p>先严格校验五组已提交状态，再生成带 canonical SHA-256 的 JSON 文件。</p>
+            </div>
+          </div>
+          <div class="state-transfer-boundary">
+            <strong>不会导出</strong>
+            <span>pending 事务、任意其他 localStorage、正文、路径、认证信息</span>
+          </div>
+          <button class="button button--secondary" id="state-transfer-export" type="button">导出已校验状态</button>
+        </section>
+
+        <section class="panel state-transfer-panel" id="state-transfer-import-panel" aria-labelledby="state-transfer-import-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">步骤二</p>
+              <h2 id="state-transfer-import-title">选择迁移文件</h2>
+              <p>一次选择 1–3 个 JSON 文件。校验与预览完成前不会写入。</p>
+            </div>
+          </div>
+          <label class="state-transfer-file-field" for="state-transfer-files">
+            <span>状态迁移 JSON</span>
+            <input id="state-transfer-files" type="file" accept=".json,application/json" multiple />
+          </label>
+          <button class="button button--primary" id="state-transfer-preview" type="button">校验并生成预览</button>
+        </section>
+      </section>
+
+      <section class="panel state-transfer-preview" id="state-transfer-preview-panel" aria-labelledby="state-transfer-preview-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">步骤三</p>
+            <h2 id="state-transfer-preview-title" tabindex="-1">核对来源、冲突与排除项</h2>
+            <p>差异不会按时间自动覆盖；每个冲突都需要明确选择。</p>
+          </div>
+        </div>
+
+        <div class="state-transfer-subsection">
+          <h3>已校验来源</h3>
+          <div class="state-transfer-bundles" id="state-transfer-bundles">
+            <p class="state-transfer-empty">尚未选择文件。</p>
+          </div>
+        </div>
+
+        <div class="state-transfer-subsection">
+          <h3>冲突决定</h3>
+          <div class="state-transfer-conflicts" id="state-transfer-conflicts">
+            <p class="state-transfer-empty">生成预览后显示。</p>
+          </div>
+        </div>
+
+        <div class="state-transfer-subsection">
+          <h3>不会写入的项目</h3>
+          <ul class="state-transfer-exclusions" id="state-transfer-exclusions"></ul>
+        </div>
+      </section>
+
+      <section class="panel state-transfer-apply" aria-labelledby="state-transfer-apply-title">
+        <div>
+          <p class="eyebrow">步骤四</p>
+          <h2 id="state-transfer-apply-title">最终确认</h2>
+          <p id="state-transfer-confirmation">尚未生成可应用的合并预览。</p>
+        </div>
+        <label class="state-transfer-confirm-check">
+          <input id="state-transfer-confirm" type="checkbox" disabled />
+          我已核对来源、SHA、全部冲突决定与排除项，并确认只应用一次。
+        </label>
+        <button class="button button--primary" id="state-transfer-apply" type="button" disabled>应用合并计划</button>
+      </section>
+
+      <p
+        class="state-transfer-status"
+        id="state-transfer-status"
+        role="status"
+        aria-live="polite"
+        tabindex="-1"
+      >此页不会自动迁移任何状态。</p>
+    </main>
+    <script type="module" src="./assets/state-transfer.mjs"></script>
+  </body>
+</html>

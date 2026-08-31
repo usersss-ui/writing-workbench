@@ -277,7 +277,15 @@ function emptyState() {
   return { version: 1, current_snapshot_id: null, snapshots: [] }
 }
 
-function validStoreState(value) {
+function cloneStoreState(value) {
+  return {
+    version: 1,
+    current_snapshot_id: value.current_snapshot_id,
+    snapshots: value.snapshots.map(clone),
+  }
+}
+
+export function isValidTaskInputStoreState(value) {
   if (!hasExactKeys(value, STORE_KEYS) || value.version !== 1 || !Array.isArray(value.snapshots)) return false
   if (!value.snapshots.every(isValidTaskInputSnapshot)) return false
   const ids = value.snapshots.map((snapshot) => snapshot.snapshot_id)
@@ -330,7 +338,18 @@ function resolvePendingPointer(pointer, snapshots, storage, keys, seen = new Set
   seen.add(pointer)
   const key = pendingKey(pointer)
   if (!keys.includes(key)) return { valid: false, current: null }
-  const pending = JSON.parse(storage.getItem(key))
+  let rawPending
+  try {
+    rawPending = storage.getItem(key)
+  } catch {
+    return { valid: false, current: null, unavailable: true }
+  }
+  let pending
+  try {
+    pending = JSON.parse(rawPending)
+  } catch {
+    return { valid: false, current: null }
+  }
   if (!validPending(pending) || pending.snapshot.snapshot_id !== pointer) return { valid: false, current: null }
   if (pending.previous_current_id === null) return { valid: true, current: null }
   if (snapshots.some((snapshot) => snapshot.snapshot_id === pending.previous_current_id)) {
@@ -340,38 +359,76 @@ function resolvePendingPointer(pointer, snapshots, storage, keys, seen = new Set
 }
 
 function inspectStore(storage) {
+  if (!storage || typeof storage.getItem !== "function") return { status: "unavailable", state: emptyState() }
+  let rawRoot
   try {
-    if (!storage || typeof storage.getItem !== "function") return { status: "unavailable", state: emptyState() }
-    const rawRoot = storage.getItem(TASK_INPUT_STORAGE_KEY)
-    const root = rawRoot === null ? emptyState() : JSON.parse(rawRoot)
-    if (!validStoreState(root)) return { status: "invalid", state: emptyState() }
-    const keys = storageKeys(storage)
-    if (keys === null) return { status: "invalid", state: emptyState() }
-    const entries = []
-    for (const key of keys.filter((candidate) => candidate.startsWith(SNAPSHOT_PREFIX))) {
-      const snapshot = JSON.parse(storage.getItem(key))
-      if (!isValidTaskInputSnapshot(snapshot) || key !== snapshotKey(snapshot.snapshot_id)) {
-        return { status: "invalid", state: emptyState() }
-      }
-      entries.push(snapshot)
-    }
-    const snapshots = orderAuthoritativeSnapshots(root.snapshots, entries)
-    if (snapshots === null) return { status: "invalid", state: emptyState() }
-    const independentCurrent = storage.getItem(CURRENT_KEY)
-    if (independentCurrent === null && snapshots.length > 0) return { status: "invalid", state: emptyState() }
-    if (independentCurrent === null && root.current_snapshot_id !== null) return { status: "invalid", state: emptyState() }
-    let current = independentCurrent
-    if (current !== null && !snapshots.some((snapshot) => snapshot.snapshot_id === current)) {
-      const resolved = resolvePendingPointer(current, snapshots, storage, keys)
-      if (!resolved.valid) return { status: "invalid", state: emptyState() }
-      current = resolved.current
-    }
-    return {
-      status: rawRoot === null && snapshots.length === 0 ? "missing" : "valid",
-      state: { version: 1, current_snapshot_id: current, snapshots },
-    }
+    rawRoot = storage.getItem(TASK_INPUT_STORAGE_KEY)
+  } catch {
+    return { status: "unavailable", state: emptyState() }
+  }
+  let root
+  try {
+    root = rawRoot === null ? emptyState() : JSON.parse(rawRoot)
   } catch {
     return { status: "invalid", state: emptyState() }
+  }
+  if (!isValidTaskInputStoreState(root)) return { status: "invalid", state: emptyState() }
+  let keys
+  try {
+    keys = storageKeys(storage)
+  } catch {
+    return { status: "unavailable", state: emptyState() }
+  }
+  if (keys === null) return { status: "invalid", state: emptyState() }
+  const entries = []
+  for (const key of keys.filter((candidate) => candidate.startsWith(SNAPSHOT_PREFIX))) {
+    let rawSnapshot
+    try {
+      rawSnapshot = storage.getItem(key)
+    } catch {
+      return { status: "unavailable", state: emptyState() }
+    }
+    let snapshot
+    try {
+      snapshot = JSON.parse(rawSnapshot)
+    } catch {
+      return { status: "invalid", state: emptyState() }
+    }
+    if (!isValidTaskInputSnapshot(snapshot) || key !== snapshotKey(snapshot.snapshot_id)) {
+      return { status: "invalid", state: emptyState() }
+    }
+    entries.push(snapshot)
+  }
+  const snapshots = orderAuthoritativeSnapshots(root.snapshots, entries)
+  if (snapshots === null) return { status: "invalid", state: emptyState() }
+  let independentCurrent
+  try {
+    independentCurrent = storage.getItem(CURRENT_KEY)
+  } catch {
+    return { status: "unavailable", state: emptyState() }
+  }
+  if (independentCurrent === null && root.current_snapshot_id !== null) {
+    return { status: "invalid", state: emptyState() }
+  }
+  let current = independentCurrent
+  if (current !== null && !snapshots.some((snapshot) => snapshot.snapshot_id === current)) {
+    const resolved = resolvePendingPointer(current, snapshots, storage, keys)
+    if (resolved.unavailable) return { status: "unavailable", state: emptyState() }
+    if (!resolved.valid) return { status: "invalid", state: emptyState() }
+    current = resolved.current
+  }
+  if (root.current_snapshot_id !== null && root.current_snapshot_id !== current) {
+    const pendingResolution = independentCurrent === null
+      ? { valid: false, current: null }
+      : resolvePendingPointer(independentCurrent, snapshots, storage, keys)
+    if (pendingResolution.unavailable) return { status: "unavailable", state: emptyState() }
+    if (!pendingResolution.valid || pendingResolution.current !== root.current_snapshot_id) {
+      return { status: "invalid", state: emptyState() }
+    }
+  }
+  return {
+    status: rawRoot === null && snapshots.length === 0 ? "missing" : "valid",
+    state: { version: 1, current_snapshot_id: current, snapshots },
   }
 }
 
@@ -405,6 +462,141 @@ function removeStorageItem(storage, key) {
   } catch {
     return false
   }
+}
+
+function isAgentOwnerKey(key) {
+  return key === TASK_INPUT_STORAGE_KEY
+    || key === CURRENT_KEY
+    || key.startsWith(SNAPSHOT_PREFIX)
+    || key.startsWith(PENDING_PREFIX)
+}
+
+function captureAgentOwnerBytes(storage) {
+  if (!storage || typeof storage.getItem !== "function") return { status: "unavailable", bytes: null }
+  let keys
+  try {
+    keys = storageKeys(storage)
+  } catch {
+    return { status: "unavailable", bytes: null }
+  }
+  if (keys === null) return { status: "unavailable", bytes: null }
+  const ownerKeys = [...new Set(keys.filter(isAgentOwnerKey))].sort()
+  const orderedKeys = [
+    TASK_INPUT_STORAGE_KEY,
+    CURRENT_KEY,
+    ...ownerKeys.filter((key) => key !== TASK_INPUT_STORAGE_KEY && key !== CURRENT_KEY),
+  ]
+  const bytes = new Map()
+  for (const key of orderedKeys) {
+    let value
+    try {
+      value = storage.getItem(key)
+    } catch {
+      return { status: "unavailable", bytes: null }
+    }
+    if (value !== null && typeof value !== "string") return { status: "invalid", bytes: null }
+    if (ownerKeys.includes(key) && value === null) return { status: "stale", bytes: null }
+    bytes.set(key, value)
+  }
+  return { status: "valid", bytes }
+}
+
+function byteMapsEqual(left, right) {
+  if (!(left instanceof Map) || !(right instanceof Map) || left.size !== right.size) return false
+  for (const [key, value] of left) {
+    if (!right.has(key) || right.get(key) !== value) return false
+  }
+  return true
+}
+
+function inspectStoreAtomically(storage) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const before = captureAgentOwnerBytes(storage)
+    if (before.status === "invalid") return { status: "invalid", state: emptyState(), bytes: null }
+    if (before.status === "unavailable") return { status: "unavailable", state: emptyState(), bytes: null }
+    if (before.status === "stale") continue
+    const inspected = inspectStore(storage)
+    const after = captureAgentOwnerBytes(storage)
+    if (after.status === "invalid") return { status: "invalid", state: emptyState(), bytes: null }
+    if (after.status === "unavailable") return { status: "unavailable", state: emptyState(), bytes: null }
+    if (after.status === "valid" && byteMapsEqual(before.bytes, after.bytes)) {
+      return { status: inspected.status, state: cloneStoreState(inspected.state), bytes: after.bytes }
+    }
+  }
+  return { status: "unavailable", state: emptyState(), bytes: null }
+}
+
+function committedAgentBytes(bytes) {
+  const committed = new Map([
+    [TASK_INPUT_STORAGE_KEY, bytes.get(TASK_INPUT_STORAGE_KEY) ?? null],
+    [CURRENT_KEY, bytes.get(CURRENT_KEY) ?? null],
+  ])
+  for (const [key, value] of bytes) {
+    if (key.startsWith(SNAPSHOT_PREFIX)) committed.set(key, value)
+  }
+  return committed
+}
+
+function pendingAgentBytes(bytes) {
+  return new Map([...bytes].filter(([key]) => key.startsWith(PENDING_PREFIX)))
+}
+
+function targetAgentBytes(nextState) {
+  const target = new Map([
+    [TASK_INPUT_STORAGE_KEY, JSON.stringify(cloneStoreState(nextState))],
+    [CURRENT_KEY, nextState.current_snapshot_id],
+  ])
+  for (const snapshot of nextState.snapshots) {
+    target.set(snapshotKey(snapshot.snapshot_id), JSON.stringify(clone(snapshot)))
+  }
+  return target
+}
+
+function ensureStorageValue(storage, key, expected) {
+  const current = getStorageItem(storage, key, 2)
+  if (current.known && current.value === expected) return true
+  if (expected === null) removeStorageItem(storage, key)
+  else setStorageItem(storage, key, expected)
+  const durable = getStorageItem(storage, key, 2)
+  return durable.known && durable.value === expected
+}
+
+function applyCommittedAgentBytes(storage, beforeBytes, targetBytes) {
+  const beforeCommitted = committedAgentBytes(beforeBytes)
+  const targetSnapshotKeys = [...targetBytes.keys()].filter((key) => key.startsWith(SNAPSHOT_PREFIX)).sort()
+  for (const key of targetSnapshotKeys) {
+    if (!ensureStorageValue(storage, key, targetBytes.get(key))) return false
+  }
+  if (!ensureStorageValue(storage, CURRENT_KEY, targetBytes.get(CURRENT_KEY))) return false
+  if (!ensureStorageValue(storage, TASK_INPUT_STORAGE_KEY, targetBytes.get(TASK_INPUT_STORAGE_KEY))) return false
+  for (const key of [...beforeCommitted.keys()].filter(
+    (candidate) => candidate.startsWith(SNAPSHOT_PREFIX) && !targetBytes.has(candidate),
+  ).sort()) {
+    if (!ensureStorageValue(storage, key, null)) return false
+  }
+  return true
+}
+
+function restoreCommittedAgentBytes(storage, beforeBytes, targetBytes) {
+  const beforeCommitted = committedAgentBytes(beforeBytes)
+  const allSnapshotKeys = new Set([
+    ...[...beforeCommitted.keys()].filter((key) => key.startsWith(SNAPSHOT_PREFIX)),
+    ...[...targetBytes.keys()].filter((key) => key.startsWith(SNAPSHOT_PREFIX)),
+  ])
+  let restored = true
+  for (const key of [...allSnapshotKeys].sort()) {
+    const expected = beforeCommitted.has(key) ? beforeCommitted.get(key) : null
+    if (!ensureStorageValue(storage, key, expected)) restored = false
+  }
+  if (!ensureStorageValue(storage, CURRENT_KEY, beforeCommitted.get(CURRENT_KEY))) restored = false
+  if (!ensureStorageValue(storage, TASK_INPUT_STORAGE_KEY, beforeCommitted.get(TASK_INPUT_STORAGE_KEY))) restored = false
+  const verified = captureAgentOwnerBytes(storage)
+  return restored && verified.status === "valid" && byteMapsEqual(verified.bytes, beforeBytes)
+}
+
+function agentBytesMatchTarget(ownerBytes, targetBytes, previousPendingBytes) {
+  return byteMapsEqual(committedAgentBytes(ownerBytes), targetBytes)
+    && byteMapsEqual(pendingAgentBytes(ownerBytes), previousPendingBytes)
 }
 
 function parsePending(raw, snapshot) {
@@ -442,9 +634,102 @@ function inspectStoreWithRetry(storage, attempts = 2) {
 }
 
 export function createTaskInputSnapshotStore(storage) {
-  let state = inspectStore(storage).state
+  const initial = inspectStoreAtomically(storage)
+  let state = cloneStoreState(initial.state)
+  let committedBaseline = initial.bytes instanceof Map
+    ? committedAgentBytes(initial.bytes)
+    : null
+
+  function rememberCommittedBaseline(bytes) {
+    committedBaseline = bytes instanceof Map
+      ? new Map(committedAgentBytes(bytes))
+      : null
+  }
+
+  function refreshCommittedBaseline() {
+    const captured = captureAgentOwnerBytes(storage)
+    if (captured.status === "valid") rememberCommittedBaseline(captured.bytes)
+  }
 
   return {
+    readValidatedState() {
+      const inspected = inspectStoreAtomically(storage)
+      rememberCommittedBaseline(inspected.bytes)
+      return { status: inspected.status, state: cloneStoreState(inspected.state) }
+    },
+
+    replaceAllValidated(nextState) {
+      if (!isValidTaskInputStoreState(nextState)) throw new TypeError("Agent 任务输入状态无效")
+      const replacement = cloneStoreState(nextState)
+      const memoryBefore = cloneStoreState(state)
+      const before = inspectStoreAtomically(storage)
+      if (before.status === "invalid" || before.status === "unavailable") {
+        return { replaced: false, status: before.status, state: cloneStoreState(memoryBefore) }
+      }
+      const beforeCommitted = committedAgentBytes(before.bytes)
+      if (!(committedBaseline instanceof Map) || !byteMapsEqual(beforeCommitted, committedBaseline)) {
+        return { replaced: false, status: "stale", state: cloneStoreState(memoryBefore) }
+      }
+
+      const latest = captureAgentOwnerBytes(storage)
+      if (latest.status === "invalid") {
+        return { replaced: false, status: "invalid", state: cloneStoreState(memoryBefore) }
+      }
+      if (latest.status === "unavailable") {
+        return { replaced: false, status: "unavailable", state: cloneStoreState(memoryBefore) }
+      }
+      if (latest.status !== "valid" || !byteMapsEqual(before.bytes, latest.bytes)) {
+        return { replaced: false, status: "stale", state: cloneStoreState(memoryBefore) }
+      }
+
+      const beforePending = pendingAgentBytes(before.bytes)
+      const targetBytes = targetAgentBytes(replacement)
+      if (byteMapsEqual(beforeCommitted, targetBytes)) {
+        state = cloneStoreState(replacement)
+        rememberCommittedBaseline(before.bytes)
+        return { replaced: true, state: cloneStoreState(state) }
+      }
+      const allKeys = new Set([...beforeCommitted.keys(), ...targetBytes.keys()])
+      const needsSet = [...allKeys].some((key) => {
+        const expected = targetBytes.has(key) ? targetBytes.get(key) : null
+        return expected !== null && beforeCommitted.get(key) !== expected
+      })
+      const needsRemove = [...allKeys].some((key) => {
+        const expected = targetBytes.has(key) ? targetBytes.get(key) : null
+        return expected === null && beforeCommitted.get(key) !== null && beforeCommitted.get(key) !== undefined
+      })
+      if ((needsSet && typeof storage?.setItem !== "function")
+        || (needsRemove && typeof storage?.removeItem !== "function")) {
+        return { replaced: false, status: "unavailable", state: cloneStoreState(memoryBefore) }
+      }
+
+      let applied = applyCommittedAgentBytes(storage, before.bytes, targetBytes)
+      let after = null
+      let reconciled = null
+      if (applied) {
+        after = captureAgentOwnerBytes(storage)
+        applied = after.status === "valid" && agentBytesMatchTarget(after.bytes, targetBytes, beforePending)
+      }
+      if (applied) {
+        reconciled = inspectStoreAtomically(storage)
+        applied = reconciled.status === "valid"
+          && JSON.stringify(reconciled.state) === JSON.stringify(replacement)
+      }
+      if (applied) {
+        state = cloneStoreState(replacement)
+        rememberCommittedBaseline(reconciled.bytes)
+        return { replaced: true, state: cloneStoreState(state) }
+      }
+
+      const restored = restoreCommittedAgentBytes(storage, before.bytes, targetBytes)
+      state = cloneStoreState(memoryBefore)
+      return {
+        replaced: false,
+        status: restored ? "persistence_failed" : "rollback_failed",
+        state: cloneStoreState(state),
+      }
+    },
+
     append(snapshot) {
       const inspected = inspectStore(storage)
       if (!["missing", "valid"].includes(inspected.status) || !isValidTaskInputSnapshot(snapshot)) return false
@@ -524,6 +809,7 @@ export function createTaskInputSnapshotStore(storage) {
         }
       }
       setStorageItem(storage, TASK_INPUT_STORAGE_KEY, JSON.stringify(state))
+      refreshCommittedBaseline()
       return true
     },
 
@@ -576,11 +862,16 @@ export function createTaskInputSnapshotStore(storage) {
 
       // The root document is only a rebuildable cache after independent
       // snapshot and current authority have both been proven.
-      setStorageItem(storage, TASK_INPUT_STORAGE_KEY, JSON.stringify(nextState))
+      const serializedRoot = JSON.stringify(nextState)
+      if (!ensureStorageValue(storage, TASK_INPUT_STORAGE_KEY, serializedRoot)) {
+        // A one-shot root-cache fault must not leave a durable pointer/cache tear.
+        ensureStorageValue(storage, TASK_INPUT_STORAGE_KEY, serializedRoot)
+      }
       const reconciled = inspectStoreWithRetry(storage)
       state = reconciled.status === "valid" && reconciled.state.current_snapshot_id === snapshotId
         ? reconciled.state
         : nextState
+      refreshCommittedBaseline()
       return true
     },
   }

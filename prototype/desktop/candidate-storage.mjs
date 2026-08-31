@@ -37,14 +37,30 @@ function emptyState() {
 }
 
 function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  try {
+    return Object.getPrototypeOf(value) === Object.prototype
+  } catch {
+    return false
+  }
 }
 
 function hasExactKeys(value, expectedKeys) {
   if (!isPlainObject(value)) return false
-  const actual = Object.keys(value).sort()
+  let ownKeys
+  let descriptors
+  try {
+    ownKeys = Reflect.ownKeys(value)
+    descriptors = Object.getOwnPropertyDescriptors(value)
+  } catch {
+    return false
+  }
+  if (ownKeys.some((key) => typeof key !== "string")) return false
+  const actual = ownKeys.sort()
   const expected = [...expectedKeys].sort()
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index])
+    && actual.every((key) => descriptors[key]?.enumerable === true && "value" in descriptors[key])
 }
 
 function isCanonicalText(value, maximum, nullable = false) {
@@ -173,7 +189,7 @@ function validCandidate(candidate) {
     && STAGES.includes(candidate.stage)
 }
 
-function validState(value) {
+export function isValidCandidateState(value) {
   if (!hasExactKeys(value, ROOT_KEYS) || value.version !== 1 || !Array.isArray(value.candidates)) return false
   if (value.candidates.length > MAX_CANDIDATES || !value.candidates.every(validCandidate)) return false
   const ids = new Set()
@@ -187,7 +203,11 @@ function validState(value) {
       dois.add(candidate.doi)
     }
   }
-  return JSON.stringify(value).length <= MAX_RAW_LENGTH
+  try {
+    return JSON.stringify(value).length <= MAX_RAW_LENGTH
+  } catch {
+    return false
+  }
 }
 
 function cloneCandidate(candidate) {
@@ -216,25 +236,61 @@ function statesEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+function getCandidateRaw(storage, attempts = 1) {
+  if (!storage || typeof storage.getItem !== "function") return { known: false, raw: null }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return { known: true, raw: storage.getItem(DISCOVERY_CANDIDATE_STORAGE_KEY) }
+    } catch {
+      // Retry once when a storage implementation reports a transient read fault.
+    }
+  }
+  return { known: false, raw: null }
+}
+
+function inspectCandidateState(storage) {
+  const stored = getCandidateRaw(storage)
+  if (!stored.known) return { status: "unavailable", state: emptyState(), raw: null }
+  if (stored.raw === null) return { status: "missing", state: emptyState(), raw: null }
+  if (typeof stored.raw !== "string" || stored.raw.length > MAX_RAW_LENGTH) {
+    return { status: "invalid", state: emptyState(), raw: stored.raw }
+  }
+  try {
+    const parsed = JSON.parse(stored.raw)
+    return isValidCandidateState(parsed)
+      ? { status: "valid", state: cloneState(parsed), raw: stored.raw }
+      : { status: "invalid", state: emptyState(), raw: stored.raw }
+  } catch {
+    return { status: "invalid", state: emptyState(), raw: stored.raw }
+  }
+}
+
 function loadInitialState(storage) {
-  if (!storage || typeof storage.getItem !== "function") return { state: emptyState(), status: "unavailable" }
-  let raw
+  const inspected = inspectCandidateState(storage)
+  const baseline = { known: inspected.status !== "unavailable", raw: inspected.raw }
+  if (inspected.status === "unavailable") return { state: emptyState(), status: "unavailable", baseline }
+  if (inspected.status === "invalid") return { state: emptyState(), status: "recovered_invalid", baseline }
+  return { state: cloneState(inspected.state), status: "ready", baseline }
+}
+
+function writeCandidateRaw(storage, raw) {
   try {
-    raw = storage.getItem(DISCOVERY_CANDIDATE_STORAGE_KEY)
+    if (raw === null) {
+      if (!storage || typeof storage.removeItem !== "function") return false
+      storage.removeItem(DISCOVERY_CANDIDATE_STORAGE_KEY)
+    } else {
+      if (!storage || typeof storage.setItem !== "function") return false
+      storage.setItem(DISCOVERY_CANDIDATE_STORAGE_KEY, raw)
+    }
+    return true
   } catch {
-    return { state: emptyState(), status: "unavailable" }
+    return false
   }
-  if (raw === null) return { state: emptyState(), status: "ready" }
-  if (typeof raw !== "string" || raw.length > MAX_RAW_LENGTH) {
-    return { state: emptyState(), status: "recovered_invalid" }
-  }
-  try {
-    const parsed = JSON.parse(raw)
-    if (!validState(parsed)) return { state: emptyState(), status: "recovered_invalid" }
-    return { state: cloneState(parsed), status: "ready" }
-  } catch {
-    return { state: emptyState(), status: "recovered_invalid" }
-  }
+}
+
+function candidateRawMatches(storage, raw) {
+  const stored = getCandidateRaw(storage, 2)
+  return stored.known && stored.raw === raw
 }
 
 function candidateFromWork(work) {
@@ -262,6 +318,29 @@ export function createCandidateStore(storage) {
   let persistedState = loadStatus === "ready"
   let detachedFromStorage = loadStatus === "unavailable"
   let detachedBase = detachedFromStorage ? emptyState() : null
+  let committedBaseline = { ...initial.baseline }
+
+  function rememberBaseline(baseline) {
+    committedBaseline = { known: baseline.known, raw: baseline.raw }
+  }
+
+  function captureInternalState() {
+    return {
+      state: cloneState(state),
+      loadStatus,
+      persistedState,
+      detachedFromStorage,
+      detachedBase: detachedBase ? cloneState(detachedBase) : null,
+    }
+  }
+
+  function restoreInternalState(snapshot) {
+    state = cloneState(snapshot.state)
+    loadStatus = snapshot.loadStatus
+    persistedState = snapshot.persistedState
+    detachedFromStorage = snapshot.detachedFromStorage
+    detachedBase = snapshot.detachedBase ? cloneState(snapshot.detachedBase) : null
+  }
 
   function persist(baseState) {
     const serialized = JSON.stringify(state)
@@ -275,6 +354,7 @@ export function createCandidateStore(storage) {
     }
     try {
       storage.setItem(DISCOVERY_CANDIDATE_STORAGE_KEY, serialized)
+      rememberBaseline({ known: true, raw: serialized })
       persistedState = true
       loadStatus = "ready"
       detachedFromStorage = false
@@ -302,6 +382,7 @@ export function createCandidateStore(storage) {
       state = reloaded.state
       loadStatus = reloaded.status
       persistedState = loadStatus === "ready"
+      rememberBaseline(reloaded.baseline)
       return
     }
 
@@ -318,6 +399,7 @@ export function createCandidateStore(storage) {
     loadStatus = "ready"
     detachedFromStorage = false
     detachedBase = null
+    rememberBaseline(reloaded.baseline)
   }
 
   function transition(paperId, fromStage, toStage) {
@@ -348,6 +430,66 @@ export function createCandidateStore(storage) {
       return cloneState(state)
     },
 
+    readValidatedState() {
+      const inspected = inspectCandidateState(storage)
+      rememberBaseline({ known: inspected.status !== "unavailable", raw: inspected.raw })
+      return { status: inspected.status, state: cloneState(inspected.state) }
+    },
+
+    replaceValidated(nextState) {
+      if (!isValidCandidateState(nextState)) throw new TypeError("候选队列状态无效")
+      const replacement = cloneState(nextState)
+      const original = captureInternalState()
+      const before = inspectCandidateState(storage)
+      if (before.status === "invalid" || before.status === "unavailable") {
+        restoreInternalState(original)
+        return { replaced: false, status: before.status, state: cloneState(state) }
+      }
+      if (!committedBaseline.known || before.raw !== committedBaseline.raw) {
+        restoreInternalState(original)
+        return { replaced: false, status: "stale", state: cloneState(state) }
+      }
+
+      const beforeInternal = original
+      if (!storage || typeof storage.setItem !== "function") {
+        restoreInternalState(beforeInternal)
+        return { replaced: false, status: "unavailable", state: cloneState(state) }
+      }
+      const nextRaw = JSON.stringify(replacement)
+      if (before.raw === nextRaw) {
+        state = cloneState(replacement)
+        loadStatus = "ready"
+        persistedState = true
+        detachedFromStorage = false
+        detachedBase = null
+        rememberBaseline({ known: true, raw: nextRaw })
+        return { replaced: true, state: cloneState(state) }
+      }
+
+      writeCandidateRaw(storage, nextRaw)
+      if (candidateRawMatches(storage, nextRaw)) {
+        state = cloneState(replacement)
+        loadStatus = "ready"
+        persistedState = true
+        detachedFromStorage = false
+        detachedBase = null
+        rememberBaseline({ known: true, raw: nextRaw })
+        return { replaced: true, state: cloneState(state) }
+      }
+
+      let restored = candidateRawMatches(storage, before.raw)
+      if (!restored) {
+        writeCandidateRaw(storage, before.raw)
+        restored = candidateRawMatches(storage, before.raw)
+      }
+      restoreInternalState(beforeInternal)
+      return {
+        replaced: false,
+        status: restored ? "persistence_failed" : "rollback_failed",
+        state: cloneState(state),
+      }
+    },
+
     getLoadStatus() {
       return loadStatus
     },
@@ -359,6 +501,7 @@ export function createCandidateStore(storage) {
       persistedState = loadStatus === "ready"
       detachedFromStorage = loadStatus === "unavailable"
       detachedBase = detachedFromStorage ? emptyState() : null
+      rememberBaseline(reloaded.baseline)
       return { status: loadStatus, state: cloneState(state) }
     },
 
@@ -375,7 +518,7 @@ export function createCandidateStore(storage) {
       const before = cloneState(state)
       const next = cloneState(state)
       next.candidates.push(candidate)
-      if (!validState(next)) throw new RangeError("候选队列存储大小超限")
+      if (!isValidCandidateState(next)) throw new RangeError("候选队列存储大小超限")
       state = next
       return { added: true, persisted: persist(before), reason: null, state: cloneState(state) }
     },

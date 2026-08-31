@@ -58,6 +58,53 @@ function cloneSnapshot(snapshot) {
   }
 }
 
+function getStoredDirectionRaw(storage, attempts = 1) {
+  if (!storage || typeof storage.getItem !== "function") return { known: false, raw: null }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return { known: true, raw: storage.getItem(DIRECTION_STORAGE_KEY) }
+    } catch {
+      // A second read can prove whether a one-shot storage fault was transient.
+    }
+  }
+  return { known: false, raw: null }
+}
+
+function inspectDirectionState(storage) {
+  const stored = getStoredDirectionRaw(storage)
+  if (!stored.known) return { status: "unavailable", state: null, raw: null }
+  if (stored.raw === null) return { status: "missing", state: null, raw: null }
+  if (typeof stored.raw !== "string") return { status: "invalid", state: null, raw: stored.raw }
+  try {
+    const parsed = JSON.parse(stored.raw)
+    return isValidDirectionSnapshot(parsed)
+      ? { status: "valid", state: cloneSnapshot(parsed), raw: stored.raw }
+      : { status: "invalid", state: null, raw: stored.raw }
+  } catch {
+    return { status: "invalid", state: null, raw: stored.raw }
+  }
+}
+
+function writeDirectionRaw(storage, raw) {
+  try {
+    if (raw === null) {
+      if (!storage || typeof storage.removeItem !== "function") return false
+      storage.removeItem(DIRECTION_STORAGE_KEY)
+    } else {
+      if (!storage || typeof storage.setItem !== "function") return false
+      storage.setItem(DIRECTION_STORAGE_KEY, raw)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function directionRawMatches(storage, expectedRaw) {
+  const stored = getStoredDirectionRaw(storage, 2)
+  return stored.known && stored.raw === expectedRaw
+}
+
 export function isValidDirectionSnapshot(value) {
   if (!hasExactKeys(value, ROOT_KEYS) || value.version !== 1 || value.project_id !== "P02") return false
   if (!isCanonicalIsoDate(value.saved_at) || !hasExactKeys(value.axes, AXIS_KEYS)) return false
@@ -92,6 +139,25 @@ export function createDirectionSnapshot(selection, { savedAt = new Date().toISOS
 }
 
 export function createDirectionSnapshotStore(storage) {
+  const initial = inspectDirectionState(storage)
+  let committedBaseline = {
+    known: initial.status !== "unavailable",
+    raw: initial.raw,
+    state: initial.state ? cloneSnapshot(initial.state) : null,
+  }
+
+  function rememberBaseline(inspected) {
+    committedBaseline = {
+      known: inspected.status !== "unavailable",
+      raw: inspected.raw,
+      state: inspected.state ? cloneSnapshot(inspected.state) : null,
+    }
+  }
+
+  function baselineState() {
+    return committedBaseline.state ? cloneSnapshot(committedBaseline.state) : null
+  }
+
   return {
     read() {
       try {
@@ -109,10 +175,64 @@ export function createDirectionSnapshotStore(storage) {
       if (!isValidDirectionSnapshot(snapshot)) return false
       try {
         if (!storage || typeof storage.setItem !== "function") return false
-        storage.setItem(DIRECTION_STORAGE_KEY, JSON.stringify(cloneSnapshot(snapshot)))
+        const saved = cloneSnapshot(snapshot)
+        const raw = JSON.stringify(saved)
+        storage.setItem(DIRECTION_STORAGE_KEY, raw)
+        rememberBaseline({ status: "valid", state: saved, raw })
         return true
       } catch {
         return false
+      }
+    },
+
+    readValidatedState() {
+      const inspected = inspectDirectionState(storage)
+      rememberBaseline(inspected)
+      return {
+        status: inspected.status,
+        state: inspected.state ? cloneSnapshot(inspected.state) : null,
+      }
+    },
+
+    replaceValidated(snapshotOrNull) {
+      if (snapshotOrNull !== null && !isValidDirectionSnapshot(snapshotOrNull)) {
+        throw new TypeError("研究方向快照无效")
+      }
+      const replacement = snapshotOrNull === null ? null : cloneSnapshot(snapshotOrNull)
+      const before = inspectDirectionState(storage)
+      const unchanged = baselineState()
+      if (before.status === "invalid" || before.status === "unavailable") {
+        return { replaced: false, status: before.status, state: unchanged }
+      }
+      if (!committedBaseline.known || before.raw !== committedBaseline.raw) {
+        return { replaced: false, status: "stale", state: unchanged }
+      }
+
+      const nextRaw = replacement === null ? null : JSON.stringify(replacement)
+      if (before.raw === nextRaw) {
+        rememberBaseline({ status: nextRaw === null ? "missing" : "valid", state: replacement, raw: nextRaw })
+        return { replaced: true, state: replacement === null ? null : cloneSnapshot(replacement) }
+      }
+      const methodAvailable = nextRaw === null
+        ? typeof storage?.removeItem === "function"
+        : typeof storage?.setItem === "function"
+      if (!methodAvailable) return { replaced: false, status: "unavailable", state: unchanged }
+
+      writeDirectionRaw(storage, nextRaw)
+      if (directionRawMatches(storage, nextRaw)) {
+        rememberBaseline({ status: nextRaw === null ? "missing" : "valid", state: replacement, raw: nextRaw })
+        return { replaced: true, state: replacement === null ? null : cloneSnapshot(replacement) }
+      }
+
+      let restored = directionRawMatches(storage, before.raw)
+      if (!restored) {
+        writeDirectionRaw(storage, before.raw)
+        restored = directionRawMatches(storage, before.raw)
+      }
+      return {
+        replaced: false,
+        status: restored ? "persistence_failed" : "rollback_failed",
+        state: unchanged,
       }
     },
   }

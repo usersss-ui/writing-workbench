@@ -31,6 +31,7 @@ import { createEmptyFacets } from "./facet-schema.mjs"
 
 const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "styles.css",
+  "state-transfer.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -172,6 +173,7 @@ async function makeFixture() {
   const templateRoot = join(repoRoot, "templates")
   await put(templateRoot, "library.template.html", "<!doctype html><html lang=\"zh-CN\"><main id=\"library-results\"></main></html>")
   await put(templateRoot, "discovery.template.html", "<!doctype html><html lang=\"zh-CN\"><main id=\"discovery-mode-tabs\"></main></html>")
+  await put(templateRoot, "state-transfer.html", "<!doctype html><html lang=\"zh-CN\"><main id=\"state-transfer-app\"></main></html>")
   for (const asset of REQUIRED_DESKTOP_ASSETS) await put(templateRoot, asset, `approved:${asset}`)
   await put(templateRoot, "vendor/katex/katex.mjs", "export default { render() {} }")
   await put(templateRoot, "vendor/katex/katex.min.css", "@font-face{src:url(fonts/KaTeX_Test-Regular.woff2) format('woff2')}")
@@ -245,13 +247,15 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
   const auditPath = join(fixture.repoRoot, "local_library_data/paper-library-audit.json")
   const pagePath = join(fixture.repoRoot, "local_library_output/desktop/library.html")
   const discoveryPath = join(fixture.repoRoot, "local_library_output/desktop/discovery.html")
+  const transferPath = join(fixture.repoRoot, "local_library_output/desktop/state-transfer.html")
   await stat(indexPath)
   await stat(auditPath)
   await stat(pagePath)
   await stat(discoveryPath)
+  await stat(transferPath)
   assert.equal(result.paperCount, 1)
   assert.equal(result.previewCount, 1)
-  assert.equal(result.pageCount, 3)
+  assert.equal(result.pageCount, 4)
   assert.equal((await readFile(indexPath, "utf8")).endsWith("\n"), true)
   assert.equal((await readFile(auditPath, "utf8")).endsWith("\n"), true)
   assert.deepEqual(Object.keys(await readJson(indexPath)).sort(), ["facet_schema", "papers", "version", "warning_count"])
@@ -261,6 +265,32 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
       `approved:${asset}`,
     )
   }
+  assert.equal(
+    await readFile(transferPath, "utf8"),
+    "<!doctype html><html lang=\"zh-CN\"><main id=\"state-transfer-app\"></main></html>",
+  )
+  assert.deepEqual(
+    await Promise.all([
+      "state-transfer.mjs",
+      "direction-snapshot.mjs",
+      "agent-task-input.mjs",
+      "paper-library-storage.mjs",
+      "paper-user-tags.mjs",
+      "candidate-storage.mjs",
+      "paper-library-model.mjs",
+      "styles.css",
+    ].map((fileName) => readFile(join(fixture.repoRoot, "local_library_output/desktop/assets", fileName), "utf8"))),
+    [
+      "approved:state-transfer.mjs",
+      "approved:direction-snapshot.mjs",
+      "approved:agent-task-input.mjs",
+      "approved:paper-library-storage.mjs",
+      "approved:paper-user-tags.mjs",
+      "approved:candidate-storage.mjs",
+      "approved:paper-library-model.mjs",
+      "approved:styles.css",
+    ],
+  )
   assert.deepEqual(
     await readFile(join(fixture.repoRoot, "local_library_output/desktop/assets/paper-user-tags.mjs")),
     await readFile(join(fixture.templateRoot, "paper-user-tags.mjs")),
@@ -462,11 +492,11 @@ test("buildPrivateLibrary emits one safe explicitly approved preferred-note prev
   const preview = await readFile(previewPath, "utf8")
 
   assert.equal(result.previewCount, 1)
-  assert.equal(result.pageCount, 3)
+  assert.equal(result.pageCount, 4)
   assert.equal(index.papers[0].note_preview_url, "../../local_library_data/notes/papera-01/preferred.html")
   assert.equal(preview, "<h1>标题</h1>\n<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n")
   assert.equal(audit.counts.generated_note_previews, 1)
-  assert.equal(audit.counts.generated_pages, 3)
+  assert.equal(audit.counts.generated_pages, 4)
 })
 
 test("buildPrivateLibrary emits fixed controlled previews for reading, derivation, simulation, and code comparison", async () => {
@@ -501,7 +531,7 @@ test("buildPrivateLibrary emits fixed controlled previews for reading, derivatio
     assert.deepEqual(paper.controlled_preview_documents[category], [])
   }
   assert.equal(result.previewCount, 4)
-  assert.equal(result.pageCount, 6)
+  assert.equal(result.pageCount, 7)
   for (const [fileName, heading] of [
     ["preferred.html", "阅读笔记"],
     ["derivation.html", "推导过程"],
@@ -594,7 +624,7 @@ test("buildPrivateLibrary emits every categorized Markdown preview in stable ord
   assert.equal(await readFile(join(fixture.repoRoot, "local_library_data/notes/papera-01/preferred.html"), "utf8"), "<h1>selected note</h1>\n")
   assert.equal(indexText.includes(fixture.sourceRoot), false)
   assert.equal(result.previewCount, 14)
-  assert.equal(result.pageCount, 16)
+  assert.equal(result.pageCount, 17)
 })
 
 test("buildPrivateLibrary skips an in-unit Markdown symlink alias and previews the canonical note once", async () => {
@@ -807,7 +837,7 @@ test("builds one controlled preview for every resolved preferred note", async ()
   const index = await readJson(join(fixture.repoRoot, "local_library_data/paper-index.json"))
 
   assert.equal(result.previewCount, 2)
-  assert.equal(result.pageCount, 4)
+  assert.equal(result.pageCount, 5)
   assert.deepEqual(index.papers.map((paper) => paper.note_status), ["notes_ready", "notes_ready"])
   await stat(join(fixture.repoRoot, "local_library_data/notes/alpha-01/preferred.html"))
   await stat(join(fixture.repoRoot, "local_library_data/notes/beta-01/preferred.html"))

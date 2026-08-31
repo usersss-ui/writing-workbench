@@ -66,6 +66,7 @@ const CONTROLLED_PREVIEW_FILES = Object.freeze({
 })
 const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "styles.css",
+  "state-transfer.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -471,6 +472,13 @@ async function loadApprovedDesktopBundle(repoRoot, templateRoot) {
     missingMessage: "固定论文发现模板不存在",
     invalidMessage: "论文发现模板必须是项目内普通非符号链接文件",
   })
+  const stateTransferTemplateBytes = await loadApprovedDesktopFile({
+    repoRoot,
+    templateRoot: canonicalTemplateRoot,
+    fileName: "state-transfer.html",
+    missingMessage: "固定浏览器状态迁移模板不存在",
+    invalidMessage: "浏览器状态迁移模板必须是项目内普通非符号链接文件",
+  })
   const assets = new Map()
   for (const fileName of REQUIRED_DESKTOP_ASSETS) {
     const bytes = await loadApprovedDesktopFile({
@@ -484,7 +492,7 @@ async function loadApprovedDesktopBundle(repoRoot, templateRoot) {
   }
   const katexAssets = await loadApprovedKaTeXBundle(repoRoot, canonicalTemplateRoot)
   for (const [relativePath, bytes] of katexAssets) assets.set(relativePath, bytes)
-  return { templateBytes, discoveryTemplateBytes, assets }
+  return { templateBytes, discoveryTemplateBytes, stateTransferTemplateBytes, assets }
 }
 
 function cloneArtifactEntry(artifact) {
@@ -998,7 +1006,12 @@ function aggregateWarningCount(audit) {
 
 export async function buildPrivateLibrary({ repoRoot, config, overrides, catalogs = {}, tagCatalog = null, institution, templateRoot, scan = scanPaperSources }) {
   const canonicalRoot = canonicalRepositoryRoot(repoRoot)
-  const { templateBytes, discoveryTemplateBytes, assets: desktopAssets } = await loadApprovedDesktopBundle(canonicalRoot, templateRoot)
+  const {
+    templateBytes,
+    discoveryTemplateBytes,
+    stateTransferTemplateBytes,
+    assets: desktopAssets,
+  } = await loadApprovedDesktopBundle(canonicalRoot, templateRoot)
   const validatedInstitution = validateInstitutionConfig(institution)
   const scanned = await scan({ config, overrides, catalogs })
   const audit = scanned.audit
@@ -1114,7 +1127,7 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
     (total, documents) => total + documents.pdf.length + documents.ocr.length,
     0,
   )
-  audit.counts.generated_pages = 2 + controlledPreviewDocumentCount + [...sourceDocumentsByPaperId.values()].reduce(
+  audit.counts.generated_pages = 3 + controlledPreviewDocumentCount + [...sourceDocumentsByPaperId.values()].reduce(
     (total, documents) => total + documents.ocr.length,
     0,
   )
@@ -1178,6 +1191,7 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
           await mkdir(assetDirectory, { recursive: true })
           await writeFile(join(desktopDirectory, "library.html"), templateBytes)
           await writeFile(join(desktopDirectory, "discovery.html"), discoveryTemplateBytes)
+          await writeFile(join(desktopDirectory, "state-transfer.html"), stateTransferTemplateBytes)
           await writeFile(join(assetDirectory, "nuist.institution.json"), prettyJson(validatedInstitution), "utf8")
           for (const [fileName, bytes] of desktopAssets) {
             const assetPath = join(assetDirectory, fileName)
