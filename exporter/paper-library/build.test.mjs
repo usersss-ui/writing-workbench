@@ -249,7 +249,7 @@ test("buildPrivateLibrary writes only rebuildable outputs and leaves source byte
   await stat(discoveryPath)
   assert.equal(result.paperCount, 1)
   assert.equal(result.previewCount, 1)
-  assert.equal(result.pageCount, 2)
+  assert.equal(result.pageCount, 3)
   assert.equal((await readFile(indexPath, "utf8")).endsWith("\n"), true)
   assert.equal((await readFile(auditPath, "utf8")).endsWith("\n"), true)
   assert.deepEqual(Object.keys(await readJson(indexPath)).sort(), ["facet_schema", "papers", "version", "warning_count"])
@@ -460,11 +460,11 @@ test("buildPrivateLibrary emits one safe explicitly approved preferred-note prev
   const preview = await readFile(previewPath, "utf8")
 
   assert.equal(result.previewCount, 1)
-  assert.equal(result.pageCount, 2)
+  assert.equal(result.pageCount, 3)
   assert.equal(index.papers[0].note_preview_url, "../../local_library_data/notes/papera-01/preferred.html")
   assert.equal(preview, "<h1>标题</h1>\n<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n")
   assert.equal(audit.counts.generated_note_previews, 1)
-  assert.equal(audit.counts.generated_pages, 2)
+  assert.equal(audit.counts.generated_pages, 3)
 })
 
 test("buildPrivateLibrary emits fixed controlled previews for reading, derivation, simulation, and code comparison", async () => {
@@ -499,7 +499,7 @@ test("buildPrivateLibrary emits fixed controlled previews for reading, derivatio
     assert.deepEqual(paper.controlled_preview_documents[category], [])
   }
   assert.equal(result.previewCount, 4)
-  assert.equal(result.pageCount, 5)
+  assert.equal(result.pageCount, 6)
   for (const [fileName, heading] of [
     ["preferred.html", "阅读笔记"],
     ["derivation.html", "推导过程"],
@@ -592,7 +592,7 @@ test("buildPrivateLibrary emits every categorized Markdown preview in stable ord
   assert.equal(await readFile(join(fixture.repoRoot, "local_library_data/notes/papera-01/preferred.html"), "utf8"), "<h1>selected note</h1>\n")
   assert.equal(indexText.includes(fixture.sourceRoot), false)
   assert.equal(result.previewCount, 14)
-  assert.equal(result.pageCount, 15)
+  assert.equal(result.pageCount, 16)
 })
 
 test("buildPrivateLibrary skips an in-unit Markdown symlink alias and previews the canonical note once", async () => {
@@ -805,7 +805,7 @@ test("builds one controlled preview for every resolved preferred note", async ()
   const index = await readJson(join(fixture.repoRoot, "local_library_data/paper-index.json"))
 
   assert.equal(result.previewCount, 2)
-  assert.equal(result.pageCount, 3)
+  assert.equal(result.pageCount, 4)
   assert.deepEqual(index.papers.map((paper) => paper.note_status), ["notes_ready", "notes_ready"])
   await stat(join(fixture.repoRoot, "local_library_data/notes/alpha-01/preferred.html"))
   await stat(join(fixture.repoRoot, "local_library_data/notes/beta-01/preferred.html"))

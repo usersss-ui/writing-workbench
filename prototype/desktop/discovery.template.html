@@ -44,7 +44,7 @@
               <form id="keyword-search-form" class="discovery-form">
                 <label>中文研究意图<textarea id="keyword-query" rows="2">时变有向网络中的低通信分布式约束优化</textarea></label>
                 <label>英文检索式<textarea id="english-query" rows="2" placeholder="生成后可编辑"></textarea></label>
-                <label>排序方式<select id="keyword-sort"><option value="relevance">相关性</option><option value="cited_by_count">引用次数</option><option value="publication_date">发表时间</option></select></label>
+                <label>排序方式<select id="keyword-sort"><option value="relevance">相关性</option><option value="citations">引用次数</option><option value="newest">发表时间</option></select></label>
                 <div class="discovery-form-actions"><button class="button button--secondary" type="submit">生成英文检索式</button><button class="button button--primary" id="keyword-live-search" type="button">搜索 OpenAlex</button></div>
               </form>
               <p id="keyword-search-status" class="discovery-status" role="status" aria-live="polite">尚未向 OpenAlex 发起检索。</p>

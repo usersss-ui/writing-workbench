@@ -49,6 +49,7 @@ test("论文发现页面是中文桌面工作台，并包含可访问的双模�
   assert.match(template, /id="known-paper-panel"[^>]*role="tabpanel"[^>]*hidden/u)
   assert.match(template, /id="english-query"/u)
   assert.match(template, /id="keyword-sort"/u)
+  assert.ok(template.includes('<option value="relevance">相关性</option><option value="citations">引用次数</option><option value="newest">发表时间</option>'))
   assert.match(template, /元数据待核验/u)
   assert.match(template, /不代表已有 PDF 或阅读笔记/u)
   assert.doesNotMatch(template, /<iframe|<embed|<object/u)
@@ -72,7 +73,7 @@ function makeElement({ dataset = {}, attributes = {}, tagName = "div" } = {}) {
     dataset: { ...dataset }, tagName: tagName.toUpperCase(), value: "", textContent: "", hidden: false,
     disabled: false, children: [], options: [], href: "", focusCount: 0,
     addEventListener(type, listener) { listeners.set(type, listener) },
-    dispatch(type) { return listeners.get(type)?.({ preventDefault() {}, currentTarget: this }) },
+    dispatch(type, event = {}) { return listeners.get(type)?.({ preventDefault() {}, currentTarget: this, ...event }) },
     setAttribute(name, value) { attrs.set(name, String(value)) },
     getAttribute(name) { return attrs.get(name) ?? null },
     removeAttribute(name) { attrs.delete(name) },
@@ -121,7 +122,7 @@ function keywordRoot() {
   }
 }
 
-test("关键词控制器切换键盘可达模式、搜索真实结果，并将结果放入待筛选队列", async () => {
+test("关键词控制器切换模式、搜索真实结果，并将结果放入待筛选队列", async () => {
   const root = keywordRoot()
   const calls = []
   const controller = createKeywordDiscoveryController({
@@ -143,6 +144,46 @@ test("关键词控制器切换键盘可达模式、搜索真实结果，并将�
   assert.equal(calls[0].sort, "relevance")
   assert.equal(root.elements.get("[data-live-result-count]").textContent, "1 条真实结果")
   assert.equal(root.elements.get("#keyword-live-results-list").children[0].children[0].textContent, "安全标题")
+})
+
+test("关键词控制器把三种可见排序映射为 OpenAlex 检索契约", async () => {
+  const root = keywordRoot()
+  const calls = []
+  const controller = createKeywordDiscoveryController({
+    root, candidateStore: candidateStore(), prepareAccess() {},
+    searchWorks: async (options) => { calls.push(options); return { total: 0, costUsd: 0, works: [] } },
+  })
+  controller.start()
+  root.elements.get("#english-query").value = "directed optimization"
+  for (const [visibleValue, expectedSort] of [["relevance", "relevance"], ["citations", "citations"], ["newest", "newest"]]) {
+    root.elements.get("#keyword-sort").value = visibleValue
+    await root.elements.get("#keyword-live-search").dispatch("click")
+    assert.equal(calls.at(-1).sort, expectedSort)
+  }
+})
+
+test("模式 Tab 以箭头、Home 和 End 键移动焦点并激活对应面板", () => {
+  const root = keywordRoot()
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(), prepareAccess() {}, searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }) })
+  controller.start()
+
+  root.keywordTab.dispatch("keydown", { key: "ArrowRight" })
+  assert.equal(root.accessTab.focusCount, 1)
+  assert.equal(root.accessTab.getAttribute("aria-selected"), "true")
+  assert.equal(root.elements.get("#known-paper-panel").hidden, false)
+
+  root.accessTab.dispatch("keydown", { key: "ArrowLeft" })
+  assert.equal(root.keywordTab.focusCount, 1)
+  assert.equal(root.keywordTab.getAttribute("aria-selected"), "true")
+  assert.equal(root.elements.get("#keyword-discovery-panel").hidden, false)
+
+  root.keywordTab.dispatch("keydown", { key: "End" })
+  assert.equal(root.accessTab.focusCount, 2)
+  assert.equal(root.accessTab.getAttribute("aria-selected"), "true")
+
+  root.accessTab.dispatch("keydown", { key: "Home" })
+  assert.equal(root.keywordTab.focusCount, 2)
+  assert.equal(root.keywordTab.getAttribute("aria-selected"), "true")
 })
 
 test("机构配置只从固定同源资源读取，并由发现控制器显式处理缺失配置", async () => {

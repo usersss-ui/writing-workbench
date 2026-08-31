@@ -1112,7 +1112,7 @@ export async function buildPrivateLibrary({ repoRoot, config, overrides, catalog
     (total, documents) => total + documents.pdf.length + documents.ocr.length,
     0,
   )
-  audit.counts.generated_pages = 1 + controlledPreviewDocumentCount + [...sourceDocumentsByPaperId.values()].reduce(
+  audit.counts.generated_pages = 2 + controlledPreviewDocumentCount + [...sourceDocumentsByPaperId.values()].reduce(
     (total, documents) => total + documents.ocr.length,
     0,
   )
