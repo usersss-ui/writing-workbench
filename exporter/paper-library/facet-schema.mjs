@@ -24,6 +24,13 @@ export const FACET_GROUPS = Object.freeze(groups.map(([panel, path, label, value
 
 export const FACET_PATHS = Object.freeze(FACET_GROUPS.map(({ path }) => path))
 
+export const FACET_STATE_VALUES = Object.freeze([
+  "unrecorded",
+  "not_applicable",
+  "pending_verification",
+])
+const facetStateValueSet = new Set(FACET_STATE_VALUES)
+
 const rootKeys = Object.freeze(["research", "objective", "constraints", "oracle", "methods", "network", "privacy_robustness", "results", "applications"])
 const leafPaths = new Map(FACET_GROUPS.map(({ path, values }) => [path, new Set(values)]))
 
@@ -43,6 +50,23 @@ function setAtPath(object, path, value) {
     return current[key]
   }, object)
   parent[leaf] = value
+}
+
+export function validateFacetStates(facets, facetStates) {
+  validatePaperFacets(facets)
+  if (!isRecord(facetStates)) throw new TypeError("facet_states 必须是对象")
+  for (const path of Reflect.ownKeys(facetStates)) {
+    if (typeof path !== "string" || !FACET_PATHS.includes(path)) {
+      throw new TypeError("facet_states 路径无效")
+    }
+    if (!facetStateValueSet.has(facetStates[path])) {
+      throw new TypeError("facet_states 状态无效")
+    }
+    if (getAtPath(facets, path).length > 0) {
+      throw new TypeError("facet_states 不能覆盖已有分面值")
+    }
+  }
+  return facetStates
 }
 
 export function createEmptyFacets() {
@@ -83,7 +107,7 @@ export function validatePaperFacets(facets) {
 
 export function serializeFacetSchema() {
   return {
-    version: 1,
+    version: 2,
     groups: FACET_GROUPS.map(({ panel, path, label, values }) => ({ panel, path, label, values: [...values] })),
   }
 }

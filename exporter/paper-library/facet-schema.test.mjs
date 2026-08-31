@@ -3,11 +3,47 @@ import assert from "node:assert/strict"
 import {
   FACET_GROUPS,
   FACET_PATHS,
+  FACET_STATE_VALUES,
   createEmptyFacets,
   flattenFacetValues,
   serializeFacetSchema,
+  validateFacetStates,
   validatePaperFacets,
 } from "./facet-schema.mjs"
+
+test("facet states are sparse and use only the three approved meanings", () => {
+  assert.deepEqual(FACET_STATE_VALUES, ["unrecorded", "not_applicable", "pending_verification"])
+  const facets = createEmptyFacets()
+  const states = {
+    applications: "not_applicable",
+    results: "pending_verification",
+    "network.time": "unrecorded",
+  }
+  assert.equal(validateFacetStates(facets, states), states)
+})
+
+test("facet states reject unknown paths, unknown states, and non-objects", () => {
+  const facets = createEmptyFacets()
+  assert.throws(() => validateFacetStates(facets, []), /facet_states 必须是对象/u)
+  assert.throws(() => validateFacetStates(facets, { "research.unknown": "unrecorded" }), /facet_states 路径无效/u)
+  assert.throws(() => validateFacetStates(facets, { results: "waiting" }), /facet_states 状态无效/u)
+  const hidden = {}
+  Object.defineProperty(hidden, "private", { value: "unrecorded", enumerable: false })
+  assert.throws(() => validateFacetStates(facets, hidden), /facet_states 路径无效/u)
+})
+
+test("a populated facet cannot also carry an empty-value state", () => {
+  const facets = createEmptyFacets()
+  facets.results = ["线性收敛"]
+  assert.throws(
+    () => validateFacetStates(facets, { results: "pending_verification" }),
+    /facet_states 不能覆盖已有分面值/u,
+  )
+})
+
+test("serialized facet schema announces empty-state support", () => {
+  assert.equal(serializeFacetSchema().version, 2)
+})
 
 test("facet schema exposes unique orthogonal paths", () => {
   assert.equal(new Set(FACET_PATHS).size, FACET_PATHS.length)
@@ -86,7 +122,7 @@ test("facet validation returns the original object and schema serialization is d
 
   const serialized = serializeFacetSchema()
   assert.deepEqual(Object.keys(serialized), ["version", "groups"])
-  assert.equal(serialized.version, 1)
+  assert.equal(serialized.version, 2)
   assert.deepEqual(serialized.groups, FACET_GROUPS)
   assert.notEqual(serialized.groups, FACET_GROUPS)
   assert.notEqual(serialized.groups[0], FACET_GROUPS[0])
