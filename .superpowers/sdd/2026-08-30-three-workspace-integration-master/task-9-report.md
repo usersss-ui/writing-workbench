@@ -12,7 +12,10 @@
 - Checkpoint 5: `2feab98` (`feat(paper-library): complete note import workflow`).
 - Independent-review hardening: `0d16483` (`fix(paper-library): harden note import boundaries`).
 - Second-review syntax and response hardening: `24286cf` (`fix(paper-library): validate canonical note syntax`).
-- Implementation head before this report update: `24286cf`.
+- Blank-block reset: `90089af` (`fix(paper-library): reset code spans at blank blocks`).
+- Markdown-block segmentation: `8257649` (`fix(paper-library): segment code spans by Markdown blocks`).
+- Leaf-block segmentation: `80a4572` (`fix(paper-library): bound code spans at leaf blocks`).
+- Implementation head before this report update: `80a4572`.
 
 ## RED/GREEN evidence
 
@@ -73,20 +76,28 @@
 - Import responses now accept only the exact NFKC canonical requested basename or the server-generated `_vN` form for `2 <= N <= 99999`. The matcher covers 10–19 and higher integers, preserves the requested `.md` extension casing, and rejects leading zeroes, extension-case drift, arbitrary suffixes, and versions outside the server loop.
 - LaTeX inspection now removes exact-length variable-backtick code spans across non-fenced line breaks, keeps escaped prose openers visible, treats backslashes inside code as ordinary content, preserves removed-span newlines, and closes fences only with the same marker character and at least the opener length.
 
+### Final-review Markdown block segmentation
+
+- Blank-boundary RED: the focused command discovered 3 tests with 0 passed and 3 failed because both single- and double-backtick spans crossed empty or whitespace-only block separators.
+- Core-block RED: the next focused command discovered 8 tests with 0 passed and 8 failed across ATX headings, blockquotes, unordered and ordered lists, setext headings, thematic breaks, and indented blocks, including the nested rollup.
+- Leaf/table RED: after the core cases passed, the expanded focused command discovered 12 tests with 7 passed and 5 failed. HTML-like lines, link-reference definitions, leading-pipe table rows, and GFM delimiter rows remained unsegmented, plus the nested rollup.
+- Combined GREEN: the ordinary soft-line, blank-line, and recognized-block governing command passed 18/18.
+- Inline code remains allowed across ordinary paragraph soft line breaks, but blank/whitespace-only lines, fences, conservative core block starters, HTML-like lines, link-reference definitions, and common GFM table boundaries flush the current inline segment. This fail-closed boundary prevents an unmatched opener in one block from hiding a real unbalanced formula in the next block without introducing a Markdown renderer dependency.
+
 ## Final verification
 
 - Required focused suite:
   `node --test exporter/paper-library/runtime.test.mjs exporter/paper-library/note-import.test.mjs exporter/paper-library/note-import-transaction.test.mjs prototype/desktop/paper-library-dom.test.mjs`
-  exited 0 with 162 passed and 0 failed.
+  exited 0 with 177 passed and 0 failed.
 - Coordinator suite:
   `node --test exporter/paper-library/write-coordinator.test.mjs`
   exited 0 with 11 passed and 0 failed.
 - Required aggregate:
   `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs`
-  discovered 484 tests and exited 1 with 483 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
+  discovered 499 tests and exited 1 with 498 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
 - Aggregate excluding the package-policy test:
   `zsh -o extendedglob -o pipefail -c 'node --test exporter/paper-library/^package-audit.test.mjs prototype/desktop/*.test.mjs 2>&1 | tail -30'`
-  exited 0 with 469 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
+  exited 0 with 484 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
 - Syntax checks passed independently for `runtime.mjs`, `note-import.mjs`, `library.mjs`, and `paper-inspector.mjs` using `node --check`.
 - `git diff --check` and `git diff --check 7013fc2..HEAD` both passed with no output.
 
