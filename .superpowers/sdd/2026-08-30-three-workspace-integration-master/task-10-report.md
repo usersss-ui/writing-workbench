@@ -4,7 +4,8 @@
 
 - 基线：`469b62b`
 - 功能提交：`42f553fb633ceadbb3724965655b4655688eb1b7`
-- 质量修复提交：`d96c89dcba6d88a03e04f217142f0f81bc1c9ff7`
+- 质量修复轮 1 提交：`d96c89dcba6d88a03e04f217142f0f81bc1c9ff7`
+- 质量修复轮 2 提交：`94c7e428e52ccaeb630fc5b4e698f8217e4c64c9`
 - 实现一个仅绑定 `127.0.0.1` 的本地服务，生产端口固定为 `4176`，测试只使用端口 `0`。
 - 路由表严格限定为六条 API；API query、旧路由、未知路由、OPTIONS 和方法不匹配均为 404。
 - `/` 仅在无 query 时 302 到 `/local_library_output/desktop/library.html`。
@@ -60,7 +61,7 @@ node --test exporter/paper-library/write-coordinator.test.mjs exporter/paper-lib
 - 静态读取锚定 canonical ordinary repo root；mapped root 的末端/中间 symlink、外部 realpath 和 repo alias 均 404。文件以 `O_NOFOLLOW` handle 读取，并在读取前后复核 handle/路径/root/repo 的 identity、size 与 realpath。
 - body 超限立即移除本模块 data/end/error listener、暂停 request、固定返回 413 并关闭该连接；大量尾部不再被应用消费，另一独立请求继续正常返回。Node 自身 `clearIncoming` listener 保留。
 
-质量修复后的 Step 8 精确命令结果：exit 0，85 tests / 85 pass / 0 fail。当前组成如下：
+质量修复轮 1 后的 Step 8 精确命令结果：exit 0，85 tests / 85 pass / 0 fail。该轮组成如下：
 
 - write coordinator：12 tests
 - runtime：4 tests
@@ -71,6 +72,33 @@ node --test exporter/paper-library/write-coordinator.test.mjs exporter/paper-lib
 
 修复轮仅修改 `candidate-archive.mjs`、`candidate-archive.test.mjs`、`candidate-archive-action.mjs`、`candidate-archive-action.test.mjs`、`local-server.mjs`、`local-server.test.mjs`；没有新增 startup post-publish validation，也没有触碰 `build.mjs` 或 Task 11 客户端。
 
+## 质量修复轮 2
+
+### RED
+
+- verifier 用例在第二轮、最后一次 commit open 前原位等长改写 metadata，先稳定复现 `Missing expected rejection`：0 pass / 1 fail。
+- action 用例在 post-build 终验的最后一次 commit open 前执行同一改写，先稳定复现 `Missing expected rejection`：0 pass / 1 fail；旧实现会继续 recovered 并清除两层 recovery 状态。
+- process-private proof 的 metadata/commit 纳秒 mtime/ctime 断言先因字段为 `undefined` 失败，证明时间状态此前没有进入 proof。
+- `O_NOFOLLOW` 是已有正确实现，因此使用明确 mutation RED：新增 injected-open flags 测试在原实现 1/1 pass；临时 mutant 删除 `io.noFollowFlag` 后稳定 0/1，实际 flags 位为 0、预期为 256；立即恢复产品行后重新 1/1 pass。原 terminal-swap 用例保留。
+
+### GREEN
+
+- proof 现在记录 metadata 与 commit 的 identity、size、SHA-256，以及优先取 bigint nanoseconds 的 mtime/ctime；恢复时 lexical stat、open handle 读取前后 stat 均与 proof 比较。
+- 每一轮内容验证后都执行 group-end：重新核验 canonical source root、package identity/stat、精确 member set，再按 commit → metadata 顺序复核两文件 identity/size/mtime/ctime，从而捕获最后一次 commit 内容读取期间对 metadata 的原位等长改写。
+- `rebuildArchivedCandidate` 的 pre-build 与 post-build verifier 共用相同受控文件系统边界；post-build 终验不通过时返回固定 conflict，`clearRecovery` 为 0 次且 process-private store 保留。
+- 该修复覆盖所有被测的验证内部交错；不声称消除同权限写者在完整验证结束后的理论 nanorace。没有新增 startup post-publish validation，也没有修改 Task 11。
+
+修复轮 2 后的 Step 8 精确命令结果：exit 0，88 tests / 88 pass / 0 fail。当前组成如下：
+
+- write coordinator：12 tests
+- runtime：4 tests
+- note import transaction：17 tests（含 4 个嵌套 schema boundary 子测试）
+- candidate archive：24 tests
+- candidate archive action：11 tests
+- local server/CLI/integration：20 tests
+
+修复轮 2 的永久代码 diff 仅含 `candidate-archive.mjs`、`candidate-archive.test.mjs`、`candidate-archive-action.mjs`、`candidate-archive-action.test.mjs` 与 `local-server.test.mjs`；`local-server.mjs` 仅用于临时 mutation RED，恢复后没有该轮产品 diff。
+
 ## 协调、归档与恢复
 
 - note import、candidate archive 和 archive rebuild 共用 Task 8 coordinator；第二项写入即时 409，不排队。
@@ -78,8 +106,8 @@ node --test exporter/paper-library/write-coordinator.test.mjs exporter/paper-lib
 - 完整扫描要求 `audit.sources` 与配置 source ID/root 一一精确覆盖，且 `scanned_directories` 为正整数；scanner blocking 项仍阻断，warning 不会全局阻断归档。
 - 归档保留 Task 5 的最终文件 `O_EXCL` 与 `.metadata.commit`，没有 rename rollback。
 - 构建失败保留已提交 package 和 last-good data/output，并进入 `candidate_archive / ARCHIVE_REBUILD_FAILED`。
-- 新增 process-private recovery proof：归档提交后立即捕获 source/package identity、精确目录成员，以及 metadata/commit 的 dev、ino、size、SHA-256 与复合身份；只有 rebuild 失败时保存在进程内，不进入 coordinator、capabilities、HTTP 或 logger。
-- recovery 先验证请求 tuple、当前扫描与私有 proof，再重建；rebuild 返回合法计数后、clear 前再次完整验证。metadata+commit 同时重写并重哈希、inode replacement、root/package replacement、额外文件、tuple mismatch、fresh empty store 或 rebuild 期间篡改均拒绝且不清 recovery；未篡改恢复成功且终验通过后才清除。
+- 新增 process-private recovery proof：归档提交后立即捕获 source/package identity、精确目录成员，以及 metadata/commit 的 dev、ino、size、SHA-256、纳秒 mtime/ctime 与复合身份；只有 rebuild 失败时保存在进程内，不进入 coordinator、capabilities、HTTP 或 logger。
+- recovery 先验证请求 tuple、当前扫描与私有 proof，再重建；rebuild 返回合法计数后、clear 前再次完整验证并执行 group-end stat/member 复核。metadata+commit 同时重写并重哈希、inode replacement、root/package replacement、额外文件、tuple mismatch、fresh empty store、rebuild 期间篡改或终验最后内容读取窗口内的原位改写均拒绝且不清 recovery；未篡改恢复成功且终验通过后才清除。
 
 ## 必要的计划修复
 
@@ -93,7 +121,7 @@ controller 将 Task 10 边界明确扩展到 `write-coordinator.mjs` 与对应�
 - 未加载真实 `local_library_config`，未运行真实配置 build，未写真实论文源、真实笔记、private/generated/live output。
 - 未启动或停止 4176/4177/4178；HTTP 测试全部监听 `127.0.0.1:0`，CLI 仅通过依赖注入和 import-safe guard 测试。
 - 预存未跟踪 `audits/`、`tmp/` 始终保持未跟踪，未纳入 diff/提交。
-- 首轮全部 10 个实际变更 `.mjs` 与修复轮 6 个变更 `.mjs` 均已通过 `node --check`。
+- 首轮全部 10 个实际变更 `.mjs`、修复轮 1 的 6 个变更 `.mjs` 与修复轮 2 的 5 个变更 `.mjs` 均已通过 `node --check`。
 - `git diff --check` 与 staged `git diff --cached --check` 均通过。
 - staged 边界仅含 Task 10 列出的文件，以及 controller 明确批准扩展的 coordinator 两文件；未修改 `build.mjs`、真实内容、donor worktree 或 GitHub manifests。
 
