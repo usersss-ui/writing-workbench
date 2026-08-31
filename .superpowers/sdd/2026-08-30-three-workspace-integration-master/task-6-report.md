@@ -46,3 +46,11 @@ Only the Task 6 listed production/test/navigation/style files were committed. Th
 
 - The checked-in public institution descriptor is validated during runtime loading and again by the builder before emission. The browser reads only that fixed same-origin public asset; it performs a small shape check because the browser bundle intentionally remains limited to the four approved modules.
 - Real local-config builds and visual/browser acceptance are intentionally deferred by the master plan; temporary-root build tests cover generated discovery output and the public institution asset.
+
+## Fix round 1 — search, keyboard, and runtime-output closure
+
+- Fix code HEAD: `de28d872b744e18808f48c557e3d167d84b58a85` (`fix: align discovery search and runtime output`).
+- Root causes: the template used OpenAlex-incompatible `cited_by_count` and `publication_date` values; the controller installed only click listeners; and generated-page accounting still counted only `library.html` despite emitting `discovery.html`. The prior runtime test also stopped at a mocked builder call.
+- RED: `node --test prototype/desktop/discovery-dom.test.mjs exporter/paper-library/runtime.test.mjs exporter/paper-library/build.test.mjs` failed with the two wrong sort values, no keyboard focus movement, and `pageCount` one lower than the generated two-page desktop surface (8 failing assertions/tests in total).
+- GREEN: the expanded required suite passed `102/102`: discovery DOM, desktop pages, build, runtime, institution config, OpenAlex, and institution-access tests. `node --check` passed for discovery/build/runtime/build CLI and `git diff --check` passed.
+- Added behavior coverage for all three visible sort values (`relevance`, `citations`, `newest`), ArrowLeft/ArrowRight/Home/End roving tabs with focus/panel/ARIA state, and a real temporary-root `rebuildConfiguredLibrary` run that asserts discovery output, resource union including KaTeX, validated NUIST asset, private-path absence, and the corrected two-page baseline.
