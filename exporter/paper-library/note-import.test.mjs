@@ -193,6 +193,34 @@ test("does not let an inline code span cross a recognizable Markdown block bound
   }
 })
 
+test("does not let an inline code span cross a display-math block boundary", async (t) => {
+  const cases = [
+    ["single-line dollars", "`code starts\n$$x$$\n$unclosed\n`"],
+    ["multiline dollars", "``code starts\n$$\nx\n$$\n$unclosed\n``"],
+    ["bracket display", "`code starts\n\\[\nx\n\\]\n$unclosed\n`"],
+  ]
+  for (const [name, markdown] of cases) {
+    await t.test(name, async () => {
+      const result = await inspect({ markdown })
+      assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), true)
+    })
+  }
+})
+
+test("isolates no-leading-pipe GFM rows after a delimiter row", async () => {
+  const result = await inspect({
+    markdown: [
+      "heading | other",
+      "--- | ---",
+      "`code starts | value",
+      "$unclosed | value",
+      "` | end",
+    ].join("\n"),
+  })
+
+  assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), true)
+})
+
 test("keeps a longer backtick fence open across a shorter backtick line", async () => {
   const result = await inspect({
     markdown: [

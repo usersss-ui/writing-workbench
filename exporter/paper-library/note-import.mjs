@@ -138,19 +138,28 @@ function closesFence(line, fence) {
   return match !== null && match[1][0] === fence.marker && match[1].length >= fence.length
 }
 
+function isGfmDelimiterRow(line) {
+  const match = /^ {0,3}(.+)$/u.exec(line)
+  if (!match || !match[1].includes("|")) return false
+  const cells = match[1].replace(/^\|/u, "").replace(/\|[ \t]*$/u, "").split("|")
+  return cells.length > 0 && cells.every((cell) => /^[ \t]*:?-{3,}:?[ \t]*$/u.test(cell))
+}
+
 function beginsMarkdownBlock(line) {
   return /^(?: {4}|\t)/u.test(line)
     || /^ {0,3}(?:#{1,6}(?:[ \t]+|$)|>|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))/u.test(line)
     || /^ {0,3}(?:=+[ \t]*|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/u.test(line)
+    || /^ {0,3}(?:\$\$|\\\[|\\\])/u.test(line)
     || /^ {0,3}</u.test(line)
     || /^ {0,3}\[[^\]]+\]:/u.test(line)
     || /^ {0,3}\|/u.test(line)
-    || /^ {0,3}:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/u.test(line)
+    || isGfmDelimiterRow(line)
 }
 
 function withoutCode(markdown) {
   const lines = markdown.split(/\r?\n/u)
   let fence = null
+  let inGfmTable = false
   const visible = []
   let inlineLines = []
   const flushInlineLines = () => {
@@ -166,15 +175,31 @@ function withoutCode(markdown) {
     }
     if (/^[ \t]*$/u.test(line)) {
       flushInlineLines()
+      inGfmTable = false
       visible.push("")
       continue
     }
     const opener = openingFence(line)
     if (opener !== null) {
       flushInlineLines()
+      inGfmTable = false
       fence = opener
       visible.push("")
       continue
+    }
+    if (isGfmDelimiterRow(line)) {
+      flushInlineLines()
+      inGfmTable = true
+      visible.push(inlineCodeRemoved(line))
+      continue
+    }
+    if (inGfmTable) {
+      if (line.includes("|")) {
+        flushInlineLines()
+        visible.push(inlineCodeRemoved(line))
+        continue
+      }
+      inGfmTable = false
     }
     if (beginsMarkdownBlock(line)) {
       flushInlineLines()
