@@ -16,7 +16,8 @@
 - Markdown-block segmentation: `8257649` (`fix(paper-library): segment code spans by Markdown blocks`).
 - Leaf-block segmentation: `80a4572` (`fix(paper-library): bound code spans at leaf blocks`).
 - Display/table segmentation: `9cae5e6` (`fix(paper-library): isolate display and table blocks`).
-- Implementation head before this report update: `9cae5e6`.
+- Renderer display alignment: `ef2c817` (`fix(paper-library): align display math boundaries`).
+- Implementation head before this report update: `ef2c817`.
 
 ## RED/GREEN evidence
 
@@ -83,23 +84,24 @@
 - Core-block RED: the next focused command discovered 8 tests with 0 passed and 8 failed across ATX headings, blockquotes, unordered and ordered lists, setext headings, thematic breaks, and indented blocks, including the nested rollup.
 - Leaf/table RED: after the core cases passed, the expanded focused command discovered 12 tests with 7 passed and 5 failed. HTML-like lines, link-reference definitions, leading-pipe table rows, and GFM delimiter rows remained unsegmented, plus the nested rollup.
 - Display/table-state RED: the final focused command discovered 5 tests with 0 passed and 5 failed. Single- and multiline `$$` blocks, bracket display math, and no-leading-pipe rows after a GFM delimiter were still swallowed by a prior unmatched code-span opener.
-- Combined GREEN: the ordinary soft-line, blank-line, recognized-block, display-math, and table-state governing command passed 23/23.
-- Inline code remains allowed across ordinary paragraph soft line breaks, but blank/whitespace-only lines, fences, conservative core block starters, HTML-like lines, link-reference definitions, display-math starters, and common GFM table boundaries flush the current inline segment. After a GFM delimiter, each consecutive pipe-containing row is isolated until a non-pipe, blank, or fenced line ends the conservative table state. These fail-closed boundaries prevent an unmatched opener in one block or row from hiding a real unbalanced formula later without introducing a Markdown renderer dependency.
+- Renderer-alignment RED: after the line-start display cases passed, the display-focused command discovered 5 tests with 3 passed and 2 failed because an in-paragraph `prefix $$x$$ suffix` expression and its nested rollup still crossed a prior unmatched code-span opener.
+- Combined GREEN: the ordinary soft-line, blank-line, recognized-block, display-math, and table-state governing command passed 24/24.
+- Inline code remains allowed across ordinary paragraph soft line breaks, but blank/whitespace-only lines, fences, conservative core block starters, HTML-like lines, link-reference definitions, unescaped `$$` anywhere on a line, line-start bracket display math, and common GFM table boundaries flush the current inline segment. This matches the preview renderer's in-paragraph `$$` contract without inventing in-paragraph bracket-display behavior. After a GFM delimiter, each consecutive pipe-containing row is isolated until a non-pipe, blank, or fenced line ends the conservative table state. These fail-closed boundaries prevent an unmatched opener in one block or row from hiding a real unbalanced formula later without introducing a Markdown renderer dependency.
 
 ## Final verification
 
 - Required focused suite:
   `node --test exporter/paper-library/runtime.test.mjs exporter/paper-library/note-import.test.mjs exporter/paper-library/note-import-transaction.test.mjs prototype/desktop/paper-library-dom.test.mjs`
-  exited 0 with 182 passed and 0 failed.
+  exited 0 with 183 passed and 0 failed.
 - Coordinator suite:
   `node --test exporter/paper-library/write-coordinator.test.mjs`
   exited 0 with 11 passed and 0 failed.
 - Required aggregate:
   `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs`
-  discovered 504 tests and exited 1 with 503 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
+  discovered 505 tests and exited 1 with 504 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
 - Aggregate excluding the package-policy test:
   `zsh -o extendedglob -o pipefail -c 'node --test exporter/paper-library/^package-audit.test.mjs prototype/desktop/*.test.mjs 2>&1 | tail -30'`
-  exited 0 with 489 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
+  exited 0 with 490 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
 - Syntax checks passed independently for `runtime.mjs`, `note-import.mjs`, `library.mjs`, and `paper-inspector.mjs` using `node --check`.
 - `git diff --check` and `git diff --check 7013fc2..HEAD` both passed with no output.
 
