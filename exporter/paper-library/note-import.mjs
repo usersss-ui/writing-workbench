@@ -142,6 +142,10 @@ function beginsMarkdownBlock(line) {
   return /^(?: {4}|\t)/u.test(line)
     || /^ {0,3}(?:#{1,6}(?:[ \t]+|$)|>|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))/u.test(line)
     || /^ {0,3}(?:=+[ \t]*|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/u.test(line)
+    || /^ {0,3}</u.test(line)
+    || /^ {0,3}\[[^\]]+\]:/u.test(line)
+    || /^ {0,3}\|/u.test(line)
+    || /^ {0,3}:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/u.test(line)
 }
 
 function withoutCode(markdown) {

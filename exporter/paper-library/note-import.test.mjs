@@ -180,6 +180,10 @@ test("does not let an inline code span cross a recognizable Markdown block bound
     ["setext heading", "`code starts\nHeading $unclosed\n---\n`"],
     ["thematic break", "``code starts\n***\n$unclosed\n``"],
     ["indented code", "`code starts\n    $unclosed\n`"],
+    ["HTML block", "``code starts\n<div>$unclosed</div>\n``"],
+    ["link reference", "`code starts\n[label]: https://example.test/$unclosed\n`"],
+    ["leading-pipe table", "`code starts\n| h $unclosed |\n| --- |\n`"],
+    ["pipe-delimited table", "``code starts\nh $unclosed | h2\n--- | ---\n``"],
   ]
   for (const [name, markdown] of cases) {
     await t.test(name, async () => {
