@@ -643,7 +643,12 @@ function recoveryBody(value) {
     || typeof body.openalex_id !== "string"
     || !/^W[1-9]\d*$/u.test(body.openalex_id)
   ) throw requestError("INVALID_REQUEST")
-  return body
+  return Object.freeze({
+    confirmation: body.confirmation,
+    archive_source_id: body.archive_source_id,
+    paper_id: body.paper_id,
+    openalex_id: body.openalex_id,
+  })
 }
 
 export function createPrivateLibraryRequestHandler({

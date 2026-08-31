@@ -1,6 +1,6 @@
 # 私有论文库桌面工作台
 
-这是一个桌面端、纯静态的论文库工作台原型。它把外部论文阅读资料与“我的论文”写作任务分开：源论文目录始终按只读方式扫描，生成的数据与页面只写入本项目的本地生成目录。当前版本没有数据库，也没有接入 Quartz。
+这是一个桌面端论文库工作台原型，由静态生成页和仅监听本机的 Node 服务组成，不使用数据库。它把外部论文阅读资料与“我的论文”写作任务分开：源论文目录默认只读扫描，生成的数据与页面只写入本项目的本地生成目录；只有用户明确确认的笔记导入、候选归档与恢复操作会经过受控本机 API 写入指定资料包。当前版本没有接入 Quartz。
 
 ## 第一次本地构建
 
@@ -29,10 +29,10 @@
    node exporter/scripts/build-private-library.mjs
    ```
 
-5. 只监听本机回环地址启动静态服务器：
+5. 启动本地论文库服务。它只监听本机回环地址 `127.0.0.1:4176`，并会在监听前重新构建：
 
    ```bash
-   python3 -m http.server 4176 --bind 127.0.0.1
+   node exporter/scripts/serve-private-library.mjs
    ```
 
 6. 在浏览器打开：
@@ -119,4 +119,87 @@ GitHub 打包审计只验证 `exporter/config/github-package-files.json` 中列�
 2. 公开或私有；
 3. 许可证。
 
-本次工作没有创建 Git 仓库、压缩包或远程仓库，没有提交或推送代码，也没有进行 Quartz 集成或部署。创建远程、推送、Quartz 集成和公开部署都需要另行确认。
+本次工作只在当前本地工作分支保留了可审查、可回退的提交；没有创建压缩包或远程 GitHub 仓库，没有推送代码，也没有进行 Quartz 集成或公开部署。创建远程、推送、Quartz 集成和公开部署都需要另行确认。
+
+## 本地运行、恢复与受控迁移
+
+### 日常构建、启动、停止与回退
+
+以下是日常操作，不会迁移旧端口的浏览器状态，也不应占用或停止其他服务。先在一个终端构建，再在另一个终端保持服务运行：
+
+```bash
+node exporter/scripts/build-private-library.mjs
+node exporter/scripts/serve-private-library.mjs
+```
+
+服务地址固定为 `http://127.0.0.1:4176/local_library_output/desktop/library.html`。停止时，在运行服务的终端按 `Ctrl-C`；若必须由另一个终端停止，先核对 PID、命令与工作目录，再只对该 PID 发送正常终止信号：
+
+```bash
+lsof -nP -iTCP:4176 -sTCP:LISTEN
+ps -ww -p <validated-pid> -o pid=,ppid=,command=
+lsof -a -p <validated-pid> -d cwd -Fn
+kill -TERM <validated-pid>
+```
+
+构建或服务启动失败时，不要删除已有生成物，也不要覆盖论文源目录；修正本机配置后重新运行构建即可。构建采用最后一次成功输出作为保护：归档后的重建失败会保留上一次可用的 `local_library_data/` 与 `local_library_output/`。若需要回到上一次正在运行的旧服务，只能按预先记录的命令和工作目录重新启动该服务；不要使用 `kill -9`，也不要把“停止所有 4176 服务”当作日常回退。
+
+### 多来源与归档目标
+
+`library.local.json` 的 `sources` 可列出多个互不重叠的论文根目录；每个根目录都要有稳定且唯一的 `source_id`。可选的 `catalog_path` 是与该来源关联的目录文件路径；配置时它必须是绝对路径，但不要求位于论文根目录内。`archive_source_id` 必须精确指定其中一个来源，只有这个来源接收候选论文归档。下面仅为占位示例，替换为自己的本机路径，不要把真实路径提交到仓库：
+
+```json
+{
+  "version": 1,
+  "archive_source_id": "primary_papers",
+  "sources": [
+    {
+      "source_id": "primary_papers",
+      "path": "REPLACE_WITH_ABSOLUTE_PATH",
+      "catalog_path": null
+    },
+    {
+      "source_id": "reference_papers",
+      "path": "REPLACE_WITH_ANOTHER_ABSOLUTE_PATH",
+      "catalog_path": "REPLACE_WITH_ANOTHER_CATALOG_PATH"
+    }
+  ]
+}
+```
+
+扫描默认只读。候选归档只有在用户明确确认后，才会在 `archive_source_id` 对应来源排他新建一份带提交标记的元数据资料包；它不会批量移动、改名或覆盖已有论文。
+
+### “待核验”与 `metadata-only`
+
+“待核验”是正式研究画像某个分面由人工明确标记为尚未核实，表示现在没有足够证据下结论；它既不等于“不适用”，也不等于论文没有相关内容。`metadata-only` 是已归档候选只有题名、作者、来源、标识符等可追溯元数据，尚无受控 PDF、OCR 或笔记预览的状态。它同样不是“已读完”或“已纳入论文证据”。
+
+正确顺序是先归档 `metadata-only` 候选以保留稳定论文 ID，之后在同一论文记录下补充 PDF，并通过“添加笔记”导入受控 Markdown/预览。补充材料会丰富同一条记录，而不是创建一条看似相同的新论文；在证据没有核实前，相关分面仍应保持“待核验”或“未记录”。
+
+### 归档恢复与静态只读回退
+
+归档、笔记导入和恢复重建共用一个写入协调器。出现“需要恢复”横幅时，普通写入会被拒绝；不要重复点击归档或手改生成目录。保留原资料包不动，核对横幅显示的固定 `archive_source_id`、`paper_id` 与 `openalex_id` 后点击“恢复重建”。恢复会先核验归档资料包身份和完整性，重建成功才解除锁定；身份不匹配、资料包被改动或重建再次失败都会继续拒绝写入并保留最后一次成功输出。
+
+当 Node 服务暂时不能运行、且只需要浏览已经生成的内容时，可使用静态只读回退：
+
+```bash
+python3 -m http.server 4176 --bind 127.0.0.1
+```
+
+它只适合查看、筛选以及既有 PDF/OCR/预览；“添加笔记”、候选归档、恢复重建和复制原始路径均不可用。该临时静态服务器没有 Node 服务的精确资源白名单，只能绑定 `127.0.0.1`，不得改成局域网或公网地址。先停止任何已核验的 4176 监听者，避免端口冲突；回到完整功能时停止该 Python 服务，再运行 `node exporter/scripts/serve-private-library.mjs`。
+
+### 浏览器本地状态备份与 Task 15 迁移
+
+个人标签保存在浏览器的 localStorage；方向、书架角色、阅读状态、候选和 Agent 输入快照也属于浏览器来源状态。日常情况下，使用页面的“导出标签”或 `http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html` 导出 JSON，并把文件保存在私有位置。个人标签导入只合并已知论文并统计跳过的未知论文；完整状态包则先生成预览，再要求用户对每个状态 owner 的冲突作出显式决定。两种导入都严格校验，也都不会自动删除原备份。
+
+旧端口（4176、4177、4178）的导出/导入不是日常启动步骤，只能在 **Task 15 受控切换** 中执行：先记录每个旧进程的 PID、命令、cwd 与重启命令；再针对当前要迁移的那个端口，临时运行下列三个命令之一：
+
+```bash
+node exporter/scripts/serve-state-transfer.mjs --port 4176
+node exporter/scripts/serve-state-transfer.mjs --port 4177
+node exporter/scripts/serve-state-transfer.mjs --port 4178
+```
+
+打开该旧端口的 `http://127.0.0.1:<port>/state-transfer.html`，导出 JSON 并记录 SHA-256；确认端口释放后启动最终 Node 服务，再在 `http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html` 逐份预览、核对摘要并按每个状态 owner 显式处理冲突后导入。任何导出、校验、端口所有权或最终服务检查失败，都停止本次切换启动的进程、按已记录命令恢复旧服务，并保留 JSON 与摘要，不进行静默跨源复制。
+
+### GitHub 包边界
+
+GitHub 候选包的 124 项固定清单只包含程序、页面模板、测试（包括六个只使用临时根目录的 Task 14 E2E 源文件）、脱敏示例、README 和获许可的 KaTeX 静态资源；打包器必须逐文件读取 `exporter/config/github-package-files.json`，不得用目录通配符或整体复制项目根目录。真实论文、PDF、OCR、全文翻译、深度阅读笔记、仿真结果、本机 `local_library_config/`、`local_library_data/`、`local_library_output/`、浏览器导出的状态 JSON、审计和截图均不在公开包内。运行 `node exporter/scripts/audit-github-package.mjs` 只能检查候选边界，不能替代人工确认公开范围。

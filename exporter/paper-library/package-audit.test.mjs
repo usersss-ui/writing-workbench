@@ -67,6 +67,7 @@ const EXPECTED_FILES = [
   "exporter/paper-library/status.test.mjs",
   "exporter/paper-library/tag-catalog.mjs",
   "exporter/paper-library/tag-catalog.test.mjs",
+  "exporter/paper-library/unified-local-server.e2e.test.mjs",
   "exporter/paper-library/write-coordinator.mjs",
   "exporter/paper-library/write-coordinator.test.mjs",
   "exporter/scripts/audit-github-package.mjs",
@@ -75,6 +76,11 @@ const EXPECTED_FILES = [
   "exporter/scripts/serve-private-library.mjs",
   "exporter/scripts/serve-state-transfer.mjs",
   "exporter/scripts/serve-state-transfer.test.mjs",
+  "exporter/verification/institution_access_e2e.py",
+  "exporter/verification/integrated-server-fixture.mjs",
+  "exporter/verification/integrated-server-fixture.test.mjs",
+  "exporter/verification/private_library_e2e.py",
+  "exporter/verification/workbench_integration_e2e.py",
   "prototype/desktop/README.md",
   "prototype/desktop/agent-task-input.mjs",
   "prototype/desktop/agent-task-input.test.mjs",
@@ -189,7 +195,7 @@ const TASK_13_NET_NEW_FILES = Object.freeze([
   "prototype/desktop/state-transfer.test.mjs",
 ])
 
-const TASK_14_DEFERRED_FILES = Object.freeze([
+const TASK_14_E2E_FILES = Object.freeze([
   "exporter/paper-library/unified-local-server.e2e.test.mjs",
   "exporter/verification/institution_access_e2e.py",
   "exporter/verification/integrated-server-fixture.mjs",
@@ -377,24 +383,33 @@ async function collectGeneratedPageSourceClosure(templatePath) {
   }
 }
 
-test("keeps the manifest and both independent policies at the exact lexical 118-file Task 13 union", async () => {
+test("keeps the manifest and both independent policies at the exact lexical 124-file Task 14 union", async () => {
   const manifest = JSON.parse(await readFile(new URL("../config/github-package-files.json", import.meta.url), "utf8"))
-  assert.equal(EXPECTED_FILES.length, 118)
+  assert.equal(EXPECTED_FILES.length, 124)
   assert.equal(TASK_13_NET_NEW_FILES.length, 43)
   assert.deepEqual(TASK_13_NET_NEW_FILES, [...TASK_13_NET_NEW_FILES].sort())
   assert.deepEqual(
     EXPECTED_FILES.filter((path) => TASK_13_NET_NEW_FILES.includes(path)),
     TASK_13_NET_NEW_FILES,
   )
+  assert.equal(TASK_14_E2E_FILES.length, 6)
+  assert.deepEqual(TASK_14_E2E_FILES, [...TASK_14_E2E_FILES].sort())
+  assert.deepEqual(
+    EXPECTED_FILES.filter((path) => TASK_14_E2E_FILES.includes(path)),
+    TASK_14_E2E_FILES,
+  )
   assert.deepEqual(manifest.files, EXPECTED_FILES)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, EXPECTED_FILES)
+  for (const files of [EXPECTED_FILES, manifest.files, EXPECTED_PACKAGE_FILES]) {
+    assert.equal(new Set(files).size, 124)
+  }
   assert.equal(Object.isFrozen(EXPECTED_PACKAGE_FILES), true)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, [...EXPECTED_FILES].sort())
   assert.throws(() => EXPECTED_PACKAGE_FILES.push("notes/innocent.md"), TypeError)
   assert.equal(EXPECTED_PACKAGE_FILES.includes("local_library_config/paper-tags.json"), false)
 })
 
-test("keeps private, generated, donor, legacy, artifact, and Task 14-only files outside the 118-file policy", () => {
+test("keeps private, generated, donor, legacy, and artifact files outside the 124-file policy", () => {
   const excluded = [
     "local_library_config/library.local.json",
     "local_library_data/paper-index.json",
@@ -405,7 +420,6 @@ test("keeps private, generated, donor, legacy, artifact, and Task 14-only files 
     "output/screenshots/library.png",
     "donor/serve-private-library.mjs",
     "prototype/paper-library-v2/library.mjs",
-    ...TASK_14_DEFERRED_FILES,
   ]
   assert.equal(EXPECTED_FILES.some((path) => excluded.includes(path)), false)
   assert.equal(auditPackageCandidates(excluded.map((path) => ({ path, content: "fixture" }))).blocking.length, excluded.length)
@@ -440,7 +454,7 @@ test("the three generated pages use exactly the 14 regular desktop assets", () =
   assert.deepEqual(union, REGULAR_DESKTOP_ASSET_SOURCES)
 })
 
-test("dynamic generated resources stay outside the 118-file and regular-asset maps", () => {
+test("dynamic generated resources stay outside the 124-file and regular-asset maps", () => {
   assert.equal(EXPECTED_FILES.includes("exporter/config/institutions/nuist.json"), true)
   for (const generatedPath of [
     "local_library_output/desktop/assets/nuist.institution.json",
@@ -468,6 +482,17 @@ test("the five Task 13 test candidates preserve private-path assertions without 
     content: await readFile(new URL(`../../${path}`, import.meta.url)),
   })))
   assert.deepEqual(auditPackageCandidates(candidates).blocking, [])
+})
+
+test("all six Task 14 E2E sources pass the unchanged package content-privacy audit", async () => {
+  const candidates = await Promise.all(TASK_14_E2E_FILES.map(async (path) => ({
+    path,
+    content: await readFile(new URL(`../../${path}`, import.meta.url)),
+  })))
+  assert.deepEqual(auditPackageCandidates(candidates), {
+    blocking: [],
+    checkedCount: 6,
+  })
 })
 
 test("the exact policy includes all three back-navigation pages and their runtime dependencies", () => {

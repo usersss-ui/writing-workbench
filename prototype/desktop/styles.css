@@ -345,6 +345,7 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
   opacity: .58;
   box-shadow: none;
 }
+.paper-library-page #library-archive-rebuild[hidden] { display: none; }
 .library-page .library-action-help {
   color: var(--muted);
   font-size: 9px;
