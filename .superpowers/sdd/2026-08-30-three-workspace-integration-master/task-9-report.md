@@ -4,13 +4,14 @@
 
 - Status: complete for master-plan Task 9's shared runtime, seven-category Markdown inspection, lock-agnostic note transaction, and desktop note-import client scope.
 - Base: `7013fc2` (`docs: record async logger fix evidence`).
-- Implementation head before this report commit: `2feab98`.
 - Branch: `codex/three-workspace-integration`.
 - Checkpoint 1: `d84fb4f` (`refactor(paper-library): share private runtime loading`).
 - Checkpoint 2: `01c2951` (`feat(paper-library): inspect markdown note imports`).
 - Checkpoint 3: `4498226` (`feat(paper-library): commit note imports safely`).
 - Checkpoint 4: `adb482a` (`feat(paper-library): add local note import dialog shell`).
 - Checkpoint 5: `2feab98` (`feat(paper-library): complete note import workflow`).
+- Independent-review hardening: `0d16483` (`fix(paper-library): harden note import boundaries`).
+- Implementation head before this report update: `0d16483`.
 
 ## RED/GREEN evidence
 
@@ -50,20 +51,32 @@
 - Full DOM GREEN: 108/108 passed, including nested tests.
 - The final controller keeps Markdown local to the file handler, rejects stale inspection results, blocks dismissal while importing, preserves the inspection only for `LIBRARY_WRITE_BUSY`, invalidates all other failures, reloads without clearing the old view, and uniquely reconciles the imported preview by URL plus filename before selecting its `selectionKey`.
 
+### Independent-review hardening
+
+- Initial review RED: the original focused follow-up command discovered 133 tests with 126 passed and 7 failed. The failures covered cleanup after a created-file write failure, both initial-fingerprint cleanup paths, frontmatter closing beyond the parser window, and the new static-controller fixture.
+- Expanded RED: adding the directory-continuity, published-cleanup, full-index, NFKC, exact-capability-state, and abort contracts discovered 177 tests with 159 passed and 18 failed, including nested-test rollups.
+- Expanded GREEN: `node --test exporter/paper-library/note-import.test.mjs exporter/paper-library/note-import-transaction.test.mjs prototype/desktop/paper-library-dom.test.mjs exporter/paper-library/build.test.mjs` passed 178/178.
+- Created-file cleanup now returns an ordinary fixed write error only after the exact created inode is confirmed absent; an unconfirmed or failed cleanup returns fixed `ROLLBACK_FAILED` without exposing a path.
+- The transaction retains a verified unit-directory handle and rechecks lexical `lstat`/`realpath` plus `dev`/`ino` continuity before and after create, fingerprint, and rollback operations. The injected pre-create replacement test proves zero `O_CREAT` calls and no file in the outside directory.
+- Frontmatter whose complete closing delimiter lies beyond the parser's 8,192-character window is a blocking `FRONTMATTER_TOO_LARGE` result, so identity metadata cannot silently become absent.
+- Build and note-import reconciliation now share `validateBuiltPaperIndex`: exact v3 root and facet schema, nonnegative warning count, exact complete paper records, controlled previews/source documents, unique paper IDs, and recursive private-locator rejection.
+- A failure to remove `.previous-*` after both generated directories have been published is treated as post-commit housekeeping and does not turn a successful rebuild into a source-note rollback.
+- The desktop client NFKC-normalizes requested basenames, accepts only canonical response basenames or `_vN` variants, validates only the three exact capability matrices, preserves static browsing without capabilities, and aborts obsolete inspections while retaining generation checks.
+
 ## Final verification
 
 - Required focused suite:
   `node --test exporter/paper-library/runtime.test.mjs exporter/paper-library/note-import.test.mjs exporter/paper-library/note-import-transaction.test.mjs prototype/desktop/paper-library-dom.test.mjs`
-  exited 0 with 129 passed and 0 failed.
+  exited 0 with 143 passed and 0 failed.
 - Coordinator suite:
   `node --test exporter/paper-library/write-coordinator.test.mjs`
   exited 0 with 11 passed and 0 failed.
 - Required aggregate:
   `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs`
-  discovered 449 tests and exited 1 with 448 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
+  discovered 465 tests and exited 1 with 464 passed and 1 failed. The sole failure was `every packaged relative HTML and static-import dependency closes inside the fixed policy`, with the exact blocker `[{ path: 'exporter/scripts/build-private-library.mjs', code: 'dependency_unlisted' }]`.
 - Aggregate excluding the package-policy test:
   `zsh -o extendedglob -o pipefail -c 'node --test exporter/paper-library/^package-audit.test.mjs prototype/desktop/*.test.mjs 2>&1 | tail -30'`
-  exited 0 with 434 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
+  exited 0 with 450 passed and 0 failed. This proves the remaining exporter and desktop regressions are GREEN.
 - Syntax checks passed independently for `runtime.mjs`, `note-import.mjs`, `library.mjs`, and `paper-inspector.mjs` using `node --check`.
 - `git diff --check` and `git diff --check 7013fc2..HEAD` both passed with no output.
 
@@ -73,9 +86,12 @@
 - All filesystem transaction tests used temporary directories. No real configured build CLI was run, and no real paper, note, PDF, OCR, image, private configuration, generated library output, browser storage, or live service was read or changed.
 - No server, route, candidate archive, discovery, Agent, migration, cutover, package policy, package manifest, E2E, screenshot, port, or service file was created or modified.
 - Pre-existing untracked `audits/` and `tmp/` remain untouched and uncommitted.
+- Transaction fixtures now register temporary-directory cleanup with `t.after`; no review test uses real source or generated data.
 
 ## Deferred risks and ownership
 
 - Task 10 owns server integration and the coordinator order: acquire through `coordinator.run`, take the inspection token as the first statement after lock acquisition, and mark `manual_note` recovery for `ROLLBACK_FAILED` or `BUILD_OUTPUT_INVALID` before rethrowing. Task 9 intentionally contains no server or coordinator knowledge in `note-import.mjs`.
+- Pure Node pathname APIs do not provide portable `openat` semantics. Within the master plan's local single-user boundary, Task 9 retains a verified directory handle and performs the strongest portable continuity checks; it does not claim protection against a same-permission malicious process winning a nanosecond pathname race. Task 10 must continue to expose the service only to the local user.
+- If post-publish cleanup leaves a `.previous-*` directory, the newly published build remains valid but the stale backup must be removed before a later preflight can reuse that fixed backup name.
 - Task 13 owns exact build/package dependency closure. It must add the Task 9 runtime/import dependency set to the fixed package policy and manifest union. The one aggregate failure quoted above is therefore a planned Task 13 dependency-list closure item, not an in-scope Task 9 regression.
 - Task 14 owns final combined package, browser, visual, and E2E acceptance after Task 13 closes the package policy. It does not own the package-list implementation itself.
