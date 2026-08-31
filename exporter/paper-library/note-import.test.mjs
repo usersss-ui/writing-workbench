@@ -159,6 +159,18 @@ test("ignores single- and double-backtick code spans that cross a prose line bre
   }
 })
 
+test("does not let an inline code span cross a blank-line block boundary", async (t) => {
+  for (const markdown of [
+    "`code starts\n\n$unclosed\n`",
+    "``code starts\n \t \n$unclosed\n``",
+  ]) {
+    await t.test(markdown.startsWith("``") ? "double backticks" : "single backticks", async () => {
+      const result = await inspect({ markdown })
+      assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), true)
+    })
+  }
+})
+
 test("keeps a longer backtick fence open across a shorter backtick line", async () => {
   const result = await inspect({
     markdown: [

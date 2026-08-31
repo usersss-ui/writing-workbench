@@ -154,6 +154,11 @@ function withoutCode(markdown) {
       visible.push("")
       continue
     }
+    if (/^[ \t]*$/u.test(line)) {
+      flushInlineLines()
+      visible.push("")
+      continue
+    }
     const opener = openingFence(line)
     if (opener !== null) {
       flushInlineLines()
