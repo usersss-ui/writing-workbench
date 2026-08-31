@@ -39,6 +39,17 @@ const LOCAL_CAPABILITY_ROOT_FIELDS = Object.freeze([
 const LOCAL_RECOVERY_FIELDS = Object.freeze([
   "required", "kind", "reason_code", "archive_source_id", "paper_id", "openalex_id",
 ])
+const ARCHIVE_CANDIDATE_FIELDS = Object.freeze([
+  "paperId", "doi", "title", "authors", "year", "source", "citations", "isOpenAccess",
+  "openAccessUrl", "landingPageUrl", "topics", "abstract", "stage",
+])
+const OPENALEX_ID = /^W[1-9]\d*$/u
+const DOI_IDENTITY = /^10\.\d{4,9}\/[\-._;()/:a-z0-9]+$/u
+const ARCHIVE_CREDENTIAL_QUERY_KEYS = new Set([
+  "accesstoken", "apikey", "authtoken", "authorization", "bearertoken", "clientsecret", "cookie",
+  "credentials", "idtoken", "oauth_token", "oauth2token", "passphrase", "password", "privatekey",
+  "refreshtoken", "secret", "secretkey", "session", "sessionid", "token", "xapikey",
+].map((value) => value.replaceAll("_", "")))
 const MATERIAL_FILTER_AXES = Object.freeze([
   "personalReadingMarkers",
   "sourceStatuses",
@@ -174,6 +185,10 @@ function isPlainObject(value) {
 
 function validPaperId(paperId) {
   return typeof paperId === "string" && (EXPLICIT_PAPER_ID.test(paperId) || FALLBACK_PAPER_ID.test(paperId))
+}
+
+export function isValidLocalPaperId(paperId) {
+  return validPaperId(paperId)
 }
 
 function validMetadataProvenance(value) {
@@ -737,6 +752,17 @@ function validRecovery(value, root) {
       && value.archive_source_id === null
       && value.paper_id === null
       && value.openalex_id === null
+      && root.archive_source_id === null
+      && root.note_import === false
+      && root.candidate_archive === false
+      && root.archive_rebuild === false
+  }
+  if (value.kind === "manual_archive") {
+    return value.reason_code === "ARCHIVE_TRANSACTION_AMBIGUOUS"
+      && value.archive_source_id === null
+      && value.paper_id === null
+      && value.openalex_id === null
+      && root.archive_source_id === null
       && root.note_import === false
       && root.candidate_archive === false
       && root.archive_rebuild === false
@@ -762,6 +788,13 @@ function validCapabilityMatrix(value) {
     return value.note_import === false
       && value.candidate_archive === false
       && value.archive_rebuild === false
+      && value.archive_source_id === null
+  }
+  if (value.recovery.kind === "manual_archive") {
+    return value.note_import === false
+      && value.candidate_archive === false
+      && value.archive_rebuild === false
+      && value.archive_source_id === null
   }
   return false
 }
@@ -930,6 +963,363 @@ export function loadPrivateSourcePath({ fetchImpl = globalThis.fetch, paperId })
     { paper_id: paperId },
     (value) => validateSourcePathResponse(value, { paperId }),
   ).then((result) => result.source_path)
+}
+
+function validArchiveCandidateText(value, maximum, { nullable = false } = {}) {
+  if (nullable && value === null) return true
+  return typeof value === "string"
+    && value.length > 0
+    && Array.from(value).length <= maximum
+    && value === value.trim().replace(/[\u0000-\u001f\u007f\u2028\u2029]/gu, " ").replace(/\s+/gu, " ")
+    && !containsPrivateLocator(value)
+}
+
+function denseArchiveArrayValues(value) {
+  if (!Array.isArray(value)) return null
+  let keys
+  let descriptors
+  try {
+    keys = Reflect.ownKeys(value)
+    descriptors = Object.getOwnPropertyDescriptors(value)
+  } catch {
+    return null
+  }
+  const length = descriptors.length?.value
+  if (!Number.isInteger(length) || length < 0) return null
+  const expectedKeys = [...Array.from({ length }, (_, index) => String(index)), "length"]
+  if (keys.some((key) => typeof key !== "string") || keys.length !== expectedKeys.length || !expectedKeys.every((key) => keys.includes(key))) return null
+  const values = []
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[index]
+    if (!descriptor?.enumerable || !Object.hasOwn(descriptor, "value")) return null
+    values.push(descriptor.value)
+  }
+  return values
+}
+
+function validDenseArchiveTextList(value, { maximumItems, maximumText }) {
+  const values = denseArchiveArrayValues(value)
+  if (!values || values.length > maximumItems) return false
+  const seen = new Set()
+  for (const item of values) {
+    if (!validArchiveCandidateText(item, maximumText) || seen.has(item)) return false
+    seen.add(item)
+  }
+  return true
+}
+
+function decodedArchiveQueryKey(value) {
+  if (typeof value !== "string" || value.length > 512 || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)) return null
+  let decoded = value
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!/%[0-9a-f]{2}/iu.test(decoded)) return decoded
+    try {
+      const next = decodeURIComponent(decoded)
+      if (next === decoded || next.length > 512 || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(next)) return null
+      decoded = next
+    } catch {
+      return null
+    }
+  }
+  return /%[0-9a-f]{2}/iu.test(decoded) ? null : decoded
+}
+
+function archiveCredentialQueryKey(value) {
+  const decoded = decodedArchiveQueryKey(value)
+  if (decoded === null) return true
+  const key = decoded.toLocaleLowerCase("en-US").replace(/[^a-z0-9]/gu, "")
+  return ARCHIVE_CREDENTIAL_QUERY_KEYS.has(key)
+    || ["token", "secret", "password", "passphrase", "apikey", "privatekey", "signature", "jwt", "credential", "cookie"]
+      .some((marker) => key.includes(marker))
+}
+
+function privateArchiveIpv4(hostname) {
+  const parts = hostname.split(".")
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/u.test(part))) return false
+  const octets = parts.map(Number)
+  if (octets.some((part) => part > 255)) return true
+  const [a, b] = octets
+  return a === 0 || a === 10 || a === 127 || a >= 224
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && (b === 0 || b === 168))
+    || (a === 198 && (b === 18 || b === 19))
+}
+
+function publicArchiveHostname(hostname) {
+  const host = hostname.toLocaleLowerCase("en-US").replace(/^\[|\]$/gu, "").replace(/\.$/u, "")
+  return Boolean(host)
+    && host !== "localhost"
+    && !host.endsWith(".localhost")
+    && !host.endsWith(".local")
+    && !host.endsWith(".home.arpa")
+    && !host.includes(":")
+    && host.includes(".")
+    && !privateArchiveIpv4(host)
+}
+
+function canonicalDoiIdentity(value) {
+  if (typeof value !== "string") return null
+  const normalized = value.trim()
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu, "")
+    .replace(/^doi:\s*/iu, "")
+    .toLocaleLowerCase("en-US")
+  if (!DOI_IDENTITY.test(normalized) || normalized.includes("//")) return null
+  const suffix = normalized.slice(normalized.indexOf("/") + 1)
+  return suffix && !suffix.split("/").some((segment) => segment === "." || segment === "..")
+    ? normalized
+    : null
+}
+
+function canonicalOpenAlexIdentity(value) {
+  if (typeof value !== "string") return null
+  const match = /^https:\/\/openalex\.org\/(W[1-9]\d*)$/u.exec(value)
+  return match ? value : null
+}
+
+function validArchiveCandidateUrl(value, { nullable = false } = {}) {
+  if (nullable && value === null) return true
+  if (!validArchiveCandidateText(value, 2_048) || value.includes("\\")) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:"
+      && !url.username
+      && !url.password
+      && !url.port
+      && !url.hash
+      && publicArchiveHostname(url.hostname)
+      && url.href === value
+      && [...url.searchParams.keys()].every((key) => !archiveCredentialQueryKey(key))
+  } catch {
+    return false
+  }
+}
+
+function cloneValidatedArchiveCandidate(candidate) {
+  if (
+    !exactStringKeys(candidate, ARCHIVE_CANDIDATE_FIELDS)
+    || typeof candidate.paperId !== "string"
+    || candidate.paperId.length > 100
+    || !OPENALEX_ID.test(candidate.paperId)
+    || (candidate.doi !== null && (
+      typeof candidate.doi !== "string"
+      || candidate.doi.length > 255
+      || canonicalDoiIdentity(candidate.doi) !== candidate.doi
+    ))
+    || !validArchiveCandidateText(candidate.title, 1_000)
+    || !validDenseArchiveTextList(candidate.authors, { maximumItems: 50, maximumText: 300 })
+    || (candidate.year !== null && (!Number.isInteger(candidate.year) || candidate.year < 1_000 || candidate.year > 9_999))
+    || !validArchiveCandidateText(candidate.source, 500)
+    || !Number.isSafeInteger(candidate.citations)
+    || candidate.citations < 0
+    || typeof candidate.isOpenAccess !== "boolean"
+    || !validArchiveCandidateUrl(candidate.openAccessUrl, { nullable: true })
+    || !validArchiveCandidateUrl(candidate.landingPageUrl)
+    || !validDenseArchiveTextList(candidate.topics, { maximumItems: 20, maximumText: 300 })
+    || !validArchiveCandidateText(candidate.abstract, 20_000, { nullable: true })
+    || candidate.stage !== "confirmed_for_archive"
+  ) throw new Error("候选归档请求格式无效")
+  return {
+    paperId: candidate.paperId,
+    doi: candidate.doi,
+    title: candidate.title,
+    authors: [...candidate.authors],
+    year: candidate.year,
+    source: candidate.source,
+    citations: candidate.citations,
+    isOpenAccess: candidate.isOpenAccess,
+    openAccessUrl: candidate.openAccessUrl,
+    landingPageUrl: candidate.landingPageUrl,
+    topics: [...candidate.topics],
+    abstract: candidate.abstract,
+    stage: candidate.stage,
+  }
+}
+
+function archiveClientError(status, code = null) {
+  const byCode = {
+    LIBRARY_WRITE_BUSY: "论文库正在执行另一项写入，请稍后重试。",
+    ARCHIVE_SCAN_INCOMPLETE: "论文来源扫描尚未完成，暂不能归档。",
+    ARCHIVE_REBUILD_REQUIRED: "受控资料包需要先完成恢复。",
+    ARCHIVE_CONFLICT: "候选归档与现有资料冲突。",
+    RECOVERY_REQUIRED: "论文库需要先完成恢复。",
+  }
+  const byStatus = {
+    400: "归档请求无效，请检查论文 ID 后重试。",
+    403: "本地服务拒绝了当前归档操作。",
+    409: "论文库写入发生冲突，请稍后重试。",
+    413: "归档请求内容超过固定上限。",
+    500: "本地归档操作失败，请按恢复提示处理。",
+    503: "论文库需要先完成恢复。",
+  }
+  const safeCode = typeof code === "string" && /^[A-Z][A-Z0-9_]*$/u.test(code)
+    ? code
+    : "LOCAL_LIBRARY_REQUEST_FAILED"
+  return new LocalLibraryApiError(safeCode, byCode[safeCode] ?? byStatus[status] ?? "本地归档请求失败。")
+}
+
+function safeArchiveErrorCode(payload) {
+  const error = payload?.error
+  if (!isPlainObject(error)) return null
+  const keys = Object.keys(error).sort().join("|")
+  if (keys !== "code|message" && keys !== "code|file_name|message") return null
+  if (!/^[A-Z][A-Z0-9_]*$/u.test(error.code ?? "") || !validApiText(error.message) || containsPrivateLocatorDeep(error)) return null
+  if (Object.hasOwn(error, "file_name") && !validLocalFileName(error.file_name)) return null
+  return error.code
+}
+
+async function requestArchiveJson(fetchImpl, url, body, { action, status, validate }) {
+  if (typeof fetchImpl !== "function") throw new Error("本地归档服务不可用")
+  let response
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Research-Console-Action": action,
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      credentials: "same-origin",
+    })
+  } catch {
+    throw new Error("本地归档服务暂不可用")
+  }
+  let payload
+  try { payload = await response?.json?.() } catch { throw new Error("本地服务响应格式无效") }
+  if (!response?.ok) throw archiveClientError(response?.status, safeArchiveErrorCode(payload))
+  if (response.status !== status) throw new Error("本地服务响应格式无效")
+  return validate(payload)
+}
+
+function validateArchiveResponse(value, paperId) {
+  const complete = exactStringKeys(value, ["status", "paper_id", "folder_name", "rebuild_status", "paper_count"])
+    && value.status === "created"
+    && value.paper_id === paperId
+    && value.folder_name === paperId
+    && value.rebuild_status === "complete"
+    && Number.isSafeInteger(value.paper_count)
+    && value.paper_count >= 0
+  const failed = exactStringKeys(value, [
+    "status", "paper_id", "folder_name", "rebuild_status", "index_state", "recovery_required",
+  ])
+    && value.status === "created"
+    && value.paper_id === paperId
+    && value.folder_name === paperId
+    && value.rebuild_status === "failed"
+    && value.index_state === "last_good"
+    && value.recovery_required === true
+  if ((!complete && !failed) || containsPrivateLocatorDeep(value)) throw new Error("本地服务响应格式无效")
+  return structuredClone(value)
+}
+
+function validateRebuildResponse(value, paperId) {
+  if (
+    !exactStringKeys(value, ["status", "paper_id", "rebuild_status", "paper_count"])
+    || value.status !== "recovered"
+    || value.paper_id !== paperId
+    || value.rebuild_status !== "complete"
+    || !Number.isSafeInteger(value.paper_count)
+    || value.paper_count < 0
+    || containsPrivateLocatorDeep(value)
+  ) throw new Error("本地服务响应格式无效")
+  return structuredClone(value)
+}
+
+export function archiveConfirmedCandidate({ fetchImpl = globalThis.fetch, archiveSourceId, paperId, candidate } = {}) {
+  if (!validPaperId(paperId)) return Promise.reject(new Error("本地论文 ID 格式无效"))
+  if (typeof archiveSourceId !== "string" || !SOURCE_ID.test(archiveSourceId)) {
+    return Promise.reject(new Error("候选归档请求格式无效"))
+  }
+  let safeCandidate
+  try { safeCandidate = cloneValidatedArchiveCandidate(candidate) } catch (error) { return Promise.reject(error) }
+  return requestArchiveJson(fetchImpl, "/api/v1/archive/candidates", {
+    version: 1,
+    confirmation: "create_metadata_only",
+    archive_source_id: archiveSourceId,
+    paper_id: paperId,
+    candidate: safeCandidate,
+  }, {
+    action: "archive-candidate",
+    status: 201,
+    validate: (value) => validateArchiveResponse(value, paperId),
+  })
+}
+
+export function requestArchiveRebuild({ fetchImpl = globalThis.fetch, archiveSourceId, paperId, openAlexId } = {}) {
+  if (!validPaperId(paperId) || !OPENALEX_ID.test(openAlexId ?? "") || typeof archiveSourceId !== "string" || !SOURCE_ID.test(archiveSourceId)) {
+    return Promise.reject(new Error("归档恢复请求格式无效"))
+  }
+  return requestArchiveJson(fetchImpl, "/api/v1/archive/rebuild", {
+    confirmation: "retry_archive_rebuild",
+    archive_source_id: archiveSourceId,
+    paper_id: paperId,
+    openalex_id: openAlexId,
+  }, {
+    action: "rebuild-library",
+    status: 200,
+    validate: (value) => validateRebuildResponse(value, paperId),
+  })
+}
+
+function strictCandidateIdentityMatches(candidate, paperIndex) {
+  if (!Array.isArray(paperIndex?.papers)) return []
+  const records = paperIndex.papers.filter((paper) => (
+    isPlainObject(paper)
+    && validPaperId(paper.paper_id)
+    && typeof paper.doi_or_url === "string"
+  ))
+  if (candidate.doi !== null) {
+    const doi = canonicalDoiIdentity(candidate.doi)
+    return doi === null ? [] : records.filter((paper) => canonicalDoiIdentity(paper.doi_or_url) === doi)
+  }
+  if (!OPENALEX_ID.test(candidate.paperId ?? "")) return []
+  const identity = `https://openalex.org/${candidate.paperId}`
+  return records.filter((paper) => canonicalOpenAlexIdentity(paper.doi_or_url) === identity)
+}
+
+function confirmedCandidate(candidateStore, openAlexId) {
+  let candidates
+  try { candidates = candidateStore?.read?.()?.candidates } catch { return null }
+  if (!Array.isArray(candidates)) return null
+  const matches = candidates.filter((candidate) => candidate?.paperId === openAlexId)
+  return matches.length === 1 && matches[0].stage === "confirmed_for_archive" ? matches[0] : null
+}
+
+function persistArchivedCandidate(candidateStore, openAlexId) {
+  let transition
+  try { transition = candidateStore?.markMetadataArchived?.(openAlexId) } catch { throw new Error("候选状态保存失败") }
+  if (transition?.changed !== true || transition?.persisted !== true) throw new Error("候选状态保存失败")
+  return true
+}
+
+export function markCandidateArchivedAfterIndexRefresh({ candidateStore, paperIndex, localPaperId, openAlexId } = {}) {
+  if (!validPaperId(localPaperId) || !OPENALEX_ID.test(openAlexId ?? "")) return false
+  const candidate = confirmedCandidate(candidateStore, openAlexId)
+  if (!candidate) return false
+  const matches = strictCandidateIdentityMatches(candidate, paperIndex)
+  if (matches.length !== 1 || matches[0].paper_id !== localPaperId) return false
+  return persistArchivedCandidate(candidateStore, openAlexId)
+}
+
+export function reconcileArchivedCandidates({ candidateStore, paperIndex } = {}) {
+  let candidates
+  try { candidates = candidateStore?.read?.()?.candidates } catch { candidates = null }
+  if (!Array.isArray(candidates)) return { archived: [], unchanged: [] }
+  const archived = []
+  const unchanged = []
+  for (const candidate of candidates) {
+    if (candidate?.stage !== "confirmed_for_archive") continue
+    const matches = strictCandidateIdentityMatches(candidate, paperIndex)
+    if (matches.length !== 1) {
+      unchanged.push(candidate.paperId)
+      continue
+    }
+    persistArchivedCandidate(candidateStore, candidate.paperId)
+    archived.push(candidate.paperId)
+  }
+  return { archived, unchanged }
 }
 
 export async function decodeUtf8MarkdownFile(file) {
@@ -1522,7 +1912,7 @@ function renderNoteImportChecks(document, mount, checks) {
   mount.replaceChildren(fragment)
 }
 
-export function createLibraryController({ document, storage, fetchImpl = globalThis.fetch }) {
+export function createLibraryController({ document, storage, fetchImpl = globalThis.fetch, candidateStore = null }) {
   const store = createWorkspaceStore(storage)
   const userTagStore = createUserTagStore(storage)
   let userTagNotice = ""
@@ -1553,6 +1943,9 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   let noteInspectAbortController = null
   let pendingImportedResult = null
   let indexRefreshFailed = false
+  let archiveRecoveryBusy = false
+  let archiveRecoveryResolved = false
+  let archiveRecoveryStatus = ""
   const indexLoader = createRetryableLoader(() => loadPaperIndex(fetchImpl))
   const privatePathCopyGuard = createPrivatePathCopyGuard(() => {
     const status = elements().inspectorStatus
@@ -1592,6 +1985,11 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       readerTocToggle: document.getElementById("library-reader-toc-toggle"),
       addNote: document.getElementById("library-add-note"),
       noteImportHelp: document.getElementById("library-note-import-help"),
+      recoveryBanner: document.querySelector("[data-library-recovery-banner]"),
+      recoveryMessage: document.querySelector("[data-library-recovery-message]"),
+      recoveryTuple: document.querySelector("[data-library-recovery-tuple]"),
+      recoveryStatus: document.querySelector("[data-library-recovery-status]"),
+      archiveRebuild: document.getElementById("library-archive-rebuild"),
       indexReloadStatus: document.querySelector("[data-index-reload-status]"),
       indexReload: document.getElementById("library-index-reload"),
       noteImportDialog: document.getElementById("library-note-import-dialog"),
@@ -1972,6 +2370,39 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     }))
   }
 
+  function renderArchiveRecovery(ui) {
+    const recovery = localCapabilities?.recovery
+    const required = recovery?.required === true
+    if (ui.recoveryBanner) ui.recoveryBanner.hidden = !required
+    if (!required) {
+      if (ui.recoveryMessage) ui.recoveryMessage.textContent = ""
+      if (ui.recoveryTuple) { ui.recoveryTuple.textContent = ""; ui.recoveryTuple.hidden = true }
+      if (ui.recoveryStatus) ui.recoveryStatus.textContent = ""
+      if (ui.archiveRebuild) { ui.archiveRebuild.hidden = true; ui.archiveRebuild.disabled = true }
+      return
+    }
+    if (recovery.kind === "candidate_archive") {
+      if (ui.recoveryMessage) ui.recoveryMessage.textContent = "上次元数据归档已写入，但论文库索引重建失败。写入操作已停用，仍可浏览上一次可用的论文库。"
+      if (ui.recoveryTuple) {
+        ui.recoveryTuple.hidden = false
+        ui.recoveryTuple.textContent = `归档来源 ${recovery.archive_source_id} · 本地论文 ID ${recovery.paper_id} · OpenAlex ${recovery.openalex_id}`
+      }
+      if (ui.archiveRebuild) {
+        ui.archiveRebuild.hidden = archiveRecoveryResolved
+        ui.archiveRebuild.disabled = archiveRecoveryBusy || archiveRecoveryResolved || localCapabilities.archive_rebuild !== true
+      }
+    } else {
+      if (ui.recoveryMessage) {
+        ui.recoveryMessage.textContent = recovery.kind === "manual_note"
+          ? "笔记导入需要人工恢复；写入操作已停用，仍可浏览上一次可用的论文库。"
+          : "候选归档事务状态不明确，需要人工核验；写入操作已停用，仍可浏览上一次可用的论文库。"
+      }
+      if (ui.recoveryTuple) { ui.recoveryTuple.textContent = ""; ui.recoveryTuple.hidden = true }
+      if (ui.archiveRebuild) { ui.archiveRebuild.hidden = true; ui.archiveRebuild.disabled = true }
+    }
+    if (ui.recoveryStatus) ui.recoveryStatus.textContent = archiveRecoveryStatus
+  }
+
   function render() {
     const ui = elements()
     const workspaceState = store.read()
@@ -2027,6 +2458,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     if (ui.contextTitle) ui.contextTitle.textContent = readerContextLabel({ detailOpen, paper: activePaper })
     if (ui.addNote) ui.addNote.disabled = localCapabilities?.note_import !== true
     if (ui.noteImportHelp) ui.noteImportHelp.hidden = localCapabilities?.note_import === true
+    renderArchiveRecovery(ui)
     if (ui.indexReloadStatus) ui.indexReloadStatus.hidden = !indexRefreshFailed
     if (ui.indexReload) ui.indexReload.disabled = !indexRefreshFailed
     const visibility = computeLoadVisibility({ loadState, viewEmpty: view.empty })
@@ -2289,8 +2721,67 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
         const fileName = error instanceof LocalLibraryApiError ? error.fileName : null
         ui.noteImportStatus.textContent = fileName ? `${message}（${fileName}）` : message
       }
+      localCapabilities = await loadLocalLibraryCapabilities(fetchImpl).catch(() => null)
+      render()
       syncNoteImportControls()
       return false
+    }
+  }
+
+  async function recoverCandidateArchive() {
+    const recovery = localCapabilities?.recovery
+    if (
+      archiveRecoveryBusy
+      || archiveRecoveryResolved
+      || recovery?.required !== true
+      || recovery.kind !== "candidate_archive"
+      || localCapabilities?.archive_rebuild !== true
+    ) return false
+    archiveRecoveryBusy = true
+    archiveRecoveryStatus = "正在重建论文库索引…"
+    renderArchiveRecovery(elements())
+    try {
+      const result = await requestArchiveRebuild({
+        fetchImpl,
+        archiveSourceId: recovery.archive_source_id,
+        paperId: recovery.paper_id,
+        openAlexId: recovery.openalex_id,
+      })
+      indexLoader.invalidate()
+      const outcome = await indexLoader.run()
+      loadState = indexLoader.getState()
+      if (!outcome.ok) throw new Error("论文库索引不可用")
+      const index = outcome.value
+      papers = index.papers
+      facetSchema = index.facet_schema
+      warningCount = index.warning_count
+      const persistedSelection = store.read().selectedPaperId
+      if (!paperById(papers, persistedSelection) && papers.length > 0) store.setSelectedPaper(papers[0].paper_id)
+      const marked = candidateStore
+        ? markCandidateArchivedAfterIndexRefresh({
+            candidateStore,
+            paperIndex: index,
+            localPaperId: result.paper_id,
+            openAlexId: recovery.openalex_id,
+          })
+        : false
+      localCapabilities = await loadLocalLibraryCapabilities(fetchImpl).catch(() => null)
+      archiveRecoveryResolved = localCapabilities?.recovery?.required === false
+      archiveRecoveryStatus = localCapabilities?.recovery?.required === true
+        ? "重建请求已完成，但本地服务仍报告需要恢复。"
+        : marked
+        ? "恢复完成，元数据归档完成。"
+        : "恢复完成；未找到本地候选或严格身份不匹配，未更改本地候选状态。"
+      render()
+      return archiveRecoveryResolved
+    } catch (error) {
+      archiveRecoveryStatus = error instanceof LocalLibraryApiError
+        ? error.message
+        : "论文库恢复未完成，请稍后重试。"
+      return false
+    } finally {
+      archiveRecoveryBusy = false
+      renderArchiveRecovery(elements())
     }
   }
 
@@ -2351,6 +2842,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     bindUserTagEditor(ui.inspectorRoot)
     bindUserTagEditor(ui.detail)
     ui.addNote?.addEventListener("click", openNoteImportDialog)
+    ui.archiveRebuild?.addEventListener("click", () => { void recoverCandidateArchive() })
     ui.noteImportFile?.addEventListener("change", () => { void inspectSelectedNoteFile() })
     ui.noteImportCategory?.addEventListener("change", () => { void inspectSelectedNoteFile() })
     ui.noteImportFileName?.addEventListener("input", syncNoteImportControls)
@@ -2632,6 +3124,9 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     loadState = indexLoader.getState()
     const [outcome, capabilities] = await Promise.all([loadOperation, capabilityOperation])
     localCapabilities = capabilities
+    archiveRecoveryBusy = false
+    archiveRecoveryResolved = false
+    archiveRecoveryStatus = ""
     loadState = indexLoader.getState()
     if (outcome.ok) {
       const index = outcome.value
@@ -2640,6 +3135,9 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       warningCount = index.warning_count
       const persistedSelection = store.read().selectedPaperId
       if (!paperById(papers, persistedSelection) && papers.length > 0) store.setSelectedPaper(papers[0].paper_id)
+      if (candidateStore && localCapabilities?.recovery?.required === false) {
+        try { reconcileArchivedCandidates({ candidateStore, paperIndex: index }) } catch { archiveRecoveryStatus = "候选状态保存失败。" }
+      }
       render()
       return { ok: true, paperCount: papers.length }
     }

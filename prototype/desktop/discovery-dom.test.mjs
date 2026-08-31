@@ -70,16 +70,18 @@ function makeElement({ dataset = {}, attributes = {}, tagName = "div" } = {}) {
   const listeners = new Map()
   const attrs = new Map(Object.entries(attributes))
   return {
-    dataset: { ...dataset }, tagName: tagName.toUpperCase(), value: "", textContent: "", hidden: false,
+    dataset: { ...dataset }, tagName: tagName.toUpperCase(), value: "", ownText: "", hidden: false,
     disabled: false, children: [], options: [], href: "", focusCount: 0,
+    set textContent(value) { this.ownText = String(value); this.children = []; this.options = [] },
+    get textContent() { return this.ownText + this.children.map((child) => child.textContent).join("") },
     addEventListener(type, listener) { listeners.set(type, listener) },
     dispatch(type, event = {}) { return listeners.get(type)?.({ preventDefault() {}, currentTarget: this, ...event }) },
     setAttribute(name, value) { attrs.set(name, String(value)) },
     getAttribute(name) { return attrs.get(name) ?? null },
     removeAttribute(name) { attrs.delete(name) },
     appendChild(child) { this.children.push(child); return child },
-    replaceChildren(...children) { this.children = children; this.options = children },
-    append(child) { this.options.push(child) },
+    replaceChildren(...children) { this.ownText = ""; this.children = children; this.options = children },
+    append(...children) { this.children.push(...children); this.options.push(...children) },
     focus() { this.focusCount += 1 },
   }
 }
@@ -94,6 +96,100 @@ function candidateStore() {
     moveToPending(paperId) { candidates = candidates.map((item) => item.paperId === paperId ? { ...item, stage: "pending_screening" } : item); return { changed: true, persisted: true, state: state() } },
     remove(paperId) { candidates = candidates.filter((item) => item.paperId !== paperId); return { changed: true, persisted: true, state: state() } },
   }
+}
+
+function task11Candidate(overrides = {}) {
+  return {
+    paperId: "W4387886124",
+    doi: "10.1109/access.2023.3327199",
+    title: "Distributed online optimization over directed networks",
+    authors: ["Yinghui Wang", "Jiuwei Wang"],
+    year: 2023,
+    source: "IEEE Access",
+    citations: 12,
+    isOpenAccess: true,
+    openAccessUrl: "https://example.org/open-paper",
+    landingPageUrl: "https://openalex.org/W4387886124",
+    topics: ["Distributed optimization"],
+    abstract: "Discovery text",
+    stage: "confirmed_for_archive",
+    ...overrides,
+  }
+}
+
+function task11CandidateStore(candidates = [task11Candidate()]) {
+  let state = { version: 1, candidates: structuredClone(candidates) }
+  const marked = []
+  return {
+    marked,
+    read: () => structuredClone(state),
+    reload: () => ({ status: "ready", state: structuredClone(state) }),
+    getLoadStatus: () => "ready",
+    confirm() { throw new Error("unexpected confirm") },
+    moveToPending() { throw new Error("unexpected move") },
+    remove() { throw new Error("unexpected remove") },
+    markMetadataArchived(openAlexId) {
+      marked.push(openAlexId)
+      state = {
+        version: 1,
+        candidates: state.candidates.map((candidate) => (
+          candidate.paperId === openAlexId ? { ...candidate, stage: "metadata_archived" } : candidate
+        )),
+      }
+      return { changed: true, persisted: true, reason: null, state: structuredClone(state) }
+    },
+  }
+}
+
+const task11Categories = Object.freeze([
+  ["note", "论文精读", "note"],
+  ["derivation", "推导过程", "derivation"],
+  ["source_map", "来源映射", "derivation"],
+  ["modeling", "建模复盘", "simulation"],
+  ["simulation", "仿真描述", "simulation"],
+  ["code_compare", "代码对照", "code_compare"],
+  ["reproduction_report", "复现报告", "simulation"],
+].map(([value, label, target_tab]) => ({ value, label, target_tab })))
+
+function task11Capabilities(overrides = {}) {
+  return {
+    api_version: 1,
+    note_import: true,
+    source_path: true,
+    candidate_archive: true,
+    archive_rebuild: true,
+    discovery: true,
+    agent_task_center: true,
+    archive_source_id: "main_papers",
+    categories: structuredClone(task11Categories),
+    recovery: {
+      required: false,
+      kind: null,
+      reason_code: null,
+      archive_source_id: null,
+      paper_id: null,
+      openalex_id: null,
+    },
+    ...overrides,
+  }
+}
+
+function task11Response(payload, { ok = true, status = ok ? 200 : 400 } = {}) {
+  return { ok, status, json: async () => structuredClone(payload) }
+}
+
+function findDescendant(root, predicate) {
+  if (!root) return null
+  if (predicate(root)) return root
+  for (const child of root.children ?? []) {
+    const match = findDescendant(child, predicate)
+    if (match) return match
+  }
+  return null
+}
+
+function findCandidateControl(root, key, value) {
+  return findDescendant(root.elements.get("#candidate-queue-list"), (element) => element.dataset?.[key] === value)
 }
 
 function keywordRoot() {
@@ -214,4 +310,310 @@ test("已知论文访问显示平台冲突警告，并只给出普通的新窗�
   const articleLink = root.elements.get("#institution-step-open")
   assert.match(articleLink.href, /^https:\/\//u)
   assert.equal(articleLink.getAttribute("target"), null, "链接属性在模板中固定为新窗口语义")
+})
+
+test("Task 11 RED2 confirmed card requires an explicit valid local ID and archives only after fresh-index identity reconciliation", async () => {
+  const root = keywordRoot()
+  const store = task11CandidateStore()
+  const fetchCalls = []
+  const confirmations = []
+  let indexLoads = 0
+  const controller = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    prepareAccess() {},
+    searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+    fetchImpl: async (url, options = {}) => {
+      fetchCalls.push([url, options])
+      if (url === "/api/v1/capabilities") return task11Response(task11Capabilities())
+      if (url === "/api/v1/archive/candidates") {
+        return task11Response({
+          status: "created",
+          paper_id: "Wang23-DIO",
+          folder_name: "Wang23-DIO",
+          rebuild_status: "complete",
+          paper_count: 1,
+        }, { status: 201 })
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+    loadIndex: async () => {
+      indexLoads += 1
+      return { papers: [{ paper_id: "Wang23-DIO", doi_or_url: "https://doi.org/10.1109/ACCESS.2023.3327199" }] }
+    },
+    confirmArchive(message) { confirmations.push(message); return true },
+  })
+  await controller.start()
+
+  const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+  const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+  const help = findCandidateControl(root, "archivePaperIdHelp", "W4387886124")
+  const status = findCandidateControl(root, "archiveStatus", "W4387886124")
+  assert.ok(input)
+  assert.equal(input.value, "", "local ID must never be inferred or prefilled")
+  assert.match(findDescendant(root.elements.get("#candidate-queue-list"), (node) => node.tagName === "LABEL")?.textContent ?? "", /本地论文 ID/u)
+  assert.match(help.textContent, /Wang23-DIO|LIB-[A-F0-9]/u)
+  assert.equal(archive.disabled, true)
+
+  input.value = "W4387886124"
+  input.dispatch("input")
+  assert.equal(archive.disabled, true, "OpenAlex W id is not a valid local paper id")
+  input.value = "Wang23-DIO"
+  input.dispatch("input")
+  assert.equal(archive.disabled, false)
+  await archive.dispatch("click")
+
+  assert.equal(indexLoads, 1, "the public index is freshly loaded after the 201 response")
+  assert.deepEqual(store.marked, ["W4387886124"])
+  assert.equal(confirmations.length, 1)
+  assert.match(confirmations[0], /Wang23-DIO/u)
+  assert.match(confirmations[0], /main_papers/u)
+  assert.match(confirmations[0], /仅归档书目信息，不含 PDF\/OCR\/证据核验/u)
+  assert.match(status.textContent, /元数据归档完成/u)
+  assert.deepEqual(Object.keys(store.read().candidates[0]).sort(), [
+    "abstract", "authors", "citations", "doi", "isOpenAccess", "landingPageUrl", "openAccessUrl",
+    "paperId", "source", "stage", "title", "topics", "year",
+  ])
+  assert.deepEqual(fetchCalls.map(([url]) => url), ["/api/v1/capabilities", "/api/v1/archive/candidates"])
+})
+
+test("Task 11 RED2 a 409 keeps the typed local ID and confirmed candidate without raw response leakage", async () => {
+  const root = keywordRoot()
+  const store = task11CandidateStore()
+  const controller = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    prepareAccess() {},
+    searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return task11Response(task11Capabilities())
+      return task11Response({
+        error: {
+          code: "LIBRARY_WRITE_BUSY",
+          message: "/Users/alice/private archive is busy",
+          source_path: "/Users/alice/private",
+        },
+      }, { ok: false, status: 409 })
+    },
+    loadIndex: async () => { throw new Error("busy response must not load the index") },
+    confirmArchive: () => true,
+  })
+  await controller.start()
+  const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+  const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+  const status = findCandidateControl(root, "archiveStatus", "W4387886124")
+  input.value = "Wang23-DIO"
+  input.dispatch("input")
+  await archive.dispatch("click")
+  assert.equal(input.value, "Wang23-DIO")
+  assert.equal(store.read().candidates[0].stage, "confirmed_for_archive")
+  assert.deepEqual(store.marked, [])
+  assert.match(status.textContent, /正在执行|稍后|冲突/u)
+  assert.doesNotMatch(root.elements.get("#candidate-queue-panel").textContent + status.textContent, /Users|alice|private|source_path/iu)
+})
+
+test("Task 11 RED3 archive 500 refreshes capabilities into fixed manual recovery and disables writes", async () => {
+  const root = keywordRoot()
+  const store = task11CandidateStore()
+  let capabilityReads = 0
+  const manualArchive = task11Capabilities({
+    note_import: false,
+    candidate_archive: false,
+    archive_rebuild: false,
+    archive_source_id: null,
+    recovery: {
+      required: true,
+      kind: "manual_archive",
+      reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS",
+      archive_source_id: null,
+      paper_id: null,
+      openalex_id: null,
+    },
+  })
+  const controller = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    prepareAccess() {},
+    searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") {
+        capabilityReads += 1
+        return task11Response(capabilityReads === 1 ? task11Capabilities() : manualArchive)
+      }
+      if (url === "/api/v1/archive/candidates") return task11Response({
+        error: {
+          code: "ARCHIVE_TRANSACTION_AMBIGUOUS",
+          message: "/Users/alice/private archive transaction is ambiguous",
+          source_path: "/Users/alice/private",
+          raw_body: "do not render",
+        },
+      }, { ok: false, status: 500 })
+      throw new Error(`unexpected ${url}`)
+    },
+    confirmArchive: () => true,
+  })
+  await controller.start()
+  const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+  const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+  const oldStatus = findCandidateControl(root, "archiveStatus", "W4387886124")
+  input.value = "Wang23-DIO"
+  input.dispatch("input")
+  await archive.dispatch("click")
+
+  const panel = root.elements.get("#candidate-queue-panel")
+  const banner = findDescendant(panel, (node) => node.dataset?.archiveRecoveryBanner === "")
+  const rebuiltArchive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+  assert.equal(capabilityReads, 2, "a write failure can change server recovery state")
+  assert.equal(banner.hidden, false)
+  assert.match(banner.textContent, /候选归档事务状态不明确/u)
+  assert.equal(findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild"), null)
+  assert.equal(rebuiltArchive.disabled, true)
+  assert.equal(store.read().candidates[0].stage, "confirmed_for_archive")
+  assert.doesNotMatch(panel.textContent + oldStatus.textContent, /Users|alice|private|source_path|raw_body|do not render/iu)
+})
+
+test("Task 11 RED2 capability matrices show rebuild only for candidate recovery and fixed manual blocking banners", async () => {
+  const states = [
+    ["normal", task11Capabilities(), false, true, ""],
+    ["no-source", task11Capabilities({ candidate_archive: false, archive_rebuild: false, archive_source_id: null }), false, false, ""],
+    ["candidate", task11Capabilities({
+      note_import: false,
+      candidate_archive: false,
+      recovery: {
+        required: true,
+        kind: "candidate_archive",
+        reason_code: "ARCHIVE_REBUILD_FAILED",
+        archive_source_id: "main_papers",
+        paper_id: "Wang23-DIO",
+        openalex_id: "W4387886124",
+      },
+    }), true, false, "论文库索引重建失败"],
+    ["manual-note", task11Capabilities({
+      note_import: false,
+      candidate_archive: false,
+      archive_rebuild: false,
+      archive_source_id: null,
+      recovery: {
+        required: true,
+        kind: "manual_note",
+        reason_code: "ROLLBACK_FAILED",
+        archive_source_id: null,
+        paper_id: null,
+        openalex_id: null,
+      },
+    }), false, false, "笔记导入需要人工恢复"],
+    ["manual-archive", task11Capabilities({
+      note_import: false,
+      candidate_archive: false,
+      archive_rebuild: false,
+      archive_source_id: null,
+      recovery: {
+        required: true,
+        kind: "manual_archive",
+        reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS",
+        archive_source_id: null,
+        paper_id: null,
+        openalex_id: null,
+      },
+    }), false, false, "候选归档事务状态不明确"],
+  ]
+
+  for (const [name, capabilities, hasRebuild, archiveEnabled, message] of states) {
+    const root = keywordRoot()
+    const controller = createKeywordDiscoveryController({
+      root,
+      candidateStore: task11CandidateStore(),
+      prepareAccess() {},
+      searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+      fetchImpl: async () => task11Response(capabilities),
+      confirmArchive: () => false,
+    })
+    await controller.start()
+    const panel = root.elements.get("#candidate-queue-panel")
+    const banner = findDescendant(panel, (node) => node.dataset?.archiveRecoveryBanner === "")
+    const rebuild = findDescendant(panel, (node) => node.dataset?.archiveRecoveryAction === "rebuild")
+    const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+    const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+    input.value = "Wang23-DIO"
+    input.dispatch("input")
+    assert.equal(Boolean(rebuild), hasRebuild, name)
+    assert.equal(archive.disabled, !archiveEnabled, name)
+    if (message) assert.match(banner.textContent, new RegExp(message, "u"), name)
+    if (name === "candidate") {
+      assert.match(banner.textContent, /main_papers/u)
+      assert.match(banner.textContent, /Wang23-DIO/u)
+      assert.match(banner.textContent, /W4387886124/u)
+    }
+  }
+})
+
+test("Task 11 RED2 failed immediate rebuild refreshes recovery, and explicit recovery reloads the index before marking", async () => {
+  const root = keywordRoot()
+  const store = task11CandidateStore()
+  let capabilityReads = 0
+  let indexLoads = 0
+  const normal = task11Capabilities()
+  const recovery = task11Capabilities({
+    note_import: false,
+    candidate_archive: false,
+    recovery: {
+      required: true,
+      kind: "candidate_archive",
+      reason_code: "ARCHIVE_REBUILD_FAILED",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: "W4387886124",
+    },
+  })
+  const controller = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    prepareAccess() {},
+    searchWorks: async () => ({ total: 0, costUsd: 0, works: [] }),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") {
+        const capabilities = [normal, recovery, normal][capabilityReads] ?? normal
+        capabilityReads += 1
+        return task11Response(capabilities)
+      }
+      if (url === "/api/v1/archive/candidates") return task11Response({
+        status: "created",
+        paper_id: "Wang23-DIO",
+        folder_name: "Wang23-DIO",
+        rebuild_status: "failed",
+        index_state: "last_good",
+        recovery_required: true,
+      }, { status: 201 })
+      if (url === "/api/v1/archive/rebuild") return task11Response({
+        status: "recovered",
+        paper_id: "Wang23-DIO",
+        rebuild_status: "complete",
+        paper_count: 1,
+      })
+      throw new Error(`unexpected ${url}`)
+    },
+    loadIndex: async () => {
+      indexLoads += 1
+      return { papers: [{ paper_id: "Wang23-DIO", doi_or_url: "10.1109/access.2023.3327199" }] }
+    },
+    confirmArchive: () => true,
+  })
+  await controller.start()
+  const input = findCandidateControl(root, "archivePaperId", "W4387886124")
+  const archive = findCandidateControl(root, "archiveCandidate", "W4387886124")
+  input.value = "Wang23-DIO"
+  input.dispatch("input")
+  await archive.dispatch("click")
+  assert.deepEqual(store.marked, [], "a last-good response cannot mark the browser candidate")
+  assert.equal(indexLoads, 0)
+  const banner = findDescendant(root.elements.get("#candidate-queue-panel"), (node) => node.dataset?.archiveRecoveryBanner === "")
+  const rebuild = findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild")
+  assert.ok(rebuild)
+  assert.equal(archive.disabled, true)
+  await rebuild.dispatch("click")
+  assert.equal(indexLoads, 1)
+  assert.deepEqual(store.marked, ["W4387886124"])
+  assert.equal(capabilityReads, 3, "successful recovery must re-read capabilities")
+  assert.equal(banner.hidden, true, "cleared server recovery must remove the stale failure banner")
+  assert.equal(findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild"), null)
 })

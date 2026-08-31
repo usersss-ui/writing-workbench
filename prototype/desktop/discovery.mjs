@@ -1,6 +1,16 @@
 import { createCandidateStore } from "./candidate-storage.mjs"
 import { resolveInstitutionAccess } from "./institution-access.mjs"
+import {
+  archiveConfirmedCandidate,
+  isValidLocalPaperId,
+  loadLocalLibraryCapabilities,
+  loadPaperIndex,
+  markCandidateArchivedAfterIndexRefresh,
+  requestArchiveRebuild,
+} from "./library.mjs"
 import { searchOpenAlexWorks } from "./openalex-search.mjs"
+
+const ARCHIVE_DISCLOSURE = "仅归档书目信息，不含 PDF/OCR/证据核验"
 
 const KEYWORDS = Object.freeze([
   ["时变非平衡有向网络", "time-varying unbalanced directed graph"],
@@ -70,22 +80,227 @@ function candidateCard(root, candidate, actions) {
   article.dataset.queuePaper = candidate.paperId
   article.className = "candidate-queue-card"
   const title = root.createElement("h3"); title.textContent = candidate.title
-  const stage = root.createElement("p"); stage.textContent = candidate.stage === "confirmed_for_archive" ? "元数据待核验 · 待归档" : "待筛选"
+  const stage = root.createElement("p")
+  stage.textContent = candidate.stage === "metadata_archived"
+    ? "元数据已归档"
+    : candidate.stage === "confirmed_for_archive"
+      ? "元数据待核验 · 待归档"
+      : "待筛选"
   article.appendChild(title); article.appendChild(stage)
   const buttons = root.createElement("div")
   if (candidate.stage === "pending_screening") {
     const confirm = root.createElement("button"); confirm.type = "button"; confirm.textContent = "确认待归档"; confirm.addEventListener("click", () => actions.confirm(candidate.paperId)); buttons.appendChild(confirm)
-  } else {
+  } else if (candidate.stage === "confirmed_for_archive") {
     const back = root.createElement("button"); back.type = "button"; back.textContent = "移回待筛选"; back.addEventListener("click", () => actions.moveToPending(candidate.paperId)); buttons.appendChild(back)
   }
   const remove = root.createElement("button"); remove.type = "button"; remove.textContent = "移除"; remove.addEventListener("click", () => actions.remove(candidate.paperId)); buttons.appendChild(remove)
   article.appendChild(buttons)
+  if (candidate.stage === "confirmed_for_archive") {
+    const archiveSection = root.createElement("section")
+    archiveSection.className = "candidate-archive-section"
+    const label = root.createElement("label")
+    label.textContent = "本地论文 ID"
+    const input = root.createElement("input")
+    input.type = "text"
+    input.autocomplete = "off"
+    input.spellcheck = false
+    input.dataset.archivePaperId = candidate.paperId
+    input.value = actions.localPaperId(candidate.paperId)
+    const help = root.createElement("small")
+    help.dataset.archivePaperIdHelp = candidate.paperId
+    help.textContent = "格式示例：Wang23-DIO；兼容 LIB-ABCDEF123456。不会从 OpenAlex ID 推断。"
+    const disclosure = root.createElement("p")
+    disclosure.className = "candidate-archive-disclosure"
+    disclosure.textContent = ARCHIVE_DISCLOSURE
+    const archiveButton = root.createElement("button")
+    archiveButton.type = "button"
+    archiveButton.dataset.archiveCandidate = candidate.paperId
+    archiveButton.textContent = "归档书目信息"
+    const status = root.createElement("p")
+    status.dataset.archiveStatus = candidate.paperId
+    status.setAttribute?.("role", "status")
+    status.setAttribute?.("aria-live", "polite")
+    const sync = () => {
+      actions.setLocalPaperId(candidate.paperId, input.value)
+      archiveButton.disabled = !actions.canArchive(input.value)
+    }
+    input.addEventListener("input", sync)
+    archiveButton.addEventListener("click", () => actions.archive(candidate, {
+      localPaperId: input.value,
+      input,
+      button: archiveButton,
+      status,
+      sync,
+    }))
+    label.append?.(input)
+    archiveSection.append?.(label, help, disclosure, archiveButton, status)
+    sync()
+    article.appendChild(archiveSection)
+  }
   return article
 }
 
-export function createKeywordDiscoveryController({ root, prepareAccess = () => {}, searchWorks = searchOpenAlexWorks, candidateStore } = {}) {
+export function createKeywordDiscoveryController({
+  root,
+  prepareAccess = () => {},
+  searchWorks = searchOpenAlexWorks,
+  candidateStore,
+  fetchImpl = globalThis.fetch,
+  loadIndex = () => loadPaperIndex(fetchImpl),
+  confirmArchive = (message) => globalThis.confirm?.(message) === true,
+} = {}) {
   if (!root || !candidateStore) throw new TypeError("关键词发现控制器缺少必要依赖")
   let works = []
+  let localCapabilities = null
+  let recoveryBanner = null
+  const localPaperIds = new Map()
+
+  const canArchive = (paperId) => localCapabilities?.candidate_archive === true
+    && localCapabilities?.recovery?.required === false
+    && isValidLocalPaperId(paperId)
+
+  const ensureRecoveryBanner = () => {
+    if (recoveryBanner) return recoveryBanner
+    const panel = node(root, "#candidate-queue-panel")
+    if (!panel) return null
+    recoveryBanner = root.createElement("section")
+    recoveryBanner.className = "archive-recovery-banner"
+    recoveryBanner.dataset.archiveRecoveryBanner = ""
+    recoveryBanner.setAttribute?.("role", "status")
+    recoveryBanner.setAttribute?.("aria-live", "polite")
+    recoveryBanner.hidden = true
+    panel.appendChild?.(recoveryBanner)
+    return recoveryBanner
+  }
+
+  const runRecovery = async (button, status) => {
+    const recovery = localCapabilities?.recovery
+    if (
+      recovery?.required !== true
+      || recovery.kind !== "candidate_archive"
+      || localCapabilities?.archive_rebuild !== true
+    ) return
+    button.disabled = true
+    status.textContent = "正在重建论文库索引…"
+    try {
+      const result = await requestArchiveRebuild({
+        fetchImpl,
+        archiveSourceId: recovery.archive_source_id,
+        paperId: recovery.paper_id,
+        openAlexId: recovery.openalex_id,
+      })
+      const freshIndex = await loadIndex()
+      const marked = markCandidateArchivedAfterIndexRefresh({
+        candidateStore,
+        paperIndex: freshIndex,
+        localPaperId: result.paper_id,
+        openAlexId: recovery.openalex_id,
+      })
+      status.textContent = marked
+        ? "恢复完成，元数据归档完成。"
+        : "恢复完成；未找到本地候选或严格身份不匹配，未更改本地候选状态。"
+      if (marked) renderQueue()
+      await refreshCapabilities()
+    } catch (error) {
+      status.textContent = error?.name === "LocalLibraryApiError"
+        ? error.message
+        : "论文库恢复未完成，请稍后重试。"
+      button.disabled = false
+    }
+  }
+
+  const renderRecoveryBanner = () => {
+    const banner = ensureRecoveryBanner()
+    if (!banner) return
+    banner.replaceChildren?.()
+    const recovery = localCapabilities?.recovery
+    if (recovery?.required !== true) {
+      banner.hidden = true
+      return
+    }
+    banner.hidden = false
+    const message = root.createElement("p")
+    const tuple = root.createElement("p")
+    tuple.className = "archive-recovery-tuple"
+    const status = root.createElement("p")
+    status.dataset.archiveRecoveryStatus = ""
+    if (recovery.kind === "candidate_archive") {
+      message.textContent = "上次元数据归档已写入，但论文库索引重建失败。请显式重建后再核对候选状态。"
+      tuple.textContent = `归档来源 ${recovery.archive_source_id} · 本地论文 ID ${recovery.paper_id} · OpenAlex ${recovery.openalex_id}`
+      const button = root.createElement("button")
+      button.type = "button"
+      button.dataset.archiveRecoveryAction = "rebuild"
+      button.textContent = "重建论文库索引"
+      button.disabled = localCapabilities.archive_rebuild !== true
+      button.addEventListener("click", () => runRecovery(button, status))
+      banner.append?.(message, tuple, button, status)
+      return
+    }
+    if (recovery.kind === "manual_note") {
+      message.textContent = "笔记导入需要人工恢复；写入操作已停用，仍可浏览上一次可用的论文库。"
+    } else {
+      message.textContent = "候选归档事务状态不明确，需要人工核验；写入操作已停用，仍可浏览上一次可用的论文库。"
+    }
+    banner.append?.(message, status)
+  }
+
+  const refreshCapabilities = async () => {
+    try { localCapabilities = await loadLocalLibraryCapabilities(fetchImpl) } catch { localCapabilities = null }
+    renderRecoveryBanner()
+    renderQueue()
+    return localCapabilities
+  }
+
+  const archiveCandidate = async (candidate, context) => {
+    const current = candidateStore.read().candidates.filter((item) => item.paperId === candidate.paperId)
+    if (current.length !== 1 || current[0].stage !== "confirmed_for_archive" || !canArchive(context.localPaperId)) return
+    const confirmation = [
+      `本地论文 ID：${context.localPaperId}`,
+      `归档来源：${localCapabilities.archive_source_id}`,
+      ARCHIVE_DISCLOSURE,
+    ].join("\n")
+    let confirmed = false
+    try { confirmed = await Promise.resolve(confirmArchive(confirmation)) } catch { confirmed = false }
+    if (!confirmed) return
+    context.button.disabled = true
+    context.status.textContent = "正在归档书目信息…"
+    let completed = false
+    try {
+      const result = await archiveConfirmedCandidate({
+        fetchImpl,
+        archiveSourceId: localCapabilities.archive_source_id,
+        paperId: context.localPaperId,
+        candidate: current[0],
+      })
+      if (result.rebuild_status === "failed") {
+        context.status.textContent = "元数据已写入，但论文库索引重建失败；请使用恢复操作。"
+        await refreshCapabilities()
+        return
+      }
+      const freshIndex = await loadIndex()
+      const marked = markCandidateArchivedAfterIndexRefresh({
+        candidateStore,
+        paperIndex: freshIndex,
+        localPaperId: result.paper_id,
+        openAlexId: candidate.paperId,
+      })
+      if (!marked) {
+        context.status.textContent = "归档响应已完成，但新索引未严格匹配该候选；本地候选状态未更改。"
+        return
+      }
+      completed = true
+      context.status.textContent = "元数据归档完成。"
+      context.button.disabled = true
+    } catch (error) {
+      context.status.textContent = error?.name === "LocalLibraryApiError"
+        ? error.message
+        : "归档操作未完成，请稍后重试。"
+      await refreshCapabilities()
+    } finally {
+      if (!completed) context.sync()
+    }
+  }
+
   const renderQueue = () => {
     const state = candidateStore.read()
     const candidates = state.candidates
@@ -95,7 +310,15 @@ export function createKeywordDiscoveryController({ root, prepareAccess = () => {
     const list = node(root, "#candidate-queue-list"); const empty = node(root, "[data-candidate-empty]")
     if (!list) return
     if (empty) empty.hidden = candidates.length > 0
-    const cards = candidates.map((candidate) => candidateCard(root, candidate, { confirm(id) { candidateStore.confirm(id); renderQueue() }, moveToPending(id) { candidateStore.moveToPending(id); renderQueue() }, remove(id) { candidateStore.remove(id); renderQueue() } }))
+    const cards = candidates.map((candidate) => candidateCard(root, candidate, {
+      confirm(id) { candidateStore.confirm(id); renderQueue() },
+      moveToPending(id) { localPaperIds.delete(id); candidateStore.moveToPending(id); renderQueue() },
+      remove(id) { localPaperIds.delete(id); candidateStore.remove(id); renderQueue() },
+      localPaperId(id) { return localPaperIds.get(id) ?? "" },
+      setLocalPaperId(id, value) { localPaperIds.set(id, typeof value === "string" ? value : "") },
+      canArchive,
+      archive: archiveCandidate,
+    }))
     list.replaceChildren(...(cards.length ? cards : empty ? [empty] : []))
   }
   const activate = (mode) => {
@@ -121,7 +344,7 @@ export function createKeywordDiscoveryController({ root, prepareAccess = () => {
     } catch (error) { setText(root, "#keyword-search-status", error?.message || "OpenAlex 检索失败") } finally { if (button) button.disabled = false }
   }
   return {
-    start() {
+    async start() {
       const tabs = nodes(root, "[data-discovery-mode]")
       const selectTab = (tab) => { activate(tab.dataset.discoveryMode); tab.focus?.() }
       for (const [index, tab] of tabs.entries()) {
@@ -140,6 +363,7 @@ export function createKeywordDiscoveryController({ root, prepareAccess = () => {
       node(root, "#keyword-search-form")?.addEventListener("submit", (event) => { event.preventDefault(); try { const expression = buildKeywordSearchExpression(node(root, "#keyword-query")?.value); const input = node(root, "#english-query"); if (input) input.value = expression; setText(root, "#keyword-search-status", "已生成英文检索式；确认后搜索 OpenAlex。"); node(root, "#keyword-search-results")?.focus?.() } catch (error) { setText(root, "#keyword-search-status", error.message) } })
       node(root, "#keyword-live-search")?.addEventListener("click", runSearch)
       renderQueue(); activate("keyword")
+      await refreshCapabilities()
     },
     prepareAccess(locator) { prepareAccess(locator) },
     getWorks() { return [...works] },
@@ -159,9 +383,24 @@ export async function loadInstitutionProfile(fetchImpl = fetch) {
   return profile
 }
 
-export function createDiscoveryController({ root, loadInstitution = loadInstitutionProfile, clipboard = globalThis.navigator?.clipboard } = {}) {
-  const store = createCandidateStore(globalThis.localStorage)
-  const keyword = createKeywordDiscoveryController({ root, candidateStore: store, prepareAccess(locator) { const input = node(root, "#access-locator"); if (input) { input.value = locator; input.focus() } } })
+export function createDiscoveryController({
+  root,
+  loadInstitution = loadInstitutionProfile,
+  clipboard = globalThis.navigator?.clipboard,
+  storage = globalThis.localStorage,
+  fetchImpl = globalThis.fetch,
+  loadIndex,
+  confirmArchive,
+} = {}) {
+  const store = createCandidateStore(storage)
+  const keyword = createKeywordDiscoveryController({
+    root,
+    candidateStore: store,
+    fetchImpl,
+    ...(typeof loadIndex === "function" ? { loadIndex } : {}),
+    ...(typeof confirmArchive === "function" ? { confirmArchive } : {}),
+    prepareAccess(locator) { const input = node(root, "#access-locator"); if (input) { input.value = locator; input.focus() } },
+  })
   let profile = null
   let accessResult = null
   const renderAccess = () => {
@@ -177,7 +416,7 @@ export function createDiscoveryController({ root, loadInstitution = loadInstitut
   }
   return {
     async start() {
-      keyword.start()
+      await keyword.start()
       try {
         profile = await loadInstitution()
         const select = node(root, "#access-provider")

@@ -476,6 +476,23 @@ function createNoteImportControllerDocument() {
   indexReloadStatus.append(indexReload)
   detail.append(detailBack, readerTabs, readerLoadStatus, readerTocToggle, addNote, noteImportHelp, indexReloadStatus)
 
+  const recoveryBanner = new MemoryNode("section")
+  recoveryBanner.ownerDocument = document
+  recoveryBanner.dataset.libraryRecoveryBanner = ""
+  recoveryBanner.hidden = true
+  const recoveryMessage = new MemoryNode("p")
+  recoveryMessage.ownerDocument = document
+  recoveryMessage.dataset.libraryRecoveryMessage = ""
+  const recoveryTuple = new MemoryNode("p")
+  recoveryTuple.ownerDocument = document
+  recoveryTuple.dataset.libraryRecoveryTuple = ""
+  const recoveryAction = make("library-archive-rebuild", "button")
+  recoveryAction.hidden = true
+  const recoveryStatus = new MemoryNode("p")
+  recoveryStatus.ownerDocument = document
+  recoveryStatus.dataset.libraryRecoveryStatus = ""
+  recoveryBanner.append(recoveryMessage, recoveryTuple, recoveryAction, recoveryStatus)
+
   const previewMounts = {}
   const materialControls = {}
   const materialSelects = {}
@@ -535,6 +552,10 @@ function createNoteImportControllerDocument() {
     ["#library-reader-toc [data-reader-toc-links]", readerTocLinks],
     ["[data-note-import-paper-id]", notePaperId],
     ["[data-note-import-status]", noteStatus],
+    ["[data-library-recovery-banner]", recoveryBanner],
+    ["[data-library-recovery-message]", recoveryMessage],
+    ["[data-library-recovery-tuple]", recoveryTuple],
+    ["[data-library-recovery-status]", recoveryStatus],
   ])
   for (const kind of ["note", "derivation", "simulation", "code_compare"]) {
     selectorNodes.set(`[data-reader-material-control="${kind}"]`, materialControls[kind])
@@ -553,7 +574,7 @@ function createNoteImportControllerDocument() {
     return baseQueryAll(selector)
   }
 
-  document.body.append(listView, detail, readerToc, inspectorRoot, noteDialog)
+  document.body.append(recoveryBanner, listView, detail, readerToc, inspectorRoot, noteDialog)
   return {
     ...ui,
     results,
@@ -569,6 +590,11 @@ function createNoteImportControllerDocument() {
     readerTocToggle,
     addNote,
     noteImportHelp,
+    recoveryBanner,
+    recoveryMessage,
+    recoveryTuple,
+    recoveryAction,
+    recoveryStatus,
     indexReloadStatus,
     indexReload,
     materialSelects,
@@ -3640,4 +3666,674 @@ test("all inline math avoids scroll containers while display math remains horizo
   const displayMath = cssRule('.paper-library-page .math-display[data-math-rendered="true"] > .katex-display')
   assert.equal(cssDeclaration(displayMath, "overflow-x"), "auto")
   assert.equal(cssDeclaration(displayMath, "overflow-y"), "hidden")
+})
+
+function task11Candidate(overrides = {}) {
+  return {
+    paperId: "W4387886124",
+    doi: "10.1109/access.2023.3327199",
+    title: "Distributed online optimization over directed networks",
+    authors: ["Yinghui Wang", "Jiuwei Wang"],
+    year: 2023,
+    source: "IEEE Access",
+    citations: 12,
+    isOpenAccess: true,
+    openAccessUrl: "https://example.org/open-paper",
+    landingPageUrl: "https://openalex.org/W4387886124",
+    topics: ["Distributed optimization"],
+    abstract: "Discovery text",
+    stage: "confirmed_for_archive",
+    ...overrides,
+  }
+}
+
+function task11CandidateStore(candidates, transition = null) {
+  let state = { version: 1, candidates: structuredClone(candidates) }
+  const marked = []
+  return {
+    marked,
+    read: () => structuredClone(state),
+    markMetadataArchived(openAlexId) {
+      marked.push(openAlexId)
+      if (transition) return transition(openAlexId, structuredClone(state))
+      state = {
+        version: 1,
+        candidates: state.candidates.map((candidate) => (
+          candidate.paperId === openAlexId
+            ? { ...candidate, stage: "metadata_archived" }
+            : candidate
+        )),
+      }
+      return { changed: true, persisted: true, reason: null, state: structuredClone(state) }
+    },
+  }
+}
+
+test("Task 11 RED1 archive and recovery clients send exact protected requests and accept only exact responses", async () => {
+  const {
+    archiveConfirmedCandidate,
+    requestArchiveRebuild,
+  } = await import("./library.mjs")
+  const candidate = task11Candidate()
+  const calls = []
+  const archiveResult = await archiveConfirmedCandidate({
+    fetchImpl: async (url, options) => {
+      calls.push([url, options])
+      return localJsonResponse({
+        status: "created",
+        paper_id: "Wang23-DIO",
+        folder_name: "Wang23-DIO",
+        rebuild_status: "complete",
+        paper_count: 2,
+      }, { status: 201 })
+    },
+    archiveSourceId: "main_papers",
+    paperId: "Wang23-DIO",
+    candidate,
+  })
+  assert.deepEqual(archiveResult, {
+    status: "created",
+    paper_id: "Wang23-DIO",
+    folder_name: "Wang23-DIO",
+    rebuild_status: "complete",
+    paper_count: 2,
+  })
+  assert.deepEqual(calls[0], [
+    "/api/v1/archive/candidates",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Research-Console-Action": "archive-candidate",
+      },
+      body: JSON.stringify({
+        version: 1,
+        confirmation: "create_metadata_only",
+        archive_source_id: "main_papers",
+        paper_id: "Wang23-DIO",
+        candidate,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+    },
+  ])
+
+  const recovered = await requestArchiveRebuild({
+    fetchImpl: async (url, options) => {
+      calls.push([url, options])
+      return localJsonResponse({
+        status: "recovered",
+        paper_id: "Wang23-DIO",
+        rebuild_status: "complete",
+        paper_count: 2,
+      }, { status: 200 })
+    },
+    archiveSourceId: "main_papers",
+    paperId: "Wang23-DIO",
+    openAlexId: "W4387886124",
+  })
+  assert.deepEqual(recovered, {
+    status: "recovered",
+    paper_id: "Wang23-DIO",
+    rebuild_status: "complete",
+    paper_count: 2,
+  })
+  assert.deepEqual(calls[1], [
+    "/api/v1/archive/rebuild",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Research-Console-Action": "rebuild-library",
+      },
+      body: JSON.stringify({
+        confirmation: "retry_archive_rebuild",
+        archive_source_id: "main_papers",
+        paper_id: "Wang23-DIO",
+        openalex_id: "W4387886124",
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+    },
+  ])
+
+  let fallbackRequest = null
+  await archiveConfirmedCandidate({
+    fetchImpl: async (_url, options) => {
+      fallbackRequest = JSON.parse(options.body)
+      return localJsonResponse({
+        status: "created",
+        paper_id: "LIB-ABCDEF123456",
+        folder_name: "LIB-ABCDEF123456",
+        rebuild_status: "failed",
+        index_state: "last_good",
+        recovery_required: true,
+      }, { status: 201 })
+    },
+    archiveSourceId: "main_papers",
+    paperId: "LIB-ABCDEF123456",
+    candidate,
+  })
+  assert.equal(fallbackRequest.paper_id, "LIB-ABCDEF123456")
+})
+
+test("Task 11 RED1 clients reject inferred ids, busy writes, malformed bodies, and private locators without leaking raw failures", async () => {
+  const { archiveConfirmedCandidate, requestArchiveRebuild } = await import("./library.mjs")
+  const candidate = Object.freeze(task11Candidate())
+  let fetchCount = 0
+  for (const paperId of [undefined, "", candidate.paperId, "Paper01", "../Paper-01", "paper id-01"]) {
+    await assert.rejects(
+      () => archiveConfirmedCandidate({
+        fetchImpl: async () => { fetchCount += 1 },
+        archiveSourceId: "main_papers",
+        paperId,
+        candidate,
+      }),
+      /论文 ID|请求格式/u,
+    )
+  }
+  assert.equal(fetchCount, 0, "invalid or inferred local ids must fail before fetch")
+
+  let busyError = null
+  try {
+    await archiveConfirmedCandidate({
+      fetchImpl: async () => localJsonResponse({
+        error: {
+          code: "LIBRARY_WRITE_BUSY",
+          message: `private ${rootedValue("Users", "alice", "papers")}`,
+          source_path: rootedValue("Users", "alice", "papers"),
+        },
+      }, { ok: false, status: 409 }),
+      archiveSourceId: "main_papers",
+      paperId: "Wang23-DIO",
+      candidate,
+    })
+  } catch (error) {
+    busyError = error
+  }
+  assert.ok(busyError)
+  assert.match(busyError.message, /正在执行|稍后|冲突/u)
+  assert.doesNotMatch(String(busyError.message), /alice|Users|source_path|private/iu)
+  assert.equal(candidate.stage, "confirmed_for_archive")
+
+  const malformedResponses = [
+    { status: 201, payload: { status: "created", paper_id: "Wang23-DIO", folder_name: "Wang23-DIO", rebuild_status: "complete" } },
+    { status: 201, payload: { status: "created", paper_id: "Wang23-DIO", folder_name: "Wang23-DIO", rebuild_status: "complete", paper_count: 2, extra: true } },
+    { status: 201, payload: { status: "created", paper_id: "Other-01", folder_name: "Other-01", rebuild_status: "complete", paper_count: 2 } },
+    { status: 201, payload: { status: "created", paper_id: "Wang23-DIO", folder_name: rootedValue("Users", "alice", "papers"), rebuild_status: "complete", paper_count: 2 } },
+    { status: 200, payload: { status: "created", paper_id: "Wang23-DIO", folder_name: "Wang23-DIO", rebuild_status: "complete", paper_count: 2 } },
+  ]
+  for (const { status, payload } of malformedResponses) {
+    let caught = null
+    try {
+      await archiveConfirmedCandidate({
+        fetchImpl: async () => localJsonResponse(payload, { status }),
+        archiveSourceId: "main_papers",
+        paperId: "Wang23-DIO",
+        candidate,
+      })
+    } catch (error) {
+      caught = error
+    }
+    assert.ok(caught)
+    assert.match(caught.message, /响应格式无效/u)
+    assert.doesNotMatch(String(caught.message), /alice|Users|Other-01|extra/iu)
+  }
+
+  await assert.rejects(
+    () => requestArchiveRebuild({
+      fetchImpl: async () => localJsonResponse({
+        status: "recovered", paper_id: "Other-01", rebuild_status: "complete", paper_count: 2,
+      }),
+      archiveSourceId: "main_papers",
+      paperId: "Wang23-DIO",
+      openAlexId: "W4387886124",
+    }),
+    /响应格式无效/u,
+  )
+})
+
+test("Task 11 RED1 fresh-index marking requires one returned-id DOI or DOI-less OpenAlex identity match", async () => {
+  const { markCandidateArchivedAfterIndexRefresh } = await import("./library.mjs")
+  const doiCandidate = task11Candidate()
+  const doiStore = task11CandidateStore([doiCandidate])
+  const doiIndex = {
+    papers: [normalizedPaper({
+      paper_id: "Wang23-DIO",
+      doi_or_url: "https://doi.org/10.1109/ACCESS.2023.3327199",
+    })],
+  }
+  assert.equal(markCandidateArchivedAfterIndexRefresh({
+    candidateStore: doiStore,
+    paperIndex: doiIndex,
+    localPaperId: "Wang23-DIO",
+    openAlexId: doiCandidate.paperId,
+  }), true)
+  assert.deepEqual(doiStore.marked, [doiCandidate.paperId])
+
+  const doiFailures = [
+    { name: "missing DOI never falls back", papers: [normalizedPaper({ paper_id: "Wang23-DIO", doi_or_url: "https://openalex.org/W4387886124" })] },
+    { name: "duplicate DOI", papers: [
+      normalizedPaper({ paper_id: "Wang23-DIO", doi_or_url: "https://doi.org/10.1109/access.2023.3327199" }),
+      normalizedPaper({ paper_id: "Other-01", doi_or_url: "10.1109/access.2023.3327199" }),
+    ] },
+    { name: "conflicting local id", papers: [
+      normalizedPaper({ paper_id: "Other-01", doi_or_url: "10.1109/access.2023.3327199" }),
+      normalizedPaper({ paper_id: "Wang23-DIO", doi_or_url: "https://openalex.org/W4387886124" }),
+    ] },
+  ]
+  for (const fixture of doiFailures) {
+    const store = task11CandidateStore([doiCandidate])
+    assert.equal(markCandidateArchivedAfterIndexRefresh({
+      candidateStore: store,
+      paperIndex: { papers: fixture.papers },
+      localPaperId: "Wang23-DIO",
+      openAlexId: doiCandidate.paperId,
+    }), false, fixture.name)
+    assert.deepEqual(store.marked, [], fixture.name)
+  }
+
+  const openAlexCandidate = task11Candidate({ doi: null, paperId: "W987654321" })
+  const openAlexStore = task11CandidateStore([openAlexCandidate])
+  assert.equal(markCandidateArchivedAfterIndexRefresh({
+    candidateStore: openAlexStore,
+    paperIndex: { papers: [normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://openalex.org/W987654321" })] },
+    localPaperId: "Local-OpenAlex",
+    openAlexId: openAlexCandidate.paperId,
+  }), true)
+  assert.deepEqual(openAlexStore.marked, [openAlexCandidate.paperId])
+
+  const openAlexFailures = [
+    { name: "missing", papers: [normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://example.org/paper" })] },
+    { name: "duplicate", papers: [
+      normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://openalex.org/W987654321" }),
+      normalizedPaper({ paper_id: "Other-01", doi_or_url: "https://openalex.org/W987654321" }),
+    ] },
+    { name: "trailing slash is not canonical", papers: [normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://openalex.org/W987654321/" })] },
+    { name: "surrounding whitespace is not canonical", papers: [normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: " https://openalex.org/W987654321 " })] },
+    { name: "API works URL is not the public canonical identity", papers: [normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://api.openalex.org/works/W987654321" })] },
+    { name: "lowercase work id is not canonical", papers: [normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://openalex.org/w987654321" })] },
+    { name: "conflicting local id", papers: [normalizedPaper({ paper_id: "Other-01", doi_or_url: "https://openalex.org/W987654321" })] },
+    { name: "direct W id equality", localPaperId: "W987654321", papers: [normalizedPaper({ paper_id: "W987654321", doi_or_url: "https://example.org/not-openalex" })] },
+    { name: "title author year guess", papers: [normalizedPaper({
+      paper_id: "Local-OpenAlex",
+      doi_or_url: "https://example.org/not-openalex",
+      title_original: openAlexCandidate.title,
+      authors: openAlexCandidate.authors,
+      publication_year: openAlexCandidate.year,
+      year: openAlexCandidate.year,
+    })] },
+  ]
+  for (const fixture of openAlexFailures) {
+    const store = task11CandidateStore([openAlexCandidate])
+    assert.equal(markCandidateArchivedAfterIndexRefresh({
+      candidateStore: store,
+      paperIndex: { papers: fixture.papers },
+      localPaperId: fixture.localPaperId ?? "Local-OpenAlex",
+      openAlexId: openAlexCandidate.paperId,
+    }), false, fixture.name)
+    assert.deepEqual(store.marked, [], fixture.name)
+  }
+
+  const failedStore = task11CandidateStore([doiCandidate], () => ({
+    changed: false,
+    persisted: false,
+    reason: "persistence_failed",
+    state: { version: 1, candidates: [doiCandidate] },
+  }))
+  assert.throws(() => markCandidateArchivedAfterIndexRefresh({
+    candidateStore: failedStore,
+    paperIndex: doiIndex,
+    localPaperId: "Wang23-DIO",
+    openAlexId: doiCandidate.paperId,
+  }), /候选状态|保存/u)
+})
+
+test("Task 11 RED1 reload reconciliation advances only confirmed candidates with a unique strict identity", async () => {
+  const { reconcileArchivedCandidates } = await import("./library.mjs")
+  const candidates = [
+    task11Candidate({ paperId: "W100", doi: "10.1000/unique" }),
+    task11Candidate({ paperId: "W200", doi: null }),
+    task11Candidate({ paperId: "W300", doi: "10.1000/missing" }),
+    task11Candidate({ paperId: "W400", doi: "10.1000/duplicate" }),
+    task11Candidate({ paperId: "W500", doi: null }),
+    task11Candidate({ paperId: "W600", doi: "10.1000/already", stage: "metadata_archived" }),
+    task11Candidate({ paperId: "W700", doi: "10.1000/pending", stage: "pending_screening" }),
+  ]
+  const store = task11CandidateStore(candidates)
+  const result = reconcileArchivedCandidates({
+    candidateStore: store,
+    paperIndex: {
+      papers: [
+        normalizedPaper({ paper_id: "Local-Doi", doi_or_url: "https://doi.org/10.1000/UNIQUE" }),
+        normalizedPaper({ paper_id: "Local-OpenAlex", doi_or_url: "https://openalex.org/W200" }),
+        normalizedPaper({ paper_id: "Duplicate-01", doi_or_url: "10.1000/duplicate" }),
+        normalizedPaper({ paper_id: "Duplicate-02", doi_or_url: "https://doi.org/10.1000/duplicate" }),
+        normalizedPaper({ paper_id: "W500", doi_or_url: "https://example.org/not-openalex" }),
+        normalizedPaper({ paper_id: "Local-Already", doi_or_url: "10.1000/already" }),
+        normalizedPaper({ paper_id: "Local-Pending", doi_or_url: "10.1000/pending" }),
+      ],
+    },
+  })
+  assert.deepEqual(store.marked, ["W100", "W200"])
+  assert.deepEqual(result, { archived: ["W100", "W200"], unchanged: ["W300", "W400", "W500"] })
+})
+
+test("Task 11 RED2 direct archive helpers reject private, credential-bearing, noncanonical, and accessor candidates before fetch", async () => {
+  const { archiveConfirmedCandidate } = await import("./library.mjs")
+  const accessorAuthors = []
+  Object.defineProperty(accessorAuthors, "0", { enumerable: true, get: () => "Author" })
+  accessorAuthors.length = 1
+  const invalidCandidates = [
+    task11Candidate({ openAccessUrl: "https://10.0.0.1/private-paper" }),
+    task11Candidate({ landingPageUrl: "https://example.org/paper?access_token=sensitive" }),
+    task11Candidate({ title: "Distributed  online optimization" }),
+    task11Candidate({ authors: accessorAuthors }),
+    task11Candidate({ paperId: `W${"1".repeat(101)}` }),
+    task11Candidate({ doi: `10.1234/${"a".repeat(256)}` }),
+  ]
+  let fetchCount = 0
+  for (const candidate of invalidCandidates) {
+    await assert.rejects(() => archiveConfirmedCandidate({
+      fetchImpl: async () => { fetchCount += 1 },
+      archiveSourceId: "main_papers",
+      paperId: "Wang23-DIO",
+      candidate,
+    }), /候选归档请求格式无效/u)
+  }
+  assert.equal(fetchCount, 0)
+})
+
+test("Task 11 RED2 capability validator accepts manual archive only as the exact fixed blocking state", async () => {
+  const { loadLocalLibraryCapabilities } = await import("./library.mjs")
+  const manualArchive = finalLocalCapabilities({
+    note_import: false,
+    candidate_archive: false,
+    archive_rebuild: false,
+    archive_source_id: null,
+    recovery: {
+      required: true,
+      kind: "manual_archive",
+      reason_code: "ARCHIVE_TRANSACTION_AMBIGUOUS",
+      archive_source_id: null,
+      paper_id: null,
+      openalex_id: null,
+    },
+  })
+  assert.deepEqual(await loadLocalLibraryCapabilities(async () => localJsonResponse(manualArchive)), manualArchive)
+  for (const invalid of [
+    { ...manualArchive, archive_rebuild: true },
+    { ...manualArchive, archive_source_id: "main_papers" },
+    { ...manualArchive, recovery: { ...manualArchive.recovery, reason_code: "ROLLBACK_FAILED" } },
+    { ...manualArchive, recovery: { ...manualArchive.recovery, paper_id: "Paper-01" } },
+  ]) {
+    await assert.rejects(
+      () => loadLocalLibraryCapabilities(async () => localJsonResponse(invalid)),
+      /响应格式无效/u,
+    )
+  }
+})
+
+test("Task 11 RED3 manual note capabilities require a null top-level archive source", async () => {
+  const { loadLocalLibraryCapabilities } = await import("./library.mjs")
+  const manualNote = finalLocalCapabilities({
+    note_import: false,
+    candidate_archive: false,
+    archive_rebuild: false,
+    archive_source_id: null,
+    recovery: {
+      required: true,
+      kind: "manual_note",
+      reason_code: "ROLLBACK_FAILED",
+      archive_source_id: null,
+      paper_id: null,
+      openalex_id: null,
+    },
+  })
+  assert.deepEqual(await loadLocalLibraryCapabilities(async () => localJsonResponse(manualNote)), manualNote)
+  await assert.rejects(
+    () => loadLocalLibraryCapabilities(async () => localJsonResponse({
+      ...manualNote,
+      archive_source_id: "main_papers",
+    })),
+    /响应格式无效/u,
+  )
+})
+
+test("Task 11 RED2 library template provides one quiet recovery banner and candidate-only rebuild action", () => {
+  assert.equal(countMatches(html, /data-library-recovery-banner(?:=|\s|>)/gu), 1)
+  assert.equal(countMatches(html, /data-library-recovery-message(?:=|\s|>)/gu), 1)
+  assert.equal(countMatches(html, /data-library-recovery-tuple(?:=|\s|>)/gu), 1)
+  assert.equal(countMatches(html, /data-library-recovery-status(?:=|\s|>)/gu), 1)
+  assert.equal(countMatches(html, /id="library-archive-rebuild"/gu), 1)
+  assert.match(html, /data-library-recovery-banner[^>]*role="status"[^>]*hidden/u)
+  assert.match(styles, /\.paper-library-page \.library-recovery-banner\s*\{/u)
+})
+
+test("Task 11 RED2 library candidate recovery keeps browsing available and reloads before reconciling browser state", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const candidate = task11Candidate()
+  const candidateStore = task11CandidateStore([candidate])
+  const recoveryCapabilities = finalLocalCapabilities({
+    note_import: false,
+    candidate_archive: false,
+    archive_rebuild: true,
+    archive_source_id: "main_papers",
+    recovery: {
+      required: true,
+      kind: "candidate_archive",
+      reason_code: "ARCHIVE_REBUILD_FAILED",
+      archive_source_id: "main_papers",
+      paper_id: "Wang23-DIO",
+      openalex_id: candidate.paperId,
+    },
+  })
+  const normalCapabilities = finalLocalCapabilities()
+  let capabilityReads = 0
+  let indexReads = 0
+  const calls = []
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    candidateStore,
+    fetchImpl: async (url, options = {}) => {
+      calls.push([url, options])
+      if (url === "/api/v1/capabilities") {
+        capabilityReads += 1
+        return localJsonResponse(capabilityReads === 1 ? recoveryCapabilities : normalCapabilities)
+      }
+      if (url === "/api/v1/archive/rebuild") return localJsonResponse({
+        status: "recovered",
+        paper_id: "Wang23-DIO",
+        rebuild_status: "complete",
+        paper_count: 1,
+      })
+      if (url.endsWith("paper-index.json")) {
+        indexReads += 1
+        return localJsonResponse(indexReads === 1
+          ? v3Index([normalizedPaper()])
+          : v3Index([normalizedPaper({
+              paper_id: "Wang23-DIO",
+              slug: "wang23-dio",
+              doi_or_url: "https://doi.org/10.1109/ACCESS.2023.3327199",
+            })]))
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+
+  assert.deepEqual(await controller.start(), { ok: true, paperCount: 1 })
+  assert.equal(ui.recoveryBanner.hidden, false)
+  assert.match(ui.recoveryMessage.textContent, /论文库索引重建失败/u)
+  assert.match(ui.recoveryTuple.textContent, /main_papers/u)
+  assert.match(ui.recoveryTuple.textContent, /Wang23-DIO/u)
+  assert.match(ui.recoveryTuple.textContent, /W4387886124/u)
+  assert.equal(ui.recoveryAction.hidden, false)
+  assert.equal(ui.recoveryAction.disabled, false)
+  assert.equal(ui.addNote.disabled, true)
+  assert.match(ui.count.textContent, /显示 1 篇，共 1 篇/u)
+  ui.recoveryAction.click()
+  await settleControllerEvents()
+  assert.equal(indexReads, 2)
+  assert.deepEqual(candidateStore.marked, [candidate.paperId])
+  assert.equal(capabilityReads, 2, "successful recovery must re-read capabilities")
+  assert.equal(ui.recoveryBanner.hidden, true, "cleared recovery must remove the stale failure banner")
+  assert.equal(ui.recoveryAction.hidden, true)
+  assert.equal(ui.addNote.disabled, false, "normal server capabilities must restore eligible writes")
+  const rebuildCall = calls.find(([url]) => url === "/api/v1/archive/rebuild")
+  assert.deepEqual(JSON.parse(rebuildCall[1].body), {
+    confirmation: "retry_archive_rebuild",
+    archive_source_id: "main_papers",
+    paper_id: "Wang23-DIO",
+    openalex_id: candidate.paperId,
+  })
+})
+
+test("Task 11 RED2 both manual recovery variants are fixed read-only library banners with no action", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const manualStates = [
+    ["manual_note", "ROLLBACK_FAILED", "笔记导入需要人工恢复"],
+    ["manual_archive", "ARCHIVE_TRANSACTION_AMBIGUOUS", "候选归档事务状态不明确"],
+  ]
+  for (const [kind, reasonCode, message] of manualStates) {
+    const ui = createNoteImportControllerDocument()
+    const controller = createLibraryController({
+      document: ui.document,
+      storage: memoryStorage(),
+      candidateStore: task11CandidateStore([]),
+      fetchImpl: async (url) => {
+        if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+        return localJsonResponse(finalLocalCapabilities({
+          note_import: false,
+          candidate_archive: false,
+          archive_rebuild: false,
+          archive_source_id: null,
+          recovery: {
+            required: true,
+            kind,
+            reason_code: reasonCode,
+            archive_source_id: null,
+            paper_id: null,
+            openalex_id: null,
+          },
+        }))
+      },
+    })
+    assert.deepEqual(await controller.start(), { ok: true, paperCount: 1 })
+    assert.equal(ui.recoveryBanner.hidden, false, kind)
+    assert.match(ui.recoveryMessage.textContent, new RegExp(message, "u"), kind)
+    assert.equal(ui.recoveryAction.hidden, true, kind)
+    assert.equal(ui.addNote.disabled, true, kind)
+    assert.match(ui.count.textContent, /显示 1 篇，共 1 篇/u)
+  }
+})
+
+test("Task 11 RED3 note import 500 refreshes capabilities into fixed manual recovery and disables writes", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  let capabilityReads = 0
+  const manualNote = finalLocalCapabilities({
+    note_import: false,
+    candidate_archive: false,
+    archive_rebuild: false,
+    archive_source_id: null,
+    recovery: {
+      required: true,
+      kind: "manual_note",
+      reason_code: "ROLLBACK_FAILED",
+      archive_source_id: null,
+      paper_id: null,
+      openalex_id: null,
+    },
+  })
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") {
+        capabilityReads += 1
+        return localJsonResponse(capabilityReads === 1 ? finalLocalCapabilities() : manualNote)
+      }
+      if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+      if (url === "/api/v1/notes/inspect") return localJsonResponse(noteInspection())
+      if (url === "/api/v1/notes/import") return localJsonResponse({
+        error: {
+          code: "ROLLBACK_FAILED",
+          message: `${rootedValue("Users", "alice", "private")} raw rollback failure`,
+          file_name: rootedValue("Users", "alice", "private", "note.md"),
+          raw_body: "do not render",
+        },
+      }, { ok: false, status: 500 })
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+
+  await controller.start()
+  ui.results.querySelector('[data-action="open-detail"]').click()
+  ui.addNote.click()
+  ui.noteFile.files = [markdownFile("local.md", "# 论文精读")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  assert.equal(ui.noteSubmit.disabled, false)
+  ui.noteForm.dispatch("submit")
+  await settleControllerEvents()
+
+  assert.equal(capabilityReads, 2, "a failed write can change server recovery state")
+  assert.equal(ui.recoveryBanner.hidden, false)
+  assert.match(ui.recoveryMessage.textContent, /笔记导入需要人工恢复/u)
+  assert.equal(ui.recoveryAction.hidden, true)
+  assert.equal(ui.addNote.disabled, true)
+  assert.equal(ui.noteSubmit.disabled, true)
+  assert.doesNotMatch(
+    ui.recoveryBanner.textContent + ui.noteDialog.textContent,
+    /Users|alice|private|raw rollback|raw_body|do not render/iu,
+  )
+})
+
+test("Task 11 RED2 recovery can finish truthfully when no browser candidate exists", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const candidateStore = task11CandidateStore([])
+  let capabilityReads = 0
+  let indexReads = 0
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: memoryStorage(),
+    candidateStore,
+    fetchImpl: async (url) => {
+      if (url.endsWith("paper-index.json")) {
+        indexReads += 1
+        return localJsonResponse(v3Index())
+      }
+      if (url === "/api/v1/archive/rebuild") return localJsonResponse({
+        status: "recovered", paper_id: "Wang23-DIO", rebuild_status: "complete", paper_count: 1,
+      })
+      capabilityReads += 1
+      return localJsonResponse(capabilityReads === 1
+        ? finalLocalCapabilities({
+            note_import: false,
+            candidate_archive: false,
+            archive_rebuild: true,
+            archive_source_id: "main_papers",
+            recovery: {
+              required: true,
+              kind: "candidate_archive",
+              reason_code: "ARCHIVE_REBUILD_FAILED",
+              archive_source_id: "main_papers",
+              paper_id: "Wang23-DIO",
+              openalex_id: "W4387886124",
+            },
+          })
+        : finalLocalCapabilities())
+    },
+  })
+  await controller.start()
+  ui.recoveryAction.click()
+  await settleControllerEvents()
+  assert.equal(indexReads, 2)
+  assert.deepEqual(candidateStore.marked, [])
+  assert.equal(capabilityReads, 2)
+  assert.equal(ui.recoveryBanner.hidden, true)
+  assert.doesNotMatch(ui.recoveryMessage.textContent, /元数据归档完成/u)
 })

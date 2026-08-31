@@ -224,6 +224,16 @@ button { color: inherit; }
 .discovery-result-card p, .candidate-queue-card p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .discovery-result-card > div, .candidate-queue-card > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .discovery-result-card a, .discovery-result-card button, .candidate-queue-card button { border: 1px solid rgba(22,119,255,.18); border-radius: 7px; background: white; color: var(--blue-deep); padding: 5px 8px; cursor: pointer; font-size: 10px; font-weight: 700; }
+.candidate-archive-section { display: grid; gap: 7px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.candidate-archive-section label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 10px; font-weight: 800; }
+.candidate-archive-section input { width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: white; color: var(--ink); font: inherit; }
+.candidate-archive-section small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.candidate-archive-section .candidate-archive-disclosure { margin: 0; color: var(--amber-deep); font-weight: 700; }
+.candidate-archive-section button[disabled], .archive-recovery-banner button[disabled] { cursor: not-allowed; opacity: .55; }
+.archive-recovery-banner { margin-top: 12px; padding: 11px 12px; border: 1px solid rgba(199,120,24,.2); border-radius: 10px; background: var(--amber-soft); color: var(--amber-deep); font-size: 10px; line-height: 1.55; }
+.archive-recovery-banner p { margin: 0; }
+.archive-recovery-banner .archive-recovery-tuple { margin-top: 5px; overflow-wrap: anywhere; color: var(--ink-soft); }
+.archive-recovery-banner button { margin-top: 9px; }
 .access-guide { padding-top: 1px; }
 .access-result { margin-top: 16px; padding: 14px; border: 1px solid rgba(22,119,255,.16); border-radius: 12px; background: var(--blue-soft); }
 .access-result > p, .access-result ol { color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
@@ -341,6 +351,24 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
   line-height: 1.45;
   text-align: right;
 }
+.paper-library-page .library-recovery-banner {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(199,120,24,.2);
+  border-radius: 12px;
+  background: var(--amber-soft);
+  color: var(--amber-deep);
+}
+.paper-library-page .library-recovery-banner[hidden] { display: none; }
+.paper-library-page .library-recovery-banner p { margin: 0; font-size: 10px; line-height: 1.5; }
+.paper-library-page .library-recovery-tuple { margin-top: 4px; overflow-wrap: anywhere; color: var(--ink-soft); }
+.paper-library-page .library-recovery-status { margin-top: 4px; font-weight: 700; }
+.paper-library-page .library-recovery-banner button { flex: 0 0 auto; }
 .library-page .library-shelf {
   margin-top: 20px;
   padding: 17px 18px 18px;

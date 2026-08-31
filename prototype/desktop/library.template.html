@@ -93,6 +93,15 @@
             </div>
           </div>
 
+          <section class="library-recovery-banner" data-library-recovery-banner role="status" aria-live="polite" hidden>
+            <div>
+              <p data-library-recovery-message></p>
+              <p class="library-recovery-tuple" data-library-recovery-tuple></p>
+              <p class="library-recovery-status" data-library-recovery-status></p>
+            </div>
+            <button class="button button--secondary" id="library-archive-rebuild" type="button" hidden>重建论文库索引</button>
+          </section>
+
           <section class="library-shelf" id="p02-shelf" aria-labelledby="p02-shelf-title">
             <div class="section-heading section-heading--compact">
               <div>
@@ -458,11 +467,13 @@
 
     <script type="module" src="./assets/library.mjs"></script>
     <script type="module">
+      import { createCandidateStore } from "./assets/candidate-storage.mjs"
       import { createLibraryController } from "./assets/library.mjs"
 
       const controller = createLibraryController({
         document,
         storage: window.localStorage,
+        candidateStore: createCandidateStore(window.localStorage),
         fetchImpl: window.fetch.bind(window),
       })
       await controller.start()
