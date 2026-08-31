@@ -43,6 +43,19 @@
 
 `local_library_data/` 与 `local_library_output/` 都是可删除、可重建的本地生成目录。删除后再次运行构建命令即可恢复；构建不会反向覆盖论文源目录。`paper-index.json` 是页面索引，`paper-library-audit.json` 是仅本地使用的详细审计，`paper-catalog.json` 是只含固定允许字段和来源相对键的脱敏目录快照。三者都不代替原始论文文件夹的物理来源记录。
 
+### 研究画像空值
+
+正式分面值仍来自 `local_library_config/paper-tags.json`。目录 version 3 为每篇记录增加稀疏 `facet_states`：空数组且没有状态时显示“未记录”；只有人工明确写入 `not_applicable` 或 `pending_verification` 时，页面才显示“不适用”或“待核验”。已有分面值与同路径状态不能同时存在，空的原文术语也只显示“未记录”。
+
+旧 version-2 目录只迁移结构，不推断结论：
+
+```bash
+node exporter/scripts/migrate-paper-tags-v3.mjs local_library_config/paper-tags.json
+node exporter/scripts/build-private-library.mjs
+```
+
+新构建输出 index version 3 和 facet schema version 2；桌面页面仍可临时读取旧的 `2/1` 生成物，并把缺失状态按“未记录”处理。
+
 ## 浏览 PDF 与 OCR
 
 打开任意论文详情后，进入“原文材料”页签：

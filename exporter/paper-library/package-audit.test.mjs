@@ -43,6 +43,8 @@ const EXPECTED_FILES = [
   "exporter/paper-library/overrides.mjs",
   "exporter/paper-library/package-audit.mjs",
   "exporter/paper-library/package-audit.test.mjs",
+  "exporter/paper-library/paper-tag-migration.mjs",
+  "exporter/paper-library/paper-tag-migration.test.mjs",
   "exporter/paper-library/scanner.mjs",
   "exporter/paper-library/scanner.test.mjs",
   "exporter/paper-library/status.mjs",
@@ -51,6 +53,7 @@ const EXPECTED_FILES = [
   "exporter/paper-library/tag-catalog.test.mjs",
   "exporter/scripts/audit-github-package.mjs",
   "exporter/scripts/build-private-library.mjs",
+  "exporter/scripts/migrate-paper-tags-v3.mjs",
   "prototype/desktop/README.md",
   "prototype/desktop/app.mjs",
   "prototype/desktop/directions.html",
@@ -151,6 +154,7 @@ test("exports the independent immutable exact package policy in lexical order", 
   assert.equal(Object.isFrozen(EXPECTED_PACKAGE_FILES), true)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, [...EXPECTED_FILES].sort())
   assert.throws(() => EXPECTED_PACKAGE_FILES.push("notes/innocent.md"), TypeError)
+  assert.equal(EXPECTED_PACKAGE_FILES.includes("local_library_config/paper-tags.json"), false)
 })
 
 test("the exact policy includes all three back-navigation pages and their runtime dependencies", () => {

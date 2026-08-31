@@ -116,10 +116,10 @@ def ensure(condition: bool, code: str) -> None:
 
 def load_index() -> tuple[dict, list[dict]]:
     payload = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
-    ensure(payload.get("version") == 2, "index_version")
+    ensure(payload.get("version") == 3, "index_version")
     facet_schema = payload.get("facet_schema")
     ensure(isinstance(facet_schema, dict), "facet_schema")
-    ensure(facet_schema.get("version") == 1, "facet_schema_version")
+    ensure(facet_schema.get("version") == 2, "facet_schema_version")
     groups = facet_schema.get("groups")
     ensure(isinstance(groups, list) and len(groups) == 18, "facet_schema_groups")
     paths = [group.get("path") for group in groups if isinstance(group, dict)]
@@ -129,6 +129,24 @@ def load_index() -> tuple[dict, list[dict]]:
     paper_ids = [paper.get("paper_id") for paper in papers]
     ensure(all(isinstance(paper_id, str) and paper_id for paper_id in paper_ids), "paper_ids")
     ensure(len(set(paper_ids)) == len(paper_ids), "paper_ids_unique")
+    allowed_states = {"unrecorded", "not_applicable", "pending_verification"}
+
+    def values_at_path(paper: dict, path: str) -> list[object]:
+        current: object = paper.get("facets")
+        for part in path.split("."):
+            if not isinstance(current, dict):
+                return []
+            current = current.get(part)
+        return current if isinstance(current, list) else []
+
+    for paper in papers:
+        states = paper.get("facet_states")
+        ensure(isinstance(states, dict), "facet_states_object")
+        ensure(set(states).issubset(set(paths)), "facet_states_paths")
+        ensure(set(states.values()).issubset(allowed_states), "facet_states_values")
+        for path, state in states.items():
+            ensure(state in allowed_states, "facet_state_value")
+            ensure(values_at_path(paper, path) == [], "facet_state_value_collision")
     return payload, papers
 
 
@@ -1280,6 +1298,29 @@ def inspector_action(page: Page, action: str, attribute: str, value: str):
 def run_workspace_checks(page: Page, guard: NetworkGuard, paper_id: str) -> None:
     baseline_status = inspector_status_signature(page)
     ensure(len(baseline_status) == 3, "formal_status_badges")
+
+    empty_paths = [
+        path for path in FACET_GROUP_BY_PATH
+        if facet_values(PREVIEW_PAPER, path) == []
+    ]
+    ensure(empty_paths, "facet_state_empty_fixture")
+    for path in empty_paths:
+        expected = {
+            "unrecorded": "未记录",
+            "not_applicable": "不适用",
+            "pending_verification": "待核验",
+        }[PREVIEW_PAPER.get("facet_states", {}).get(path, "unrecorded")]
+        profile = page.locator(f'[data-profile-path="{path}"]')
+        ensure(profile.count() == 1, f"facet_profile_{path}")
+        ensure(expected in profile.inner_text(), f"facet_profile_state_{path}")
+    expected_pending = sum(
+        PREVIEW_PAPER.get("facet_states", {}).get(path) == "pending_verification"
+        for path in empty_paths
+    )
+    ensure(
+        page.locator(".library-profile-empty--pending-verification").count() == expected_pending,
+        "facet_profile_pending_count",
+    )
 
     for role in P02_ROLES:
         button = inspector_action(page, "toggle-shelf", "role", role)
