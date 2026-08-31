@@ -1076,6 +1076,62 @@ test("inspector renders the schema-ordered research profile and plain source ter
   assert.equal(root.querySelectorAll('[data-action="copy-private-path"]').length, 1)
 })
 
+test("personal tag editor renders safe add, remove, import, and export controls", async () => {
+  const { renderUserTagEditor } = await import("./paper-inspector.mjs")
+  const document = {
+    createElement: (tagName) => new MemoryNode(tagName),
+    createTextNode: (value) => {
+      const node = new MemoryNode("#text")
+      node.textContent = value
+      return node
+    },
+  }
+  const paper = normalizedPaper({ paper_id: "Paper-01", title_zh: "测试论文" })
+  const root = renderUserTagEditor({
+    document,
+    paper,
+    userTags: ["必读", "<img src=x onerror=alert(1)>"],
+    userTagNotice: "已添加标签“必读”",
+  })
+
+  assert.match(root.textContent, /我的标签必读移除<img src=x onerror=alert\(1\)>/u)
+  assert.equal(root.querySelectorAll("img").length, 0)
+  assert.equal(root.querySelectorAll("[data-user-tag-form]").length, 1)
+  assert.equal(root.querySelectorAll("[data-user-tag-input]").length, 1)
+  assert.deepEqual(
+    root.querySelectorAll('[data-action="remove-user-tag"]').map((button) => button.dataset.userTagLabel),
+    ["必读", "<img src=x onerror=alert(1)>"],
+  )
+  assert.equal(root.querySelectorAll('[data-action="export-user-tags"]').length, 1)
+  assert.equal(root.querySelectorAll('[data-action="import-user-tags"]').length, 1)
+  assert.match(root.querySelector("[data-user-tag-notice]").textContent, /已添加标签/u)
+})
+
+test("inspector and reader overview each place personal tags before the research profile", async () => {
+  const { renderInspector, renderReaderOverview } = await import("./paper-inspector.mjs")
+  const document = {
+    createElement: (tagName) => new MemoryNode(tagName),
+    createTextNode: (value) => {
+      const node = new MemoryNode("#text")
+      node.textContent = value
+      return node
+    },
+  }
+  const paper = normalizedPaper()
+  const inspector = renderInspector({
+    document, paper, workspaceState: {}, facetSchema: validFacetSchema(), userTags: ["必读"], userTagNotice: "",
+  })
+  const overview = renderReaderOverview({
+    document, paper, facetSchema: validFacetSchema(), userTags: ["必读"], userTagNotice: "",
+  })
+
+  for (const root of [inspector, overview]) {
+    assert.equal(root.querySelectorAll("[data-user-tags]").length, 1)
+    const children = root.children
+    assert.ok(children.indexOf(root.querySelector("[data-user-tags]")) < children.indexOf(root.querySelector(".library-research-profile")))
+  }
+})
+
 test("facet UI and inspector never assign uncontrolled innerHTML", () => {
   assert.doesNotMatch(`${librarySource}\n${inspectorSource}`, /\.innerHTML\s*=/u)
 })

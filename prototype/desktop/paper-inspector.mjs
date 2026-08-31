@@ -109,6 +109,68 @@ function appendArtifactCounts(document, parent, paper) {
   parent.append(section)
 }
 
+export function renderUserTagEditor({ document, paper, userTags = [], userTagNotice = "" }) {
+  const section = document.createElement("section")
+  section.className = "library-inspector-section library-user-tags"
+  section.dataset.userTags = ""
+  appendTextElement(document, section, "h3", "我的标签")
+
+  const labels = Array.isArray(userTags)
+    ? userTags.filter((label) => typeof label === "string" && label.trim())
+    : []
+  if (labels.length === 0) appendTextElement(document, section, "p", "尚未添加个人标签", "library-user-tags-empty")
+  else {
+    const list = document.createElement("ul")
+    list.className = "library-user-tag-list"
+    for (const label of labels) {
+      const item = document.createElement("li")
+      appendTextElement(document, item, "span", label)
+      const remove = document.createElement("button")
+      remove.type = "button"
+      remove.dataset.action = "remove-user-tag"
+      remove.dataset.userTagLabel = label
+      remove.setAttribute("aria-label", `从《${displayPaperTitle(paper)}》移除个人标签“${label}”`)
+      remove.textContent = "移除"
+      item.append(remove)
+      list.append(item)
+    }
+    section.append(list)
+  }
+
+  const form = document.createElement("form")
+  form.className = "library-user-tag-form"
+  form.dataset.userTagForm = ""
+  const input = document.createElement("input")
+  input.type = "text"
+  input.name = "userTag"
+  input.dataset.userTagInput = ""
+  input.autocomplete = "off"
+  input.placeholder = "例如：必读、可作基线"
+  input.setAttribute("aria-label", `为《${displayPaperTitle(paper)}》添加个人标签`)
+  const add = document.createElement("button")
+  add.type = "submit"
+  add.textContent = "添加"
+  form.append(input, add)
+  section.append(form)
+
+  const backup = document.createElement("div")
+  backup.className = "library-user-tag-backup"
+  for (const [action, label] of [["export-user-tags", "导出标签"], ["import-user-tags", "导入标签"]]) {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.dataset.action = action
+    button.textContent = label
+    backup.append(button)
+  }
+  section.append(backup)
+
+  const notice = appendTextElement(document, section, "p", userTagNotice, "library-user-tag-notice")
+  notice.dataset.userTagNotice = ""
+  notice.setAttribute("role", "status")
+  notice.setAttribute("aria-live", "polite")
+  return section
+}
+
 function appendReadingControl(document, parent, paper, workspaceState) {
   const fieldset = document.createElement("fieldset")
   fieldset.className = "library-inspector-control library-reading-options"
@@ -254,7 +316,9 @@ function appendResearchProfile(document, parent, paper, facetSchema) {
   parent.append(section)
 }
 
-export function renderInspector({ document, paper, workspaceState, facetSchema }) {
+export function renderInspector({
+  document, paper, workspaceState, facetSchema, userTags = [], userTagNotice = "",
+}) {
   const root = document.createElement("div")
   root.className = "library-inspector-paper"
   const heading = document.createElement("div")
@@ -266,6 +330,7 @@ export function renderInspector({ document, paper, workspaceState, facetSchema }
   root.append(heading)
   appendIdentityContext(document, root, paper)
   appendStatusBadges(document, root, paper)
+  root.append(renderUserTagEditor({ document, paper, userTags, userTagNotice }))
   appendResearchProfile(document, root, paper, facetSchema)
   appendArtifactCounts(document, root, paper)
   appendReadingControl(document, root, paper, workspaceState)
@@ -280,7 +345,9 @@ export function renderInspector({ document, paper, workspaceState, facetSchema }
   return root
 }
 
-export function renderReaderOverview({ document, paper, facetSchema }) {
+export function renderReaderOverview({
+  document, paper, facetSchema, userTags = [], userTagNotice = "",
+}) {
   const root = document.createElement("div")
   root.className = "library-reader-overview"
   const introduction = document.createElement("section")
@@ -296,6 +363,7 @@ export function renderReaderOverview({ document, paper, facetSchema }) {
   root.append(introduction)
   appendBibliography(document, root, paper)
   appendArtifactCounts(document, root, paper)
+  root.append(renderUserTagEditor({ document, paper, userTags, userTagNotice }))
   appendResearchProfile(document, root, paper, facetSchema)
   return root
 }
