@@ -84,21 +84,86 @@ function frontmatterState(markdown) {
   return { closed: true, tooLarge: false, data: parsePaperFrontmatter(completeBlock).data }
 }
 
+function inlineCodeRemoved(source) {
+  let visible = ""
+  let cursor = 0
+  while (cursor < source.length) {
+    if (source[cursor] !== "`") {
+      visible += source[cursor]
+      cursor += 1
+      continue
+    }
+    if (escapedAt(source, cursor)) {
+      visible += source[cursor]
+      cursor += 1
+      continue
+    }
+
+    let openerEnd = cursor + 1
+    while (source[openerEnd] === "`") openerEnd += 1
+    const delimiterLength = openerEnd - cursor
+    let search = openerEnd
+    let closerEnd = -1
+    while (search < source.length) {
+      const closerStart = source.indexOf("`", search)
+      if (closerStart === -1) break
+      let runEnd = closerStart + 1
+      while (source[runEnd] === "`") runEnd += 1
+      if (runEnd - closerStart === delimiterLength) {
+        closerEnd = runEnd
+        break
+      }
+      search = runEnd
+    }
+
+    if (closerEnd === -1) {
+      visible += source.slice(cursor, openerEnd)
+      cursor = openerEnd
+    } else {
+      visible += ` ${source.slice(cursor, closerEnd).replace(/[^\n]/gu, "")}`
+      cursor = closerEnd
+    }
+  }
+  return visible
+}
+
+function openingFence(line) {
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line)
+  if (!match || (match[1][0] === "`" && match[2].includes("`"))) return null
+  return { marker: match[1][0], length: match[1].length }
+}
+
+function closesFence(line, fence) {
+  const match = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)
+  return match !== null && match[1][0] === fence.marker && match[1].length >= fence.length
+}
+
 function withoutCode(markdown) {
   const lines = markdown.split(/\r?\n/u)
   let fence = null
   const visible = []
+  let inlineLines = []
+  const flushInlineLines = () => {
+    if (inlineLines.length === 0) return
+    visible.push(inlineCodeRemoved(inlineLines.join("\n")))
+    inlineLines = []
+  }
   for (const line of lines) {
-    const match = /^\s*(```+|~~~+)/u.exec(line)
-    if (match) {
-      const marker = match[1][0]
-      if (fence === null) fence = marker
-      else if (fence === marker) fence = null
+    if (fence !== null) {
+      if (closesFence(line, fence)) fence = null
       visible.push("")
       continue
     }
-    visible.push(fence === null ? line.replace(/`[^`\r\n]*`/gu, "") : "")
+    const opener = openingFence(line)
+    if (opener !== null) {
+      flushInlineLines()
+      fence = opener
+      visible.push("")
+      continue
+    }
+    inlineLines.push(line)
   }
+  flushInlineLines()
   return visible.join("\n")
 }
 

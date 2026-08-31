@@ -835,11 +835,13 @@ function validImportedPreviewUrl(value) {
 }
 
 function validateImportResponse(value, { requestedFileName }) {
-  const extension = ".md"
-  const stem = requestedFileName.toLowerCase().endsWith(extension)
-    ? requestedFileName.slice(0, -extension.length)
-    : requestedFileName
-  const expectedVersion = new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}_v[2-9][0-9]*\\.md$`, "u")
+  const extension = requestedFileName.slice(-3)
+  const stem = requestedFileName.slice(0, -extension.length)
+  const escapePattern = (part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+  const expectedVersion = new RegExp(
+    `^${escapePattern(stem)}_v(?:[2-9]|[1-9][0-9]{1,4})${escapePattern(extension)}$`,
+    "u",
+  )
   if (
     !exactStringKeys(value, ["paper_id", "actual_file_name", "target_tab", "new_preview_url", "index_version"])
     || !validPaperId(value.paper_id)

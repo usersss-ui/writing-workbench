@@ -2328,6 +2328,55 @@ test("note import normalizes a fullwidth requested filename before sending and a
   assert.equal(result.actual_file_name, "Paper-01_论文精读_v2.md")
 })
 
+test("note import accepts every canonical server version integer including 10 through 19 and the upper bound", async (t) => {
+  const { importLocalMarkdownNote } = await import("./library.mjs")
+  for (const version of [10, 19, 100, 99_999]) {
+    await t.test(`v${version}`, async () => {
+      const actualFileName = `Paper-01_论文精读_v${version}.md`
+      const result = await importLocalMarkdownNote({
+        fetchImpl: async () => localJsonResponse(importedNote({ actual_file_name: actualFileName })),
+        inspectionId: "inspection-1",
+        requestedFileName: "Paper-01_论文精读.md",
+      })
+
+      assert.equal(result.actual_file_name, actualFileName)
+    })
+  }
+})
+
+test("note import accepts a canonical versioned response with the requested uppercase Markdown extension", async () => {
+  const { importLocalMarkdownNote } = await import("./library.mjs")
+  const result = await importLocalMarkdownNote({
+    fetchImpl: async () => localJsonResponse(importedNote({ actual_file_name: "Paper-01_论文精读_v2.MD" })),
+    inspectionId: "inspection-1",
+    requestedFileName: "Paper-01_论文精读.MD",
+  })
+
+  assert.equal(result.actual_file_name, "Paper-01_论文精读_v2.MD")
+})
+
+test("note import rejects noncanonical versions and extension-case changes", async (t) => {
+  const { importLocalMarkdownNote } = await import("./library.mjs")
+  for (const [requestedFileName, actualFileName] of [
+    ["Paper-01_论文精读.md", "Paper-01_论文精读_v1.md"],
+    ["Paper-01_论文精读.md", "Paper-01_论文精读_v02.md"],
+    ["Paper-01_论文精读.md", "Paper-01_论文精读_v100000.md"],
+    ["Paper-01_论文精读.MD", "Paper-01_论文精读_v2.md"],
+    ["Paper-01_论文精读.md", "Paper-01_论文精读_copy.md"],
+  ]) {
+    await t.test(actualFileName, async () => {
+      await assert.rejects(
+        () => importLocalMarkdownNote({
+          fetchImpl: async () => localJsonResponse(importedNote({ actual_file_name: actualFileName })),
+          inspectionId: "inspection-1",
+          requestedFileName,
+        }),
+        /本地服务响应格式无效/u,
+      )
+    })
+  }
+})
+
 test("file decoding uses fatal UTF-8 before inspection", async () => {
   const { decodeUtf8MarkdownFile } = await import("./library.mjs")
   const valid = { name: "note.md", arrayBuffer: async () => new TextEncoder().encode("# 中文").buffer }

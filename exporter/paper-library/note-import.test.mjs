@@ -129,6 +129,51 @@ test("accepts closed dollar, display, parenthesis, and bracket LaTeX delimiters"
   assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), false)
 })
 
+test("ignores variable-length backtick inline code before checking LaTeX delimiters", async () => {
+  const result = await inspect({ markdown: "Prose before ``$HOME`` and prose after." })
+
+  assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), false)
+})
+
+test("does not let escaped backticks hide an unbalanced prose formula", async () => {
+  const result = await inspect({ markdown: "Escaped literals: \\`$unclosed\\`" })
+
+  assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), true)
+})
+
+test("closes a code span when its matching backtick follows a backslash inside code", async () => {
+  const result = await inspect({ markdown: "Visible `$HOME\\` prose." })
+
+  assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), false)
+})
+
+test("ignores single- and double-backtick code spans that cross a prose line break", async (t) => {
+  for (const markdown of [
+    "Visible `code starts\n$HOME\nends` prose.",
+    "Visible ``code starts\n$HOME\nends`` prose.",
+  ]) {
+    await t.test(markdown.startsWith("Visible ``") ? "double backticks" : "single backticks", async () => {
+      const result = await inspect({ markdown })
+      assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), false)
+    })
+  }
+})
+
+test("keeps a longer backtick fence open across a shorter backtick line", async () => {
+  const result = await inspect({
+    markdown: [
+      "````text",
+      "a shell token: $HOME",
+      "```",
+      "another shell token: $PATH",
+      "````",
+      "Visible prose after the fence.",
+    ].join("\n"),
+  })
+
+  assert.equal(result.publicResult.checks.blocking_codes.includes("LATEX_UNBALANCED"), false)
+})
+
 test("blocks unsafe image statuses and warns only for missing images in source order", async () => {
   const statuses = ["unsafe", "unsupported", "ambiguous", "invalid_type", "too_large", "missing", "resolved"]
   const result = await inspect({
