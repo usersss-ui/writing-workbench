@@ -36,6 +36,25 @@ function credentialKey(key) {
   return key.toLowerCase().replace(/[^a-z0-9]/gu, "")
 }
 
+function decodedQueryKey(value) {
+  if (
+    typeof value !== "string" || value.length > 512 ||
+    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
+  ) return null
+  let decoded = value
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!/%[0-9a-f]{2}/iu.test(decoded)) return decoded
+    try {
+      const next = decodeURIComponent(decoded)
+      if (next === decoded || next.length > 512 || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(next)) return null
+      decoded = next
+    } catch {
+      return null
+    }
+  }
+  return /%[0-9a-f]{2}/iu.test(decoded) ? null : decoded
+}
+
 function isCredentialKey(value) {
   const key = credentialKey(value)
   return CREDENTIAL_KEYS.has(key) || [
@@ -129,7 +148,8 @@ function isPublicHostname(hostname) {
 
 function hasCredentialQuery(parsed) {
   for (const key of parsed.searchParams.keys()) {
-    if (isCredentialKey(key)) return true
+    const decoded = decodedQueryKey(key)
+    if (decoded === null || isCredentialKey(decoded)) return true
   }
   return false
 }

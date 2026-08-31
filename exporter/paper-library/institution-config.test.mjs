@@ -44,6 +44,12 @@ function obfuscatedCredentialQueryUrl(keyParts) {
   return url.href
 }
 
+function repeatedlyEncodedCredentialQueryUrl(keyParts, passes) {
+  let key = keyParts.join("")
+  for (let index = 0; index < passes; index += 1) key = encodeURIComponent(key)
+  return `https://example.com/page?${key}=${encodeURIComponent(SENSITIVE_MARKER)}`
+}
+
 function userInfoUrl() {
   const url = new URL("https://example.com/")
   url.username = "reader"
@@ -228,6 +234,17 @@ test("rejects malformed, local, private-host, or credential-bearing URLs", () =>
         else fixture[field] = value
       }, /URL|路径|HTTPS|公网/u)
     }
+  }
+})
+
+test("rejects public configuration URLs with repeatedly encoded credential keys", () => {
+  for (const value of [
+    repeatedlyEncodedCredentialQueryUrl(["api", "[", "key", "]"], 2),
+    repeatedlyEncodedCredentialQueryUrl(["api", "_", "key"], 2),
+    repeatedlyEncodedCredentialQueryUrl(["access", "_", "token"], 3),
+    repeatedlyEncodedCredentialQueryUrl(["bearer", "_", "token"], 8),
+  ]) {
+    assertConfigRejected((fixture) => { fixture.library_home = value }, /URL|凭据/u)
   }
 })
 

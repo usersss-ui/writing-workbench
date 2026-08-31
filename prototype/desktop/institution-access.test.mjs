@@ -26,6 +26,12 @@ function obfuscatedCredentialQueryUrl(keyParts) {
   return url.href
 }
 
+function repeatedlyEncodedCredentialQueryUrl(keyParts, passes) {
+  let key = keyParts.join("")
+  for (let index = 0; index < passes; index += 1) key = encodeURIComponent(key)
+  return `https://example.org/paper?${key}=${encodeURIComponent(SENSITIVE_MARKER)}`
+}
+
 function credentialFragmentUrl(keyParts) {
   const url = new URL("https://example.org/paper")
   url.hash = `${keyParts.join("_")}=${SENSITIVE_MARKER}`
@@ -171,6 +177,15 @@ test("keeps ordinary public query metadata distinct from credential aliases", ()
   url.searchParams.set(["conference", "session"].join("_"), "2026")
   url.searchParams.set(["citation", "style"].join("_"), "numeric")
   assert.equal(normalizeExternalHttpsUrl(url.href), url.href)
+})
+
+test("rejects credential query keys hidden behind repeated percent encoding", () => {
+  for (const value of [
+    repeatedlyEncodedCredentialQueryUrl(["api", "[", "key", "]"], 2),
+    repeatedlyEncodedCredentialQueryUrl(["api", "_", "key"], 2),
+    repeatedlyEncodedCredentialQueryUrl(["access", "_", "token"], 3),
+    repeatedlyEncodedCredentialQueryUrl(["bearer", "_", "token"], 8),
+  ]) assert.equal(normalizeExternalHttpsUrl(value), null)
 })
 
 test("parses reliable inputs and refuses unsafe values as titles", () => {

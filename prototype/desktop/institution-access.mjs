@@ -63,8 +63,29 @@ function normalizedQueryKey(value) {
   return value.toLowerCase().replace(/[^a-z0-9]/gu, "")
 }
 
+function decodedQueryKey(value) {
+  if (
+    typeof value !== "string" || value.length > 512 ||
+    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
+  ) return null
+  let decoded = value
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!/%[0-9a-f]{2}/iu.test(decoded)) return decoded
+    try {
+      const next = decodeURIComponent(decoded)
+      if (next === decoded || next.length > 512 || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(next)) return null
+      decoded = next
+    } catch {
+      return null
+    }
+  }
+  return /%[0-9a-f]{2}/iu.test(decoded) ? null : decoded
+}
+
 function isCredentialQueryKey(value) {
-  const key = normalizedQueryKey(value)
+  const decoded = decodedQueryKey(value)
+  if (decoded === null) return true
+  const key = normalizedQueryKey(decoded)
   return CREDENTIAL_QUERY_KEYS.has(key) || [
     ["to", "ken"].join(""), ["sec", "ret"].join(""), ["pass", "word"].join(""),
     ["pass", "phrase"].join(""), ["api", "key"].join(""), ["private", "key"].join(""),

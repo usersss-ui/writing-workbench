@@ -17,6 +17,12 @@ function obfuscatedCredentialQueryUrl(keyParts, path = "/paper") {
   return url.href
 }
 
+function repeatedlyEncodedCredentialQueryUrl(keyParts, passes, path = "/paper") {
+  let key = keyParts.join("")
+  for (let index = 0; index < passes; index += 1) key = encodeURIComponent(key)
+  return `https://public.example${path}?${key}=${encodeURIComponent(SENSITIVE_MARKER)}`
+}
+
 function credentialFragmentUrl(keyParts, path = "/paper") {
   const url = new URL(`https://public.example${path}`)
   url.hash = `${keyParts.join("_")}=${SENSITIVE_MARKER}`
@@ -357,6 +363,38 @@ test("searchOpenAlexWorks never exposes private, credential-like, or token-beari
   }
 })
 
+test("searchOpenAlexWorks removes links with repeatedly encoded credential keys", async () => {
+  for (const unsafeUrl of [
+    repeatedlyEncodedCredentialQueryUrl(["api", "[", "key", "]"], 2),
+    repeatedlyEncodedCredentialQueryUrl(["api", "_", "key"], 2),
+    repeatedlyEncodedCredentialQueryUrl(["access", "_", "token"], 3),
+    repeatedlyEncodedCredentialQueryUrl(["bearer", "_", "token"], 8),
+  ]) {
+    const result = await searchOpenAlexWorks({
+      query: "privacy",
+      fetchImpl: async () => jsonResponse({
+        meta: { count: 1 },
+        results: [{
+          id: "https://openalex.org/W9",
+          doi: null,
+          title: "Safe title",
+          authorships: [],
+          publication_year: 2026,
+          primary_location: { landing_page_url: unsafeUrl, source: { display_name: "Source" } },
+          cited_by_count: 0,
+          open_access: { is_oa: true, oa_url: unsafeUrl },
+          best_oa_location: null,
+          topics: [],
+          abstract_inverted_index: null,
+        }],
+      }),
+    })
+    assert.equal(result.works[0].openAccessUrl, null)
+    assert.equal(result.works[0].landingPageUrl, "https://openalex.org/W9")
+    assert.equal(JSON.stringify(result).includes(SENSITIVE_MARKER), false)
+  }
+})
+
 test("searchOpenAlexWorks rejects abusive nested work fields instead of truncating attacker payloads", async () => {
   const baseWork = {
     id: "https://openalex.org/W9",
@@ -407,6 +445,8 @@ test("searchOpenAlexWorks rejects abusive nested work fields instead of truncati
       ),
     },
     { ...baseWork, abstract_inverted_index: { word: Array.from({ length: 20_000 }, () => "invalid") } },
+    { ...baseWork, abstract_inverted_index: { word: ["x".repeat(10_001)] } },
+    { ...baseWork, abstract_inverted_index: { word: [1.5] } },
     {
       ...baseWork,
       abstract_inverted_index: {

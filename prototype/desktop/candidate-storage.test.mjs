@@ -4,6 +4,7 @@ import {
   DISCOVERY_CANDIDATE_STORAGE_KEY,
   createCandidateStore,
 } from "./candidate-storage.mjs"
+import { searchOpenAlexWorks } from "./openalex-search.mjs"
 
 const SENSITIVE_MARKER = ["sensitive", "marker"].join("-")
 
@@ -17,6 +18,12 @@ function obfuscatedCredentialQueryUrl(keyParts, path = "/paper") {
   const url = new URL(`https://public.example${path}`)
   url.searchParams.set(keyParts.join(""), SENSITIVE_MARKER)
   return url.href
+}
+
+function repeatedlyEncodedCredentialQueryUrl(keyParts, passes, path = "/paper") {
+  let key = keyParts.join("")
+  for (let index = 0; index < passes; index += 1) key = encodeURIComponent(key)
+  return `https://public.example${path}?${key}=${encodeURIComponent(SENSITIVE_MARKER)}`
 }
 
 function credentialFragmentUrl(keyParts, path = "/paper") {
@@ -190,6 +197,14 @@ test("malformed, unknown-version, extra-field, duplicate, or unsafe persisted st
     JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: credentialQueryUrl(["access", "token"]) }] }),
     JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: credentialFragmentUrl(["access", "token"]) }] }),
     JSON.stringify({ version: 1, candidates: [{ ...candidate, landingPageUrl: obfuscatedCredentialQueryUrl(["oauth", "_", "token"]) }] }),
+    JSON.stringify({ version: 1, candidates: [{
+      ...candidate,
+      landingPageUrl: repeatedlyEncodedCredentialQueryUrl(["api", "[", "key", "]"], 2),
+    }] }),
+    JSON.stringify({ version: 1, candidates: [{
+      ...candidate,
+      landingPageUrl: repeatedlyEncodedCredentialQueryUrl(["bearer", "_", "token"], 8),
+    }] }),
     " ".repeat(2_500_001),
   ]
 
@@ -206,6 +221,7 @@ test("add accepts only the strict bounded OpenAlex work shape and preserves prio
   const before = store.read()
   const invalidWorks = [
     { ...OPENALEX_WORK, paperId: "OpenAlex-W123" },
+    { ...OPENALEX_WORK, paperId: `W${"1".repeat(100)}` },
     { ...OPENALEX_WORK, paperId: "../W123" },
     { ...OPENALEX_WORK, extra: true },
     { ...OPENALEX_WORK, doi: "10.1234/../../admin" },
@@ -233,6 +249,10 @@ test("add accepts only the strict bounded OpenAlex work shape and preserves prio
     { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["service", "_", "api", "_", "key"], "/work") },
     { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["x", "-", "amz", "-", "signa", "ture"], "/work") },
     { ...OPENALEX_WORK, landingPageUrl: obfuscatedCredentialQueryUrl(["j", "wt"], "/work") },
+    {
+      ...OPENALEX_WORK,
+      landingPageUrl: repeatedlyEncodedCredentialQueryUrl(["api", "_", "key"], 2, "/work"),
+    },
     { ...OPENALEX_WORK, landingPageUrl: "https://0/work" },
     { ...OPENALEX_WORK, landingPageUrl: "https://127.1/work" },
     { ...OPENALEX_WORK, landingPageUrl: "https://0x7f000001/work" },
@@ -262,6 +282,39 @@ test("add accepts only the strict bounded OpenAlex work shape and preserves prio
     () => store.moveToPending("../W123"),
     () => store.remove("W0/escape"),
   ]) assert.throws(mutation, /OpenAlex ID/u)
+})
+
+test("OpenAlex sanitization prevents repeatedly encoded credential links from reaching candidate storage", async () => {
+  const unsafeUrl = repeatedlyEncodedCredentialQueryUrl(["api", "[", "key", "]"], 2, "/work")
+  const result = await searchOpenAlexWorks({
+    query: "privacy",
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          meta: { count: 1 },
+          results: [{
+            id: "https://openalex.org/W77",
+            doi: null,
+            title: "Safe title",
+            authorships: [],
+            publication_year: 2026,
+            primary_location: { landing_page_url: unsafeUrl, source: { display_name: "Source" } },
+            cited_by_count: 0,
+            open_access: { is_oa: true, oa_url: unsafeUrl },
+            best_oa_location: null,
+            topics: [],
+            abstract_inverted_index: null,
+          }],
+        }
+      },
+    }),
+  })
+  const storage = fakeStorage()
+  const outcome = createCandidateStore(storage).add(result.works[0])
+  assert.equal(outcome.persisted, true)
+  assert.equal(storage.raw(DISCOVERY_CANDIDATE_STORAGE_KEY).includes(SENSITIVE_MARKER), false)
 })
 
 test("caps the queue at one hundred candidates without mutating the full state", () => {
