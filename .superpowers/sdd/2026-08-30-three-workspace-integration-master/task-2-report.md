@@ -165,3 +165,73 @@ Master Task 14 owns the combined real build, generated-index inspection, and liv
 - The real generated output was deliberately not rebuilt, so the currently served output may remain the legacy `2/1` pair until master Task 14 performs the combined runtime acceptance.
 - `private_library_e2e.py` now expects the new `3/2` generated wire shape but was syntax-checked only; live execution is intentionally deferred.
 - Keep the private v2 backup until Task 14's real build and browser acceptance pass and an operator explicitly decides it is no longer needed.
+
+## Fix Loop
+
+### Status and head
+
+- Independent-review Important findings were addressed with test-first fixes.
+- Fix implementation commit/head before this report-only commit: `50cf27df06e5ced1a8cafc039b72c965d34e69ad` (`fix: harden paper facet state boundaries`).
+- No configured build, generated-index inspection, service change, or live browser acceptance was performed.
+
+### Files changed
+
+- `exporter/paper-library/facet-schema.mjs`
+- `exporter/paper-library/facet-schema.test.mjs`
+- `exporter/paper-library/paper-tag-migration.test.mjs`
+- `exporter/paper-library/status.mjs`
+- `exporter/paper-library/status.test.mjs`
+- `exporter/paper-library/tag-catalog.mjs`
+- `exporter/paper-library/tag-catalog.test.mjs`
+- `exporter/scripts/migrate-paper-tags-v3.mjs`
+- `prototype/desktop/library.mjs`
+- `prototype/desktop/paper-library-dom.test.mjs`
+
+### RED/GREEN evidence
+
+- Strict exporter objects RED:
+  - Command: `node --test exporter/paper-library/facet-schema.test.mjs exporter/paper-library/tag-catalog.test.mjs exporter/paper-library/status.test.mjs prototype/desktop/paper-library-dom.test.mjs`
+  - Result: exit 1; the new exporter assertions reported four missing exceptions for inherited/non-enumerable/accessor state shapes and spread-loss. Two browser tests initially had a missing local import; that test wiring was corrected before production code changed.
+- Strict browser records corrected RED:
+  - Command: `node --test --test-name-pattern='ordinary JSON|non-enumerable and symbol' prototype/desktop/paper-library-dom.test.mjs`
+  - Result: exit 1; 0 passed, 2 failed with missing expected rejections.
+- Strict objects GREEN:
+  - Command: `node --test exporter/paper-library/facet-schema.test.mjs exporter/paper-library/tag-catalog.test.mjs exporter/paper-library/status.test.mjs prototype/desktop/paper-library-dom.test.mjs`
+  - Result: exit 0; 137 passed, 0 failed.
+- Warning uncertainty RED:
+  - Command: `node --test --test-name-pattern='warning uncertainty|unknown warning counts' prototype/desktop/paper-library-dom.test.mjs`
+  - Result: exit 1; 0 passed, 2 failed because malformed counts normalized to `0` and rendered `扫描未记录警告`.
+- Warning uncertainty GREEN:
+  - Same command exited 0; 2 passed, 0 failed, including the controller-visible `扫描警告数量未提供` assertion.
+- Atomic migration RED:
+  - Command: `node --test exporter/paper-library/paper-tag-migration.test.mjs`
+  - Result: exit 1; 4 passed, 3 failed: a foreign temp was deleted, reporter failure was misreported, and injected rename failure was ignored.
+- Atomic migration GREEN:
+  - Same command exited 0; 7 passed, 0 failed. Real temporary files prove invalid input and rename failure preserve source bytes, only owned temporary files are cleaned, foreign temp files survive, stdout/stderr are fixed, and post-rename reporting failure leaves valid v3 bytes without false stderr.
+
+### Fixes
+
+- Exporter and browser object guards now require a plain `Object.prototype` object whose `Reflect.ownKeys` are string, enumerable data properties. Symbols, hidden keys, accessors, arrays, inherited data, and non-plain prototypes are rejected without invoking getters.
+- Generated-record and tag-catalog validation share the exporter guard; strict browser records use the equivalent descriptor-aware guard. Invalid `facet_states` cannot be silently lost by spread or serialization.
+- Malformed or unknown `warning_count` values normalize to `null`, preserving the user-visible uncertainty message.
+- Migration cleanup tracks temporary-file ownership, supports an injected rename operation for real-filesystem failure tests, and keeps post-rename reporting outside the replacement failure handler.
+- The real catalog test no longer fixes the catalog to 52 IDs or a full ID list; it retains non-empty, all-empty-state, and representative-record assertions. The stale version-2-only loader test name was corrected.
+
+### Final verification
+
+- Focused Task 2 suite:
+  - Command: `node --test exporter/paper-library/facet-schema.test.mjs exporter/paper-library/paper-tag-migration.test.mjs exporter/paper-library/tag-catalog.test.mjs exporter/paper-library/status.test.mjs exporter/paper-library/build.test.mjs prototype/desktop/paper-library-model.test.mjs prototype/desktop/paper-library-dom.test.mjs`
+  - Result: exit 0; 213 passed, 0 failed.
+- Package boundary:
+  - `node --test exporter/paper-library/package-audit.test.mjs` exited 0; 32 passed, 0 failed.
+  - `node exporter/scripts/audit-github-package.mjs` exited 0; `GitHub 打包审计：通过（73 个候选文件）`.
+- Full exporter/desktop suite:
+  - Command: `node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs`
+  - Result: exit 0; 383 passed, 0 failed.
+- `node --check` passed for every changed production JavaScript module.
+
+### Privacy and mutation boundary
+
+- The real catalog SHA-256 remained `ad980b7fe101b8b65c6db6e8bdeb4690464e06711176a8264dd9d8346398d423` across the fix verification; the fix loop did not mutate it.
+- The retained backup SHA-256 remains `58b08667bbd46a9cf96c47dccc34438f299c0b921dd056d6e685dd77cf4c44c6`.
+- Both `local_library_config/paper-tags.json` and its backup remain ignored, untracked, unstaged, uncommitted, and absent from the public package.
