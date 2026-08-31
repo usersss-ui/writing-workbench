@@ -107,3 +107,27 @@ exit 0, no output
 ```
 
 - This round changes only `agent-task-input.mjs` and its focused test. Package manifests remain untouched, and the Task 13 package-closure deferral above remains in force.
+
+## Fix round 3 — authoritative fallback pointers
+
+- Review fix implementation: `3c384c15899f578d2ff638e045a0470248147233` (`fix: reject pending pointers as snapshot fallback`).
+- The P/A/C transaction regression was RED (`0/1`): P was committed, A and C each failed before their committed-snapshot write, and retrying A rewrote its fallback to raw current C. That created an A/C pending cycle, so the failed call made both the live and reopened logical current `null` instead of preserving P.
+- Raw current is now eligible as a pending fallback only when its ID is present in the independently validated committed snapshot collection. A raw pointer to another pending item falls back to the already validated logical current instead. The covered failure sequence therefore keeps both A and C pointed at P, preserves P after the final failed retry, and permits the same A and C IDs to be committed later in that explicit order.
+- A second focused test covers raw current pointing to an unknown ID or malformed pending record. Both cases fail closed without changing storage.
+- This narrows the fix-round-2 statement about a “durable pointer”: only an authoritative committed raw pointer may replace the validated logical fallback; an unresolved pending pointer is never treated as committed authority.
+
+Final fix-round-3 verification:
+
+```text
+node --test prototype/desktop/direction-snapshot.test.mjs prototype/desktop/agent-task-input.test.mjs prototype/desktop/agent-tasks.test.mjs prototype/desktop/desktop-pages.test.mjs exporter/paper-library/build.test.mjs
+79 passed, 0 failed
+
+node --check prototype/desktop/agent-task-input.mjs
+node --check prototype/desktop/agent-task-input.test.mjs
+both exit 0
+
+git diff --check
+exit 0, no output
+```
+
+- This round again changes only `agent-task-input.mjs` and its focused test, plus this report in a separate commit. Package manifests remain untouched, and Task 13 still owns the deferred package-closure audit.
