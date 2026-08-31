@@ -131,3 +131,22 @@ The donor test expected stage changes and removals to remain visible in memory a
 - `git diff --check` passed before the fix commit.
 - Targeted forbidden-literal scan across the nine implementation files and this report returned zero matches.
 - No live network, browser, service, port, build, generated output, archive, or real-paper operation was introduced during the fix loop.
+
+## Repeated-encoding security fix loop
+
+### Status and RED evidence
+
+- A second independent review found that credential-like query keys hidden behind repeated percent encoding could survive the URL parser's first decode and then pass the four URL boundaries.
+- The failing focused run had 63 tests: 56 passed and 7 failed. Failures covered institution configuration, external-link normalization, persisted candidate recovery, candidate add validation, the fake OpenAlex response boundary, the fake OpenAlex-to-candidate persistence chain, and an abusive abstract-position value.
+- Fix implementation head before this report-update commit: `872a3a123cef8510ab06e7092355edd4e313514b` (`fix: reject encoded discovery credentials`).
+
+### Fixes and final verification
+
+- Query keys now pass through a bounded recursive percent-decoding step before classification. Invalid decoding, decoded control characters, excessive key length, or a still-encoded escape after the fixed decode budget fail closed.
+- The same rule is exercised at institution configuration, external article input, OpenAlex result normalization, candidate add, and persisted candidate reload boundaries, including double, triple, and beyond-budget encodings.
+- A no-network integration test proves that a malicious fake OpenAlex link is sanitized before the exact candidate shape is written and that the marker does not reach browser storage.
+- Candidate OpenAlex identifiers now use the same 100-character bound as the OpenAlex response normalizer.
+- OpenAlex rejects oversized raw abstract-position strings and non-integer numeric positions before reconstruction while retaining the documented conservative handling of short optional malformed text.
+- Final exact focused suite: exit 0; 63 passed and 0 failed.
+- `node --check` passed for all four production modules, `git diff --check` passed, and the targeted forbidden-literal scan over the nine public files plus this report returned zero matches.
+- The existing privacy and operational boundary remains unchanged: no live network, browser, service, port, build, generated output, archive, or real-paper operation occurred.
