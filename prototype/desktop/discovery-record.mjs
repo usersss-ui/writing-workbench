@@ -1,4 +1,4 @@
-import { normalizeDoi, safeHttpsUrl } from "./openalex-search.mjs"
+import { normalizeDoi, safeHttpsUrl } from "./bibliography-normalization.mjs"
 
 const RECORD_KEYS = Object.freeze(["record_id", "provider_id", "bibliography", "provenance", "retraction"])
 const BIBLIOGRAPHY_KEYS = Object.freeze([

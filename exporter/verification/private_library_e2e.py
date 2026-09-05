@@ -43,6 +43,9 @@ OPENALEX_SELECT = ",".join((
     "best_oa_location",
     "topics",
     "abstract_inverted_index",
+    "language",
+    "type",
+    "is_retracted",
 ))
 
 

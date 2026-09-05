@@ -1,5 +1,5 @@
 import { normalizeDiscoveryRecord } from "./discovery-record.mjs"
-import { normalizeDoi, safeHttpsUrl } from "./openalex-search.mjs"
+import { normalizeDoi, safeHttpsUrl } from "./bibliography-normalization.mjs"
 
 const MAX_BYTES = 2 * 1024 * 1024
 const MAX_ENTRIES = 500
