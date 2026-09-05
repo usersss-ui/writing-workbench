@@ -75,6 +75,8 @@
     "prototype/desktop/directions.html",
     "prototype/desktop/directions.mjs",
     "prototype/desktop/discovery-dom.test.mjs",
+    "prototype/desktop/discovery-query-plan.mjs",
+    "prototype/desktop/discovery-query-plan.test.mjs",
     "prototype/desktop/discovery.mjs",
     "prototype/desktop/discovery.template.html",
     "prototype/desktop/index.html",
