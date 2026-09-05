@@ -56,6 +56,24 @@ test("an unrelated title sharing a DOI is kept separate and flags both identitie
   assert.equal(state.records.length, 2)
 })
 
+test("a shortened title sharing a DOI remains compatible with its longer full title", () => {
+  const short = record("a", { title: "Distributed optimization over networks" })
+  const full = record("b", { title: "Distributed optimization over networks with communication delays and packet losses" })
+  const state = merge([short, full])
+  assert.equal(state.results.length, 1)
+  assert.deepEqual(state.results[0].record_ids, ["a", "b"])
+  assert.equal(state.results[0].identity_status, "clear")
+})
+
+test("abbreviated and full journal labels without contradictory identifiers do not split a DOI", () => {
+  const journal = { title: "IEEE Trans. Autom. Control", source_id: null, issns: [], source_type: "journal" }
+  const state = merge([record("a", { journal }),
+    record("b", { journal: { ...journal, title: "IEEE Transactions on Automatic Control" } })])
+  assert.equal(state.results.length, 1)
+  assert.deepEqual(state.results[0].record_ids, ["a", "b"])
+  assert.equal(state.results[0].identity_status, "clear")
+})
+
 test("explicit year, publication type and journal conflicts prevent merging", () => {
   const journal = { title: "Synthetic Journal A", source_id: null, issns: ["1234-5678"], source_type: "journal" }
   const a = record("a", { work_type: "article", journal })

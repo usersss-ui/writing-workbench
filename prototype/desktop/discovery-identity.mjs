@@ -58,12 +58,10 @@ function titleText(value) {
   return (value ?? "").normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, " ").trim()
 }
 
-function similarTitles(left, right) {
-  const a = titleText(left)
-  const b = titleText(right)
-  if (!a || !b) return false
-  if (a === b) return true
-  // Bigrams support both spaced titles and Chinese titles; similarity is only a clue.
+function titleOverlap(a, b) {
+  if (!a || !b) return 0
+  if (a === b) return 1
+  // Bigrams support both spaced titles and Chinese titles.
   const grams = text => {
     const characters = Array.from(text)
     return new Set(characters.slice(1).map((character, index) => characters[index] + character))
@@ -71,7 +69,21 @@ function similarTitles(left, right) {
   const ag = grams(a)
   const bg = grams(b)
   const common = [...ag].filter(gram => bg.has(gram)).length
-  return 2 * common / (ag.size + bg.size) >= 0.7
+  return ag.size + bg.size ? 2 * common / (ag.size + bg.size) : 0
+}
+
+function similarTitles(left, right) {
+  return titleOverlap(titleText(left), titleText(right)) >= 0.7
+}
+
+function obviouslyConflictingTitles(left, right) {
+  const a = titleText(left)
+  const b = titleText(right)
+  // A shortened label is incomplete evidence, not a contradictory title.
+  if (a.includes(b) || b.includes(a)) return false
+  // Failure to meet the similarity threshold is not enough to reject a strong ID.
+  // Require substantial titles with very little shared text; leave ambiguous pairs alone.
+  return Array.from(a).length >= 12 && Array.from(b).length >= 12 && titleOverlap(a, b) < 0.3
 }
 
 function sameVerifiedProviderId(a, b) {
@@ -96,12 +108,11 @@ function metadataConflicts(a, b) {
   if (left.doi && right.doi && left.doi !== right.doi) reasons.push("doi_mismatch")
   if (left.year !== null && right.year !== null && left.year !== right.year) reasons.push("year_mismatch")
   if (left.work_type && right.work_type && left.work_type !== right.work_type) reasons.push("publication_type_mismatch")
-  if (!similarTitles(left.title, right.title)) reasons.push("title_mismatch")
+  if (obviouslyConflictingTitles(left.title, right.title)) reasons.push("title_mismatch")
   const j = left.journal
   const k = right.journal
   const sharedIssn = j.issns.some(issn => k.issns.includes(issn))
   if ((j.issns.length && k.issns.length && !sharedIssn) ||
-    (j.title && k.title && titleText(j.title) !== titleText(k.title) && !sharedIssn) ||
     (j.source_type && k.source_type && j.source_type !== k.source_type) ||
     (a.provenance.provider === b.provenance.provider && j.source_id && k.source_id && j.source_id !== k.source_id)) {
     reasons.push("journal_mismatch")
