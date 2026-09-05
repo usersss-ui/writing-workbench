@@ -44,6 +44,7 @@ test("imported fixture builds a complete deterministic library entirely below it
   assert.deepEqual(index.papers.map((paper) => paper.paper_id).sort(), [
     FIXTURE_IDS.metadataOnlyPaper,
     FIXTURE_IDS.richPaper,
+    'Fixture24-Note',
   ].sort())
   const rich = index.papers.find((paper) => paper.paper_id === FIXTURE_IDS.richPaper)
   const metadataOnly = index.papers.find((paper) => paper.paper_id === FIXTURE_IDS.metadataOnlyPaper)
@@ -103,7 +104,12 @@ async function exerciseExecutableShutdown(mode) {
     const capabilities = await publicJson(readiness.origin, "/api/v1/capabilities")
     const index = await publicJson(readiness.origin, "/local_library_data/paper-index.json")
     assert.equal(JSON.parse(capabilities.text).api_version, 1)
-    assert.equal(JSON.parse(index.text).papers.length, 2)
+    const fixturePapers = JSON.parse(index.text).papers
+    assert.equal(fixturePapers.length, 3)
+    const noteOnly = fixturePapers.find(paper => paper.paper_id === 'Fixture24-Note')
+    assert.equal(noteOnly.title_original, 'Note-Only Controlled Search Fixture')
+    assert.deepEqual(noteOnly.source_documents.pdf, [])
+    assert.equal(noteOnly.controlled_preview_documents.note.length, 1)
     for (const publicText of [capabilities.text, index.text, ...capabilities.response.headers.values(), ...index.response.headers.values()]) {
       assert.equal(publicText.includes(ownedParent), false)
       assert.equal(publicText.includes(forbiddenHomeMarker), false)

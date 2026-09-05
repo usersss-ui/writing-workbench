@@ -34,6 +34,22 @@ test('stale review cannot commit and cancel closes without changes', async () =>
   controller.close(); assert.equal(env.panel.hidden, true)
 })
 
+test('review and split choices distinguish same-title sources using public DOI or provider identity', () => {
+  const env = setup()
+  env.state.records[0].bibliography.doi = '10.1234/source-a'
+  const second = recordInput({ record_id: 'r-2', provider_id: 'W9100000099' })
+  second.bibliography.doi = null
+  env.state.records.push(second); env.state.results[0].record_ids.push('r-2'); env.state.batches[0].record_ids.push('r-2')
+  ui.createDiscoveryReviewController(env).open('result-1')
+  for (const key of ['reviewSource', 'splitSource']) {
+    const firstLabel = findElement(env.panel, node => node.tagName === 'LABEL' && node.children.some(child => child.dataset?.[key] === 'r-1'))
+    const secondLabel = findElement(env.panel, node => node.tagName === 'LABEL' && node.children.some(child => child.dataset?.[key] === 'r-2'))
+    assert.match(firstLabel.textContent, /10\.1234\/source-a/)
+    assert.match(secondLabel.textContent, /W9100000099/)
+  }
+  assert.doesNotMatch(env.panel.textContent, /record_id|result_id/)
+})
+
 test('review binds only user-selected source evidence and explicitly replaces the checked prior assertion', async () => {
   const env = setup()
   env.state.records.push(recordInput({ record_id: 'r-2' })); env.state.results[0].record_ids.push('r-2'); env.state.batches[0].record_ids.push('r-2')

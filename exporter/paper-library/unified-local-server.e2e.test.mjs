@@ -105,6 +105,7 @@ test("startup builds before listening and a startup-build failure creates no lis
   assert.equal(indexResponse.status, 200)
   assert.deepEqual((await indexResponse.json()).papers.map((paper) => paper.paper_id).sort(), [
     FIXTURE_IDS.metadataOnlyPaper,
+    'Fixture24-Note',
     FIXTURE_IDS.richPaper,
   ].sort())
 

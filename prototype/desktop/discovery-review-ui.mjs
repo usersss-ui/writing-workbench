@@ -1,6 +1,12 @@
 import { isValidDiscoveryWorkspaceState } from './discovery-workspace.mjs'
 import { splitDiscoveryResult } from './discovery-identity.mjs'
 
+function sourceLabel(record) {
+  const bibliography = record.bibliography
+  const identity = bibliography.doi ? `DOI ${bibliography.doi}` : record.provider_id || '公开标识未提供'
+  return [record.provenance.provider, bibliography.title, identity, bibliography.year ?? '年份未提供', record.provenance.method].join(' · ')
+}
+
 /** Shared review panel: no storage access; commits are validated, generation-bound proposals. */
 export function createDiscoveryReviewController({ root, getContext, onCommit }) {
   const panel = root.querySelector('#discovery-review-panel')
@@ -34,7 +40,7 @@ export function createDiscoveryReviewController({ root, getContext, onCommit }) 
     for (const recordId of result.record_ids) {
       const record = state.records.find(item => item.record_id === recordId), checkbox = make('input'); checkbox.type = 'checkbox'
       checkbox.checked = recordId === result.preferred_record_id; checkbox.dataset.reviewSource = recordId
-      const label = make('label', `${record.provenance.provider} · ${record.bibliography.title}`); label.append(checkbox); content.push(label)
+      const label = make('label', sourceLabel(record)); label.append(checkbox); content.push(label)
       sourceChoices.push({ recordId, checkbox })
     }
     for (const collection of ['condition_reviews', 'scope_reviews', 'representative_reviews']) for (const [index, entry] of state[collection].entries()) {
@@ -87,7 +93,7 @@ export function createDiscoveryReviewController({ root, getContext, onCommit }) 
       details.append(summary, make('p', '原候选随原首选来源保留。证据只随实际来源迁移；跨两组的条件证据转为待核验。跨组的范围和代表性判断将退出有效核验，需要重新核对。'))
       const groups = []
       for (const recordId of result.record_ids) {
-        const record = state.records.find(item => item.record_id === recordId), label = make('label', `${record.provenance.provider} · ${record.bibliography.title}`), select = make('select')
+        const record = state.records.find(item => item.record_id === recordId), label = make('label', sourceLabel(record)), select = make('select')
         for (const [value, text] of [['original', '原论文'], ['separate', '另一篇论文']]) { const option = make('option', text); option.value = value; select.append(option) }
         select.value = recordId === result.preferred_record_id ? 'original' : 'separate'; select.dataset.splitSource = recordId
         if (recordId === result.preferred_record_id) select.disabled = true

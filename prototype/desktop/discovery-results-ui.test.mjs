@@ -8,6 +8,20 @@ function setup() {
   const list = makeElement()
   return { list, root: { createElement: tagName => makeElement({ tagName }), querySelector: () => list } }
 }
+test('conflict cards summarize types and source count without exposing internal record IDs or hiding evidence', () => {
+  const { root, list } = setup()
+  const conflicts = ['doi_mismatch:["private-record-1","private-record-2"]', 'doi_mismatch:["private-record-1","private-record-3"]', 'year_mismatch:["private-record-2","private-record-3"]']
+  const input = { ...result, identity_status: 'conflict', conflicts, record_ids: ['r-1', 'r-2', 'r-3'] }
+  const before = structuredClone(input)
+  ui.renderDiscoveryResults({ root, results: [input], records: [record], evaluations: [{ result_id: 'result-1', status: 'pending', missing: ['论文身份冲突待核验', '缺少已确认 JIF 证据'], reasons: [...conflicts, '来源已标记撤稿'] }], onSelect() {}, onReview() {} })
+  assert.match(list.textContent, /DOI 不一致/)
+  assert.match(list.textContent, /发表年份不一致/)
+  assert.match(list.textContent, /3 条来源记录/)
+  assert.match(list.textContent, /缺少已确认 JIF 证据/)
+  assert.match(list.textContent, /来源已标记撤稿/)
+  assert.doesNotMatch(list.textContent, /private-record-|doi_mismatch|year_mismatch/)
+  assert.deepEqual(input, before)
+})
 test('all results retain pending and nonrecommended papers, render literal titles and material labels', () => {
   assert.equal(typeof ui.renderDiscoveryResults, 'function')
   const { root, list } = setup(); const selected = []

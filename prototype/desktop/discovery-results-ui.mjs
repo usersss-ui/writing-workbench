@@ -1,5 +1,15 @@
 import { safeHttpsUrl } from './bibliography-normalization.mjs'
 
+function displayReasons(values) {
+  const conflictLabels = { doi_mismatch: 'DOI 不一致', year_mismatch: '发表年份不一致',
+    publication_type_mismatch: '文献类型不一致', title_mismatch: '题名不一致',
+    journal_mismatch: '期刊身份不一致', title_similarity: '题名相似，身份待核对' }
+  return [...new Set(values.map(value => {
+    const code = /^([a-z_]+):\[/u.exec(value)?.[1]
+    return code ? conflictLabels[code] ?? '来源身份不一致，需核对来源' : value
+  }))].join('；')
+}
+
 /** Render only supplied public projections. All source text remains literal text. */
 export function renderDiscoveryResults({ root, results, records, evaluations, view = 'all',
   onSelect, onReview, localMatches = new Map(), onView = () => {}, onExportSelect = () => {}, selected = new Set(),
@@ -17,7 +27,7 @@ export function renderDiscoveryResults({ root, results, records, evaluations, vi
   summary.className = 'discovery-loaded-summary'
   const children = [summary]
   if (view === 'curated' && !visible.length) {
-    children.push(make('p', unavailableReason || `暂无符合严格规则的重点推荐。${[...new Set(evaluations.flatMap(item => [...item.missing, ...item.reasons]))].slice(0, 10).join('；') || '请先设置条件，并补充期刊、范围和人工条件证据。'}`))
+    children.push(make('p', unavailableReason || `暂无符合严格规则的重点推荐。${displayReasons(evaluations.flatMap(item => [...item.missing, ...item.reasons])) || '请先设置条件，并补充期刊、范围和人工条件证据。'}`))
     const back = make('button', '回到全部结果'); back.type = 'button'; back.dataset.returnAll = 'true'
     back.addEventListener('click', () => onView('all')); children.push(back)
   }
@@ -41,7 +51,8 @@ export function renderDiscoveryResults({ root, results, records, evaluations, vi
       for (const match of local.matches) {
         const link = make('a', match.title || match.paperId); link.href = match.href; card.append(link)
       }
-      if (evaluation) card.append(make('p', [...evaluation.reasons, ...evaluation.missing].join('；')))
+      if (evaluation) card.append(make('p', displayReasons([...evaluation.reasons, ...evaluation.missing])))
+      if (result.conflicts.length) card.append(make('p', `本篇包含 ${result.record_ids.length} 条来源记录；请打开“核验依据”逐项核对来源。`))
       const url = safeHttpsUrl(bib.url || record.provenance.public_url)
       if (url) { const link = make('a', '出版来源 / 全文线索 ↗'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; card.append(link) }
       const choice = make('label', '选择导出'); const checkbox = make('input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(result.result_id)
