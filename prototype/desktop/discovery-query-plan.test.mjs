@@ -113,3 +113,44 @@ test('external searches preserve query, omit empty years and disclose manual lan
   assert.equal(years.searchParams.get('as_yhi'), '2025')
   assert.throws(() => buildExternalSearchLinks({ query: 'query', scope: { startYear: 2025, endYear: 2000 } }), /年份/)
 })
+
+test('oversized unselected intersection warns and stays out of executable suggestions without blocking the original', () => {
+  const large = ['a', 'b', 'c', 'd'].map(id => ({ id, label: id, terms: [id.repeat(300)], role: 'other' }))
+  const plan = buildDiscoveryQueryPlan({ raw: 'valid manual NOT query', conditions: large, expand: false })
+  assert.deepEqual(plan.selected, [{ query_id: 'original', expression: 'valid manual NOT query', condition_ids: [], kind: 'original' }])
+  assert.equal(plan.suggested.some(query => query.condition_ids.length === 4), false)
+  assert.equal(plan.suggested.length, 4)
+  assert.deepEqual(plan.conditions, large)
+  assert.match(plan.warnings.join(' '), /建议.*过长|过长.*建议/)
+  assert.match(plan.warnings.join(' '), /a, b, c, d/)
+  assert.match(plan.warnings.join(' '), /未执行/)
+  assert.throws(() => buildDiscoveryQueryPlan({ raw: 'valid manual NOT query', conditions: large, expand: true }), /缩短/)
+  assert.throws(() => buildDiscoveryQueryPlan({ conditions: large, expand: false }), /缩短/)
+})
+
+test('explicit expansion links exact generated collisions to the retained original without duplicate requests', () => {
+  const explicit = [{ id: 'p', label: '在线优化', terms: ['online optimization'], role: 'problem' }]
+  const plan = buildDiscoveryQueryPlan({ raw: '("online optimization")', conditions: explicit, expand: true })
+  assert.deepEqual(plan.selected, [{ query_id: 'original', expression: '("online optimization")', condition_ids: ['p'], kind: 'original' }])
+  assert.deepEqual(plan.suggested, [])
+  for (const expand of [false, 'true']) {
+    const unconfirmed = buildDiscoveryQueryPlan({ raw: '("online optimization")', conditions: explicit, expand })
+    assert.deepEqual(unconfirmed.selected[0].condition_ids, [])
+  }
+  const different = buildDiscoveryQueryPlan({ raw: '(("online optimization"))', conditions: explicit, expand: true })
+  assert.deepEqual(different.selected[0].condition_ids, [])
+})
+
+test('identical expressions from different explicit groups retain the first group and warn instead of unioning IDs', () => {
+  const explicit = [
+    { id: 'p', label: '问题', terms: ['same term'], role: 'other' },
+    { id: 'q', label: '方法', terms: ['same term'], role: 'other' },
+  ]
+  const plan = buildDiscoveryQueryPlan({ raw: '("same term")', conditions: explicit, expand: true })
+  assert.deepEqual(plan.selected[0].condition_ids, ['p'])
+  assert.equal(plan.selected.filter(query => query.expression === '("same term")').length, 1)
+  assert.match(plan.warnings.join(' '), /不同条件组.*保留.*未合并/)
+  const reordered = buildDiscoveryQueryPlan({ raw: '("same term")', conditions: [...explicit].reverse(), expand: true })
+  assert.deepEqual(reordered.selected, plan.selected)
+  assert.deepEqual(reordered.warnings, plan.warnings)
+})

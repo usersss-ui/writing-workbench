@@ -116,15 +116,28 @@ export function buildDiscoveryQueryPlan({ raw = '', conditions: input = [], expa
   if (typeof raw !== 'string') throw new Error('检索式无效')
   if (!Array.isArray(primary_ids) || primary_ids.some(id => !conditions.some(c => c.id === id))) throw new Error('主问题条件 ID 无效')
   const queries = []
+  const warnings = []
+  const generatedGroups = new Map()
   function add(group, kind = 'expanded') {
     if (!group.length) return null
     const ordered = [...group].sort((a, b) => a.id.localeCompare(b.id, 'en'))
     const roles = ['problem', 'network', 'method', 'other']
     const displayOrder = [...ordered].sort((a, b) => roles.indexOf(a.role) - roles.indexOf(b.role))
-    const expression = checkedQuery(`(${displayOrder.map(conditionExpression).join(' AND ')})`)
-    const existing = queries.find(q => q.expression === expression)
-    if (existing) return existing
+    const expression = `(${displayOrder.map(conditionExpression).join(' AND ')})`
     const ids = ordered.map(c => c.id)
+    const previousIds = generatedGroups.get(expression)
+    if (previousIds && JSON.stringify(previousIds) !== JSON.stringify(ids)) {
+      warnings.push(`相同检索式对应不同条件组（${previousIds.join(', ')} / ${ids.join(', ')}）；保留首次生成组，未合并条件 ID。`)
+    }
+    if (!previousIds) generatedGroups.set(expression, ids)
+    const existing = queries.find(q => q.expression === expression)
+    if (existing) {
+      if (existing.kind === 'original' && !previousIds) {
+        if (expand === true) existing.condition_ids = ids
+        else warnings.push('原式与生成条件式完全相同；尚未确认扩展，未关联条件 ID。')
+      }
+      return existing
+    }
     // Length prefixes avoid collisions between IDs containing hyphens.
     const query = { query_id: `q-${ids.map(id => `${id.length}-${id}`).join('-')}`, expression, condition_ids: ids, kind }
     queries.push(query)
@@ -144,8 +157,16 @@ export function buildDiscoveryQueryPlan({ raw = '', conditions: input = [], expa
   if (!queries.length) throw new Error('请输入研究方向或关键词')
   let selected = expand === true ? queries.slice(0, 6) : [original ?? intersection]
   if (expand === true && intersection && !selected.includes(intersection)) selected[selected.length - 1] = intersection
-  const suggested = queries.filter(q => !selected.includes(q))
-  const warnings = []
+  for (const query of selected) checkedQuery(query.expression)
+  const suggested = queries.filter(q => !selected.includes(q)).filter(query => {
+    try {
+      checkedQuery(query.expression)
+      return true
+    } catch (error) {
+      warnings.push(`建议条件组（${query.condition_ids.join(', ')}）未执行且未列入可执行建议：${error.message}`)
+      return false
+    }
+  })
   if (suggested.length) warnings.push(expand === true
     ? `还有 ${suggested.length} 条建议未执行；本批最多 6 条，请按需继续。`
     : `还有 ${suggested.length} 条扩展建议未执行；请明确确认后运行。`)
