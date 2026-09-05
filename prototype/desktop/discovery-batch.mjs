@@ -249,7 +249,8 @@ export function createDiscoveryBatchController({ searchPage, onChange = () => {}
     cancel() { stop(); emit() },
     read,
     acceptImported({ generation: expected, records: incoming } = {}) {
-      if (!session || session.stopped || expected !== generation) return false
+      const owner = session
+      if (!owner || owner.stopped || expected !== generation) return false
       try {
         array(incoming, 500, '导入记录')
         for (const record of incoming) {
@@ -257,7 +258,10 @@ export function createDiscoveryBatchController({ searchPage, onChange = () => {}
             || record.provenance.query_id !== null || !['import', 'local', 'manual'].includes(record.provenance.method)
             || (record.provenance.method === 'local' && record.provenance.provider !== 'local')) fail('导入来源')
         }
-        commit(merge(incoming))
+        const merged = merge(incoming)
+        // Identity allocation can synchronously cancel or replace the owning batch.
+        if (session !== owner || owner.stopped || expected !== generation) return false
+        commit(merged)
         emit()
         return true
       } catch { return false }

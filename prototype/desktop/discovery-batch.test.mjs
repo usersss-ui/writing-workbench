@@ -406,3 +406,51 @@ test('a reentrant start supersedes the start which triggered its abort listener'
   assert.equal(c.read().batch.queries[0].query.query_id, 'C')
   assert.equal(c.read().batch.queries[0].total, 33)
 })
+
+// Identity allocation may replace the batch; the old import must not commit into its successor.
+test('rejects an import if identity allocation starts a replacement batch', async () => {
+  let serial = 0, replace = false, replacement
+  const c = createDiscoveryBatchController({ searchPage: () => page(), now: () => timestamp,
+    idFactory: () => {
+      const id = `import-race-${++serial}`
+      if (replace) {
+        replace = false
+        replacement = start(c)
+      }
+      return id
+    } })
+  await start(c)
+  const initial = c.read()
+  const imported = recordInput()
+  imported.provenance.batch_id = initial.batch.batch_id
+  replace = true
+  assert.equal(c.acceptImported({ generation: initial.generation, records: [imported] }), false)
+  await replacement
+  const next = c.read()
+  assert.notEqual(next.generation, initial.generation)
+  assert.notEqual(next.batch.batch_id, initial.batch.batch_id)
+  assert.deepEqual(next.records, [])
+  assert.deepEqual(next.results, [])
+  assert.deepEqual(next.batch.record_ids, [])
+})
+
+// Cancellation during identity allocation must reject the import and preserve the last accepted snapshot.
+test('rejects an import if identity allocation cancels the owning batch', async () => {
+  let serial = 0, cancel = false
+  const c = createDiscoveryBatchController({ searchPage: () => page(), now: () => timestamp,
+    idFactory: () => {
+      if (cancel) c.cancel()
+      return `cancel-import-${++serial}`
+    } })
+  await start(c)
+  const initial = c.read()
+  const imported = recordInput()
+  imported.provenance.batch_id = initial.batch.batch_id
+  cancel = true
+  assert.equal(c.acceptImported({ generation: initial.generation, records: [imported] }), false)
+  const cancelled = c.read()
+  assert.notEqual(cancelled.generation, initial.generation)
+  assert.deepEqual(cancelled.records, initial.records)
+  assert.deepEqual(cancelled.results, initial.results)
+  assert.deepEqual(cancelled.batch, initial.batch)
+})
