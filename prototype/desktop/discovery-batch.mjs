@@ -50,7 +50,8 @@ export function validateDiscoveryQueryPlan(input) {
   const conditions = array(input.conditions, 50, '条件')
   for (const condition of conditions) {
     exact(condition, ['id', 'label', 'terms', 'role'], '条件')
-    identity(condition.id, '条件 ID')
+    if (typeof condition.id !== 'string' || condition.id.length > 160
+      || !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u.test(condition.id)) fail('条件 ID')
     text(condition.label, 500, '条件名称')
     const terms = array(condition.terms, 20, '条件术语')
     if (!terms.length) fail('条件术语')

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { deferred, recordInput } from './discovery-test-fixtures.mjs'
-import { createDiscoveryBatchController } from './discovery-batch.mjs'
+import { createDiscoveryBatchController, validateDiscoveryQueryPlan } from './discovery-batch.mjs'
 
 const timestamp = '2026-09-05T00:00:00.000Z'
 const scope = { startYear: null, endYear: null, language: 'all' }
@@ -453,4 +453,34 @@ test('rejects an import if identity allocation cancels the owning batch', async 
   assert.deepEqual(cancelled.records, initial.records)
   assert.deepEqual(cancelled.results, initial.results)
   assert.deepEqual(cancelled.batch, initial.batch)
+})
+
+// Pipe/space/oversized condition IDs can corrupt persisted condition references and quota group keys.
+test('rejects condition IDs outside the planner grammar before starting any requests', async () => {
+  let requests = 0
+  const c = controller(() => { requests++; return page() })
+  for (const id of ['left|right', 'with space', 'x'.repeat(161), '-leading', 'trailing-', 'double--dash']) {
+    const invalid = plan('A')
+    invalid.conditions = [{ id, label: 'Problem', terms: ['optimization'], role: 'problem' }]
+    invalid.selected[0].condition_ids = [id]
+    assert.throws(() => validateDiscoveryQueryPlan(invalid), TypeError)
+    await assert.rejects(c.start({ plan: invalid, scope, sort: 'relevance' }), TypeError)
+  }
+  assert.equal(requests, 0)
+  assert.equal(c.read().batch, null)
+})
+
+// Valid boundary IDs and generated axis IDs must remain usable as original-query condition references.
+test('accepts planner condition ID boundaries without shrinking the query ID allowance', async () => {
+  for (const id of ['x'.repeat(160), 'axis-problem-0-2', 'axis-topology-1', 'A9-b2']) {
+    const valid = plan('q'.repeat(2048))
+    valid.selected[0].expression = 'optimization'
+    valid.conditions = [{ id, label: 'Problem', terms: ['optimization'], role: 'problem' }]
+    valid.selected[0].condition_ids = [id]
+    assert.deepEqual(validateDiscoveryQueryPlan(valid), valid)
+    const c = controller(() => page())
+    await c.start({ plan: valid, scope, sort: 'relevance' })
+    assert.equal(c.read().batch.queries[0].status, 'finished')
+    assert.deepEqual(c.read().batch.queries[0].query.condition_ids, [id])
+  }
 })
