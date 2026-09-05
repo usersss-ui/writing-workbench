@@ -211,7 +211,7 @@ export function createDiscoveryWorkspaceStore(storage) {
     if (!storage || typeof storage.setItem !== 'function') return failure('unavailable')
     if (increment) {
       replacement.revision = before.state.revision + 1
-      validate(replacement)
+      if (!isValidDiscoveryWorkspaceState(replacement)) return failure('invalid')
     }
     const raw = JSON.stringify(replacement)
     if (before.raw !== raw) write(raw)

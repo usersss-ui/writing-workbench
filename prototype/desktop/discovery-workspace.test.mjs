@@ -31,6 +31,22 @@ function workspace(count = 1) {
 }
 const evidence = (record = 'r-1') => ({ record_ids: [record], locator: 'Abstract', reason: 'Explicit statement', method: 'manual', checked_at: time })
 
+function fullByteWorkspace(revision = 0) {
+  const state = workspace(80); state.revision = revision
+  for (const record of state.records) record.bibliography.abstract = '汉'.repeat(17000)
+  let padding = 4194304 - Buffer.byteLength(JSON.stringify(state))
+  assert.ok(padding > 0)
+  // Warnings are genuine bounded persisted plan data, used to hit the byte boundary exactly.
+  while (padding > 3) {
+    const length = Math.min(9999, padding - (state.batches[0].plan.warnings.length ? 3 : 2))
+    state.batches[0].plan.warnings.push('x'.repeat(length))
+    padding = 4194304 - Buffer.byteLength(JSON.stringify(state))
+  }
+  if (padding) state.batches[0].plan.warnings[0] += 'x'.repeat(padding)
+  assert.equal(Buffer.byteLength(JSON.stringify(state)), 4194304)
+  return state
+}
+
 test('missing workspace is readable without materializing storage and all snapshots are defensive', () => {
   assert.equal(typeof createStore, 'function', 'workspace store must be implemented')
   const storage = memoryStorage(); const store = createStore(storage)
@@ -174,18 +190,7 @@ test('capacity limits count source records, sources per result, batches and exac
   assert.equal(valid(many), true)
   const batches = empty(); batches.batches = Array.from({ length: 100 }, (_, i) => batch(`b-${i}`))
   assert.equal(valid(batches), true); batches.batches.push(batch('b-100')); assert.equal(valid(batches), false)
-  const bytes = workspace(80)
-  for (const record of bytes.records) record.bibliography.abstract = '汉'.repeat(17000)
-  const remaining = 4 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(bytes))
-  assert.ok(remaining > 0)
-  // Warnings are genuine bounded persisted plan data, used to hit the byte boundary exactly.
-  let padding = remaining
-  while (padding > 3) {
-    const length = Math.min(9999, padding - (bytes.batches[0].plan.warnings.length ? 3 : 2))
-    bytes.batches[0].plan.warnings.push('x'.repeat(length)); padding = 4 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(bytes))
-  }
-  if (padding) bytes.batches[0].plan.warnings[0] += 'x'.repeat(padding)
-  assert.equal(Buffer.byteLength(JSON.stringify(bytes)), 4194304)
+  const bytes = fullByteWorkspace()
   assert.equal(valid(bytes), true)
   const fullStorage = memoryStorage(); const fullStore = createStore(fullStorage)
   assert.equal(fullStore.commit(bytes).persisted, true)
@@ -299,3 +304,24 @@ test('merged aliases preserve conflicting and repeated review evidence for downs
   assert.deepEqual(store.read().scope_reviews.map(review => review.value), ['en', 'zh'])
   assert.equal(cleanup(store.read(), 'b-1').retained_records, 1)
 })
+
+for (const [label, inputFactory] of [
+  ['safe integer revision overflow', () => ({ ...workspace(), revision: Number.MAX_SAFE_INTEGER })],
+  ['revision digit growth past the UTF-8 byte limit', () => fullByteWorkspace(9)],
+]) {
+  test(`commit reports invalid for derived ${label} without writes or session mutation`, () => {
+    const input = inputFactory(); assert.equal(valid(input), true)
+    const raw = JSON.stringify(input); const storage = memoryStorage([[key, raw]])
+    const store = createStore(storage); const before = store.read()
+    let writes = 0
+    const originalSet = storage.setItem.bind(storage); const originalRemove = storage.removeItem.bind(storage)
+    storage.setItem = (...args) => { writes++; originalSet(...args) }
+    storage.removeItem = (...args) => { writes++; originalRemove(...args) }
+    const result = store.commit(input)
+    assert.deepEqual(result, { persisted: false, reason: 'invalid', state: before })
+    assert.equal(writes, 0); assert.equal(storage.getItem(key), raw)
+    assert.deepEqual(store.read(), before); assert.equal(store.getLoadStatus(), 'valid')
+    result.state.revision = 123
+    assert.deepEqual(store.read(), before)
+  })
+}
