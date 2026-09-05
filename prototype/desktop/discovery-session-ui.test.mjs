@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeElement, findElement, memoryStorage, recordInput, deferred } from './discovery-test-fixtures.mjs'
 import { createDiscoveryWorkspaceStore, createEmptyDiscoveryWorkspaceState, DISCOVERY_WORKSPACE_STORAGE_KEY } from './discovery-workspace.mjs'
+import { createCandidateStore } from './candidate-storage.mjs'
 const ui = await import('./discovery-session-ui.mjs').catch(() => ({}))
 function setup({ storage = memoryStorage(), searchPage, searchWorks, batchController, candidateStore, confirmArchive, fetchImpl, initialDirection } = {}) {
   const elements = new Map()
@@ -201,6 +202,70 @@ test('successful conversion stores the canonical OpenAlex URL cross-reference an
   await env.session.convert(env.resultId)
   assert.equal(env.workspaceStore.read().external_candidates[0].openalex_id, 'https://openalex.org/W123')
   await env.session.convert(env.resultId); assert.equal(saved.length, 1)
+})
+
+test('conversion rejects a competing saved DOI identity created during the old-store add', async () => {
+  const storage = memoryStorage(), oldStore = createCandidateStore(storage)
+  const env = await selectedEnv({ candidateStore: { read: oldStore.read, reload: oldStore.reload, add(work) {
+    createCandidateStore(storage).add({ ...work, paperId: 'W456', source: 'Synthetic Journal' })
+    return oldStore.add(work)
+  } } })
+  await env.session.convert(env.resultId)
+  assert.deepEqual(createCandidateStore(storage).read().candidates.map(item => item.paperId), ['W456'])
+  assert.equal(env.workspaceStore.read().external_candidates[0].openalex_id, null)
+  assert.match(env.root.elements.get('#discovery-status').textContent, /身份.*冲突/)
+  assert.doesNotMatch(env.root.elements.get('#discovery-status').textContent, /已转入/)
+})
+
+test('explicit batch rules survive another page, a failed page and its retry', async () => {
+  let calls = 0
+  const env = setup({ searchPage: async options => {
+    calls++
+    if (calls === 3) throw new Error('Synthetic page failure')
+    const record = recordInput({ record_id: options.idFactory(), provider_id: `W${calls}`, provenance: { ...recordInput().provenance, provider: 'openalex', method: 'api', verification: 'api', batch_id: options.batch_id, query_id: options.query_id } })
+    record.bibliography.doi = `10.1234/page.${calls}`
+    return { records: [record], works: [], total: 3, nextCursor: calls < 4 ? `page-${calls + 1}` : null }
+  } })
+  for (const [id, value] of [['discovery-rule-year', '2024'], ['discovery-rule-category', 'Control'], ['discovery-apply-rules', '']]) {
+    const element = makeElement(); element.value = value; env.root.elements.set(`#${id}`, element)
+  }
+  env.session.start(); await env.session.search(); await env.root.elements.get('#discovery-apply-rules').dispatch('click')
+  const rules = { version: 1, data_year: 2024, category: 'Control', low_match_limit: 5 }
+  for (let page = 0; page < 3; page++) {
+    await env.session.search(true)
+    assert.deepEqual(env.session.getSnapshot().batch.rule_snapshot, rules)
+    assert.deepEqual(env.workspaceStore.read().batches.at(-1).rule_snapshot, rules)
+    assert.deepEqual(env.workspaceStore.read().rules, rules)
+  }
+  assert.equal(calls, 4); assert.equal(env.session.getSnapshot().batch.queries[0].status, 'finished')
+})
+
+test('later-page candidate identity conflicts retain results and release search controls', async () => {
+  const storage = memoryStorage(), seed = createDiscoveryWorkspaceStore(storage), state = createEmptyDiscoveryWorkspaceState()
+  const a = recordInput(), b = recordInput({ record_id: 'r-2', provider_id: 'W123' })
+  b.bibliography.doi = null; b.provenance = { ...b.provenance, provider: 'openalex', method: 'api', verification: 'api' }
+  state.records = [a, b]
+  state.results = [a, b].map((record, index) => ({ result_id: `result-${index}`, record_ids: [record.record_id], preferred_record_id: record.record_id, alias_ids: [], identity_status: 'clear', conflicts: [] }))
+  state.batches = [{ batch_id: 'b-1', created_at: a.provenance.retrieved_at, scope: { startYear: null, endYear: null, language: 'all' }, plan: { conditions: [], selected: [], suggested: [], warnings: [] }, rule_snapshot: state.rules, queries: [], record_ids: ['r-1', 'r-2'], excluded_record_ids: [] }]
+  state.external_candidates = state.results.map((result, index) => ({ result_id: result.result_id, selected_at: a.provenance.retrieved_at, openalex_id: index ? 'https://openalex.org/W456' : 'https://openalex.org/W123' }))
+  assert.equal(seed.commit(state).persisted, true)
+  let calls = 0
+  const env = setup({ storage, searchPage: async options => {
+    calls++
+    const record = recordInput({ record_id: options.idFactory(), provider_id: calls === 1 ? 'W789' : 'W123', provenance: { ...a.provenance, provider: 'openalex', method: 'api', verification: 'api', batch_id: options.batch_id, query_id: options.query_id } })
+    if (calls === 1) { record.bibliography.doi = '10.1234/unrelated'; record.bibliography.title = 'Synthetic unrelated paper retained' }
+    return { records: [record], works: [], total: 2, nextCursor: calls === 1 ? 'next' : null }
+  } })
+  env.session.start(); await env.session.search()
+  const saved = env.workspaceStore.read(), visible = env.session.getSnapshot().results
+  await assert.doesNotReject(env.session.search(true))
+  assert.equal(env.session.getSnapshot().busy, false)
+  assert.equal(env.root.elements.get('#keyword-live-search').disabled, false)
+  assert.equal(env.root.elements.get('#keyword-load-more').disabled, false)
+  assert.equal(env.root.elements.get('#keyword-search-results').getAttribute('aria-busy'), 'false')
+  assert.deepEqual(env.workspaceStore.read(), saved); assert.deepEqual(env.session.getSnapshot().results, visible)
+  assert.match(env.root.elements.get('#keyword-live-results-list').textContent, /Synthetic unrelated paper retained/)
+  assert.match(env.root.elements.get('#keyword-search-status').textContent, /交叉引用.*冲突/)
 })
 
 test('identity bridge across historical candidates canonicalizes references without dropping review evidence', async () => {

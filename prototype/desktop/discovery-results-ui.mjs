@@ -9,8 +9,10 @@ export function renderDiscoveryResults({ root, results, records, evaluations, vi
   const make = (tag, value) => { const element = root.createElement(tag); if (value !== undefined) element.textContent = value; return element }
   const byRecord = new Map(records.map(record => [record.record_id, record]))
   const byEvaluation = new Map(evaluations.map(item => [item.result_id, item]))
-  const visible = results.filter(result => view === 'all' || (visibleIds
-    ? visibleIds.includes(result.result_id) : byEvaluation.get(result.result_id)?.status === 'recommended'))
+  const byResult = new Map(results.map(result => [result.result_id, result]))
+  const visible = view === 'all' ? results : visibleIds
+    ? visibleIds.map(id => byResult.get(id)).filter(Boolean)
+    : results.filter(result => byEvaluation.get(result.result_id)?.status === 'recommended')
   const summary = make('p', `去重后已加载 ${results.length} 篇；仅代表本轮已加载范围`)
   summary.className = 'discovery-loaded-summary'
   const children = [summary]

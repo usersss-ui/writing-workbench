@@ -36,3 +36,16 @@ test('curated paging exposes loaded recommendations beyond page one without quer
   const next = findElement(list, node => node.dataset?.recommendationPage === 'next')
   assert.ok(next); await next.dispatch('click'); assert.equal(page, 2)
 })
+
+test('curated cards follow ranked page IDs while all results retain discovery order', () => {
+  const { root, list } = setup()
+  const results = ['A', 'B', 'C'].map(result_id => ({ ...result, result_id }))
+  const options = { root, results, records: [record], evaluations: results.map(item => ({ result_id: item.result_id, status: 'recommended', missing: [], reasons: [] })), onSelect() {}, onReview() {} }
+  const cards = () => list.children.filter(node => node.dataset?.resultId).map(node => node.dataset.resultId)
+  ui.renderDiscoveryResults({ ...options, view: 'curated', visibleIds: ['B', 'A'], page: 1, hasMore: true })
+  assert.deepEqual(cards(), ['B', 'A'])
+  ui.renderDiscoveryResults({ ...options, view: 'curated', visibleIds: ['C'], page: 2 })
+  assert.deepEqual(cards(), ['C'])
+  ui.renderDiscoveryResults({ ...options, view: 'all', visibleIds: ['B', 'A'] })
+  assert.deepEqual(cards(), ['A', 'B', 'C'])
+})

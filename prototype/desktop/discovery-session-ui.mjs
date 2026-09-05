@@ -168,7 +168,11 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
   function mergeBatch(snapshot) {
     const merged = mergeDiscoveryRecords({ records: state.records, results: state.results, incoming: snapshot.records, idFactory: id })
     const next = { ...copy(state), records: merged.records, results: merged.results }
-    next.batches = next.batches.filter(item => item.batch_id !== snapshot.batch.batch_id); next.batches.push(copy(snapshot.batch))
+    const previous = next.batches.find(item => item.batch_id === snapshot.batch.batch_id)
+    const acceptedBatch = copy(snapshot.batch)
+    // Page progress belongs to the controller; explicitly confirmed rules belong to the workspace.
+    if (previous) acceptedBatch.rule_snapshot = copy(previous.rule_snapshot)
+    next.batches = next.batches.filter(item => item.batch_id !== snapshot.batch.batch_id); next.batches.push(acceptedBatch)
     canonicalizeCandidates(next)
     return next
   }
@@ -228,8 +232,10 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
   async function more(queryId, retry) {
     if (busy || !sessionBatch) return
     const owner = generation; setBusy(true)
-    await (retry ? batch.retry(queryId) : batch.loadMore(queryId)); acceptLoaded(owner)
-    if (owner === generation) setBusy(false)
+    try {
+      await (retry ? batch.retry(queryId) : batch.loadMore(queryId)); acceptLoaded(owner)
+    } catch (error) { if (owner === generation) message(error.message, '#keyword-search-status') }
+    finally { if (owner === generation) setBusy(false) }
   }
   function emptyImportBatch() {
     return { batch_id: id(), created_at: instant(), scope: readScope(), plan: { conditions: declaredConditions(), selected: [], suggested: [], warnings: [] },
@@ -295,6 +301,7 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
       const outcome = existing.length ? { persisted: true } : candidateStore.add(verified.work)
       onQueueChange()
       if (!outcome.persisted) { message('归档候选只在临时内存中，尚未保存。外部记录保留。'); return }
+      if (!existing.length && outcome.added !== true) { message('归档候选未新增或身份存在冲突，请重新核对旧队列。外部记录保留。'); return }
       const next = copy(state); next.external_candidates.find(item => item.result_id === candidate.result_id).openalex_id = `https://openalex.org/${verified.work.paperId}`
       const crossref = commit({ state: next, expectedRevision: ticket.revision, expectedGeneration: ticket.generation })
       message(crossref.persisted ? '已转入归档候选。请继续在原队列确认和归档。' : '归档候选已保存；交叉引用待同步。外部记录保留。')
