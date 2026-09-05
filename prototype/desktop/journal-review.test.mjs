@@ -50,6 +50,43 @@ test('unconfirmed identity, name-only JCR match and missing source do not pass',
   }
   assert.equal(gate([review({ issns: ['2345-6789'] })]).status, 'pending')
 })
+test('JCR cannot expand the Chinese whitelist or infer unknown publication language', () => {
+  for (const [language, status] of [['en','pass'],['zh','fail'],[null,'pending'],['fr','fail']]) {
+    assert.equal(gate([review()], {bibliography:bibliography({language})}).status,status)
+  }
+})
+test('a confirmed print ISSN accepts incomplete electronic coverage without hiding quartile conflicts', () => {
+  const b = bibliography({journal:{title:'Synthetic Journal',source_id:null,source_type:'journal',issns:['1234-5678','2345-6789']}})
+  assert.equal(gate([review()], {bibliography:b}).status,'pass')
+  assert.equal(gate([review(), review({review_id:'j-2',issns:['2345-6789'],quartile:'Q3'})], {bibliography:b}).status,'pending')
+  assert.equal(gate([review({issns:['3456-7890']})], {bibliography:b}).status,'pending')
+})
+for (const [title,issn,canonical] of [['Acta Automatica Sinica','0254-4156','自动化学报'],['Control Theory & Applications','1000-8152','控制理论与应用']]) {
+  test(`${title} is an exact whitelist alias only with compatible identity evidence`, () => {
+    const b = bibliography({language:'zh',journal:{title,issns:[issn],source_id:null,source_type:'journal'}})
+    const result = gate([], {bibliography:b})
+    assert.equal(result.status,'pass')
+    assert.match(result.basis.join(' '),new RegExp(canonical,'u'))
+    assert.equal(gate([], {bibliography:{...b,journal:{...b.journal,issns:[issn === '0254-4156' ? '1000-8152' : '0254-4156']}}}).status,'pending')
+    assert.equal(gate([], {bibliography:{...b,journal:{...b.journal,issns:[]}}}).status,'pending')
+    const evidence = {record_ids:['r-1'],locator:'Masthead',reason:'Exact identity verified',method:'manual',checked_at:now}
+    assert.equal(gate([], {bibliography:{...b,journal:{...b.journal,issns:[]}},result_id:'result-1',
+      scope_reviews:[{result_id:'result-1',field:'journal_identity',value:canonical,evidence}]}).status,'pass')
+  })
+}
+test('Control Theory and Technology and substring extensions never acquire whitelist identity', () => {
+  for (const title of ['Control Theory and Technology','Acta Automatica Sinica Supplement','Control Theory & Applications International']) {
+    assert.equal(gate([], {bibliography:bibliography({language:'zh',journal:{title,issns:['1000-8152'],source_id:null,source_type:'journal'}})}).status,'pending')
+  }
+})
+test('distinct English lookalike journals may qualify through their own confirmed JCR identity', () => {
+  for (const title of ['IEEE/CAA Journal of Automatica Sinica','Control Theory and Technology']) {
+    const result = gate([review({title})], {bibliography:bibliography({journal:{title,issns:['1234-5678'],source_id:null,source_type:'journal'}})})
+    assert.equal(result.status,'pass')
+    assert.match(result.basis.join(' '),/JIF/u)
+    assert.doesNotMatch(result.basis.join(' '),/中文期刊名单/u)
+  }
+})
 test('JournalReview validates exact bounded plain data without invoking accessors', () => {
   assert.equal(validateJournalReview(review()), true)
   assert.equal(validateJournalReview(review({ source_url: null, import_description: 'User supplied CSV' })), true)

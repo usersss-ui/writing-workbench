@@ -50,6 +50,33 @@ test('same evidence has same eligibility across providers, import methods and qu
     assert.equal(evaluateDiscoveryRecommendation(args).status, 'recommended')
   }
 })
+test('four confirmed conditions and Q1 cannot bypass language-specific journal admission under scope all', () => {
+  for (const [language,status] of [['en','recommended'],['zh','not_recommended'],[null,'pending'],['fr','not_recommended']]) {
+    const args = input(4,4); args.scope.language = 'all'; args.records[0].bibliography.language = language
+    assert.equal(evaluateDiscoveryRecommendation(args).status,status)
+  }
+})
+test('incomplete secondary ISSN coverage preserves a valid English Q1 recommendation', () => {
+  const args = input(4,4); args.records[0].bibliography.journal.issns.push('2345-6789')
+  assert.equal(evaluateDiscoveryRecommendation(args).status,'recommended')
+})
+for (const [chinese,english,issn] of [['自动化学报','Acta Automatica Sinica','0254-4156'],['控制理论与应用','Control Theory & Applications','1000-8152']]) {
+  test(`merged ${chinese} and ${english} sources retain alias reviews with current evidence`, () => {
+    const args = input(4,4); args.scope.language = 'all'; args.result.alias_ids = ['before-merge']
+    args.records[0].bibliography.language = 'zh'
+    args.records[0].bibliography.journal = {title:chinese,issns:[issn],source_id:null,source_type:'journal'}
+    const other = structuredClone(args.records[0]); other.record_id = 'r-2'; other.bibliography.journal.title = english
+    args.records.push(other); args.result.record_ids.push('r-2'); args.result.preferred_record_id = 'r-2'
+    for (const review of args.condition_reviews) review.result_id = 'before-merge'
+    args.scope_reviews = [{result_id:'before-merge',field:'journal_identity',value:chinese,evidence:evidence(['r-1','r-2'])},
+      {result_id:'result-1',field:'journal_identity',value:english,evidence:evidence(['r-2'])}]
+    const result = evaluateDiscoveryRecommendation(args)
+    assert.equal(result.status,'recommended')
+    assert.deepEqual(result.confirmed_ids,['c1','c2','c3','c4'])
+    args.scope_reviews[1].evidence.record_ids = ['split-away']
+    assert.equal(evaluateDiscoveryRecommendation(args).status,'pending')
+  })
+}
 test('only complete evidence pointing to current result records can confirm conditions', () => {
   for (const patch of [{ record_ids: ['split-away'] }, { record_ids: [] }, { locator: '' }, { reason: '' }, { method: 'auto' }, { checked_at: 'today' }]) {
     const args = input(); Object.assign(args.condition_reviews[0].evidence, patch)

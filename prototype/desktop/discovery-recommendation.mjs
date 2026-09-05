@@ -1,5 +1,5 @@
 import { isValidDiscoveryRecord, classifyDiscoveryScope } from './discovery-record.mjs'
-import { evaluateJournalGate } from './journal-review.mjs'
+import { canonicalChineseJournalTitle, evaluateJournalGate } from './journal-review.mjs'
 
 const RESULT_KEYS = ['result_id', 'record_ids', 'preferred_record_id', 'alias_ids', 'identity_status', 'conflicts']
 const EVALUATION_KEYS = ['result_id', 'status', 'confirmed_ids', 'missing', 'reasons', 'group_id', 'limit']
@@ -9,6 +9,7 @@ const fail = label => { throw new TypeError(`${label} 无效`) }
 const nonempty = (value, max = 2048) => typeof value === 'string' && !!value.trim() && value.length <= max
   && !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
 const conditionId = value => typeof value === 'string' && value.length <= 160 && /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u.test(value)
+const journalTitleIdentity = value => canonicalChineseJournalTitle(value) ?? value
 
 function exact(value, keys) {
   if (!value || Object.getPrototypeOf(value) !== Object.prototype) return false
@@ -65,7 +66,7 @@ function sourceConflicts(records) {
       const a = records[i].bibliography.journal, b = records[j].bibliography.journal
       if ((a.issns.length && b.issns.length && !a.issns.some(issn => b.issns.includes(issn)))
         || (a.source_type && b.source_type && a.source_type !== b.source_type)
-        || (a.title && b.title && a.title !== b.title && /[\p{Script=Han}]/u.test(a.title + b.title))
+        || (a.title && b.title && journalTitleIdentity(a.title) !== journalTitleIdentity(b.title) && /[\p{Script=Han}]/u.test(a.title + b.title))
         || (records[i].provenance.provider === records[j].provenance.provider && a.source_id && b.source_id && a.source_id !== b.source_id)) {
         reasons.push('来源期刊身份冲突')
       }
@@ -104,9 +105,9 @@ export function evaluateDiscoveryRecommendation({ result, records, conditions, c
   }
   const preferred = byId.get(result.preferred_record_id)
   const bibliography = structuredClone(preferred.bibliography)
-  const journalIdentities = unique(eligibleScopes.filter(review => review.field === 'journal_identity').map(review => review.value))
+  const journalIdentities = unique(eligibleScopes.filter(review => review.field === 'journal_identity').map(review => journalTitleIdentity(review.value)))
   if (journalIdentities.length > 1 || (bibliography.journal.title && journalIdentities.length
-    && bibliography.journal.title !== journalIdentities[0])) return finish('pending', [], ['期刊身份核验证据冲突'])
+    && journalTitleIdentity(bibliography.journal.title) !== journalIdentities[0])) return finish('pending', [], ['期刊身份核验证据冲突'])
   // Unreported fields can use another current source or an explicit review, never a guessed default.
   for (const field of ['language', 'work_type']) {
     const reported = current.map(record => record.bibliography[field]).find(value => value !== null) ?? null

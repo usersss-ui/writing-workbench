@@ -4,6 +4,19 @@ const REVIEW_KEYS = ['review_id', 'title', 'issns', 'identity_confirmed', 'metri
   'category', 'quartile', 'source_url', 'import_description', 'checked_at', 'method']
 const EVIDENCE_KEYS = ['record_ids', 'locator', 'reason', 'method', 'checked_at']
 const CHINESE_JOURNALS = new Map([['0254-4156', '自动化学报'], ['1000-8152', '控制理论与应用']])
+const CHINESE_JOURNAL_NAMES = new Map([
+  ['自动化学报', '自动化学报'], ['Acta Automatica Sinica', '自动化学报'],
+  ['控制理论与应用', '控制理论与应用'], ['Control Theory & Applications', '控制理论与应用'],
+])
+const CONFLICTING_WHITELIST_NAMES = new Set([
+  'IEEE/CAA Journal of Automatica Sinica', 'Control Theory and Technology', 'Control and Decision', '控制与决策',
+])
+
+/** Exact approved bilingual names only; this resolves names, not ISSN or language eligibility. */
+export function canonicalChineseJournalTitle(title) {
+  return CHINESE_JOURNAL_NAMES.get(title) ?? null
+}
+
 const year = value => Number.isInteger(value) && value >= 1000 && value <= 9999
 const text = (value, max = 2048) => typeof value === 'string' && !!value.trim() && value.length <= max
   && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
@@ -71,19 +84,24 @@ export function evaluateJournalGate({ bibliography, journal_reviews, rules, scop
   }
   if (!array(journal.issns, 10)) return pending('期刊身份待核验')
   const whiteMatches = journal.issns.filter(issn => CHINESE_JOURNALS.has(issn))
-  const exactChineseName = [...CHINESE_JOURNALS.values()].includes(journal.title)
-  if (whiteMatches.length || exactChineseName) {
+  const canonicalTitle = canonicalChineseJournalTitle(journal.title)
+  if (whiteMatches.length || canonicalTitle || (bibliography.language === 'zh' && CONFLICTING_WHITELIST_NAMES.has(journal.title))) {
     if (bibliography.language !== 'zh') return pending('中文书目语言待核验')
     if (whiteMatches.length === 1 && journal.issns.length === 1
-      && (!journal.title || journal.title === CHINESE_JOURNALS.get(whiteMatches[0]))) {
+      && (!journal.title || canonicalTitle === CHINESE_JOURNALS.get(whiteMatches[0]))) {
       return { status: 'pass', basis: [`中文期刊名单准入：${CHINESE_JOURNALS.get(whiteMatches[0])} (${whiteMatches[0]})`], missing: [] }
     }
-    if (journal.issns.length === 0 && exactChineseName && result_id !== null && scope_reviews.some(review =>
+    if (journal.issns.length === 0 && canonicalTitle && result_id !== null && scope_reviews.some(review =>
       exact(review, ['result_id', 'field', 'value', 'evidence']) && review.result_id === result_id
-      && review.field === 'journal_identity' && review.value === journal.title && validEvidence(review.evidence))) {
-      return { status: 'pass', basis: [`中文期刊名单准入：用户核验 ${journal.title}`], missing: [] }
+      && review.field === 'journal_identity' && review.value === canonicalTitle && validEvidence(review.evidence))) {
+      return { status: 'pass', basis: [`中文期刊名单准入：用户核验 ${canonicalTitle}`], missing: [] }
     }
     return pending('中文期刊身份缺失或冲突')
+  }
+  if (bibliography.language === null || bibliography.language === undefined) return pending('书目语言待核验')
+  if (bibliography.language !== 'en') {
+    return { status: 'fail', basis: [bibliography.language === 'zh'
+      ? '未在本轮中文期刊名单内，保留在全部结果' : '本轮仅提供英文期刊与指定中文期刊推荐规则，保留在全部结果'], missing: [] }
   }
   const confirmed = journal_reviews.filter(review => validateJournalReview(review) && review.identity_confirmed)
   // The selected year comes from the whole supplied batch, not this journal's history.
@@ -92,8 +110,7 @@ export function evaluateJournalGate({ bibliography, journal_reviews, rules, scop
   const matches = confirmed.filter(review => review.data_year === dataYear && review.category === rules.category
     && journal.issns.length > 0 && journal.issns.some(issn => review.issns.includes(issn)))
   if (!matches.length) return pending(`缺少 ${dataYear} 年 ${rules.category} 的已确认 JIF 期刊身份及分区`)
-  // A shared identifier cannot conceal a second, contradictory identifier.
-  if (matches.some(review => journal.issns.some(issn => !review.issns.includes(issn)))) return pending('期刊 ISSN 身份冲突')
+  // A confirmed overlapping ISSN is sufficient; an omitted secondary ISSN is incomplete coverage, not contradictory identity.
   const quartiles = [...new Set(matches.map(review => review.quartile))]
   if (quartiles.length !== 1) return pending(`同年同学科 JIF 分区冲突：${quartiles.sort().join(' / ')}`)
   const quartile = quartiles[0]
