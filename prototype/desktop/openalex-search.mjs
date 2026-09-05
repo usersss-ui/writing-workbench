@@ -132,7 +132,7 @@ function isPublicHostname(hostname) {
   return !isPrivateIpv4(host)
 }
 
-function safeHttpsUrl(value) {
+export function safeHttpsUrl(value) {
   if (typeof value !== "string" || value.length > 2_048) return null
   if (/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)) return null
   const text = value.trim()
@@ -158,7 +158,7 @@ function normalizePaperId(value) {
   return match ? match[1].toUpperCase() : null
 }
 
-function normalizeDoi(value) {
+export function normalizeDoi(value) {
   if (
     typeof value !== "string" || value.length > 512 || value.includes("\\") ||
     /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
