@@ -88,6 +88,43 @@ test('invalid local identifiers cannot leak private locations into public result
   assert.deepEqual(search([paper({ paper_id: '/private/paper' }), paper({ paper_id: '../escape' })]), [])
 })
 
+test('malformed index members throw even alongside hits or when scope would exclude them', () => {
+  for (const member of [null, 42, {}, [], new Date(), { paper_id: 42 }, Object.create({ paper_id: 'Local-02' })]) {
+    assert.throws(() => search([member]), TypeError)
+    assert.throws(() => search([paper(), member]), TypeError)
+  }
+  assert.throws(() => search([{ year: 2010 }], { scope: { startYear: 2020, endYear: null, language: 'all' } }), TypeError)
+  assert.throws(() => search(new Array(1)), TypeError)
+  assert.deepEqual(search([{ paper_id: 'Local-02' }]), [])
+  assert.deepEqual(search([{ paper_id: '../unsafe' }]), [])
+})
+
+test('canonical network facets recall exact field-specific hints and distinguish opposing values', () => {
+  const cases = [
+    ['direction', '有向', '无向', 'directed network'],
+    ['direction', '无向', '有向', 'undirected network'],
+    ['balance', '平衡', '不平衡', 'balanced network'],
+    ['balance', '不平衡', '平衡', 'unbalanced network'],
+    ['time', '固定', '时变', 'static topology'],
+    ['time', '时变', '固定', 'time-varying topology'],
+  ]
+  for (const [field, value, opposite, term] of cases) {
+    const conditions = [{ id: 'network-condition', label: 'Network condition', terms: [term], role: 'network' }]
+    const source = paper({ title_original: 'Unrelated title', facets: { network: { [field]: [value] } },
+      facet_states: { 'oracle.estimation': 'pending_verification' },
+      metadata_provenance: { facets: 'tag_catalog', facet_states: 'tag_catalog' } })
+    const hits = search([source], { conditions })
+    assert.equal(hits.length, 1, term)
+    assert.deepEqual(hits[0].hint_condition_ids, ['network-condition'])
+    assert.deepEqual(hits[0].matched_fields, [`facets.network.${field}`])
+    assert.deepEqual(hits[0].paper.facets, source.facets)
+    assert.deepEqual(hits[0].paper.facet_states, source.facet_states)
+    assert.deepEqual(hits[0].paper.metadata_provenance, source.metadata_provenance)
+    assert.equal(search([paper({ title_original: 'Unrelated title', facets: { network: { [field]: [opposite] } } })], { conditions }).length, 0, `${term}: opposite`)
+    assert.equal(search([paper({ title_original: value, source_terms: [value], facets: { objective: [value] } })], { conditions }).length, 0, `${term}: no global short aliases`)
+  }
+})
+
 test('only supplied topical fields are read and public hit projections exclude private locations', () => {
   const source = paper({ relative_path: '/private/paper', source_path: '/private/source',
     artifacts: { note: [{ relative_path: '/private/note' }] }, preferred_note: '/private/note',

@@ -23,6 +23,13 @@ const FACET_PATHS = ['research.domain', 'research.mode', 'objective', 'constrain
   'constraints.consistency', 'oracle.information', 'oracle.estimation', 'methods.framework',
   'methods.coordination', 'methods.operator', 'network.direction', 'network.time', 'network.balance',
   'network.mixing', 'privacy_robustness', 'results', 'applications']
+// Canonical short values mean these terms only inside their own facet path.
+// Never expand them into global prose or source-term substring searches.
+const NETWORK_FACET_TERMS = {
+  'facets.network.direction': { '有向': ['directed network', '有向网络'], '无向': ['undirected network', '无向网络'] },
+  'facets.network.balance': { '平衡': ['balanced network', '平衡网络'], '不平衡': ['unbalanced network', '非平衡网络'] },
+  'facets.network.time': { '固定': ['static topology', '静态拓扑'], '时变': ['time-varying topology', '时变拓扑'] },
+}
 const normalize = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim() : ''
 const atPath = (value, path) => path.split('.').reduce((node, key) => node?.[key], value)
 
@@ -40,6 +47,15 @@ function contains(value, term) {
   if (/\p{Script=Han}/u.test(term)) return content.includes(term)
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
   return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'u').test(content)
+}
+
+function fieldMatches(field, value, term) {
+  const canonical = normalize(value)
+  const mapping = NETWORK_FACET_TERMS[field]
+  if (mapping && Object.hasOwn(mapping, canonical)) {
+    return canonical === term || mapping[canonical].includes(term)
+  }
+  return contains(value, term)
 }
 
 function searchableFields(paper) {
@@ -87,6 +103,12 @@ function publicPaper(paper) {
  */
 export function searchLocalDiscovery({ papers, conditions = [], raw = '', scope = {} } = {}) {
   if (!Array.isArray(papers)) throw new TypeError('请先载入有效的本地论文索引')
+  for (const paper of papers) {
+    if (!paper || Object.getPrototypeOf(paper) !== Object.prototype
+      || !Object.hasOwn(paper, 'paper_id') || typeof paper.paper_id !== 'string') {
+      throw new TypeError('本地论文索引包含无效记录')
+    }
+  }
   if (!Array.isArray(conditions) || typeof raw !== 'string') throw new TypeError('本地检索条件无效')
   const groups = conditions.map(condition => {
     if (!condition || typeof condition.id !== 'string' || !Array.isArray(condition.terms)) throw new TypeError('本地检索条件无效')
@@ -95,7 +117,7 @@ export function searchLocalDiscovery({ papers, conditions = [], raw = '', scope 
   const rawTerms = termsFor([raw])
   const hits = []
   for (const paper of papers) {
-    if (!paper || typeof paper !== 'object' || Array.isArray(paper) || !LOCAL_PAPER_ID.test(paper.paper_id ?? '')) continue
+    if (!LOCAL_PAPER_ID.test(paper.paper_id)) continue
     const year = Number.isInteger(paper.publication_year) ? paper.publication_year : paper.year
     if (Number.isInteger(year) && ((Number.isInteger(scope.startYear) && year < scope.startYear)
       || (Number.isInteger(scope.endYear) && year > scope.endYear))) continue
@@ -106,7 +128,7 @@ export function searchLocalDiscovery({ papers, conditions = [], raw = '', scope 
     const ids = new Set()
     for (const { id, terms } of [...groups, { id: null, terms: rawTerms }]) {
       for (const [field, values] of fields) {
-        if (!values.some(value => terms.some(term => contains(value, term)))) continue
+        if (!values.some(value => terms.some(term => fieldMatches(field, value, term)))) continue
         matched.add(field)
         if (id !== null) ids.add(id)
       }
