@@ -81,7 +81,7 @@ test("accepts canonical exact records regardless of object insertion order", () 
   assert.equal(isValidDiscoveryRecord(reordered), true)
 })
 
-test("normalizes bounded descriptive metadata while retaining unknown language and type values", () => {
+test("normalizes bounded descriptive metadata while retaining author multiplicity and unknown values", () => {
   const record = normalizeDiscoveryRecord(withBibliography({
     title: "  A   bounded title  ",
     authors: ["  Alice   Example  ", "Alice Example", "Bob Example"],
@@ -98,7 +98,7 @@ test("normalizes bounded descriptive metadata while retaining unknown language a
 
   assert.equal(record.bibliography.title, "A bounded title")
   assert.equal(record.bibliography.abstract, "A bounded abstract.")
-  assert.deepEqual(record.bibliography.authors, ["Alice Example", "Bob Example"])
+  assert.deepEqual(record.bibliography.authors, ["Alice Example", "Alice Example", "Bob Example"])
   assert.equal(record.bibliography.language, "fr")
   assert.equal(record.bibliography.work_type, "proceedings-article")
   assert.equal(record.bibliography.journal.title, "Example Journal")
@@ -128,12 +128,16 @@ test("accepts exact metadata boundaries and rejects values one step over each li
 
   const invalid = [
     withBibliography({ title: "T".repeat(1_001) }),
+    withBibliography({ title: `A${" ".repeat(999)}B` }),
     withBibliography({ abstract: "A".repeat(20_001) }),
+    withBibliography({ abstract: `A${" ".repeat(19_999)}B` }),
     withBibliography({ authors: ["N".repeat(301)] }),
+    withBibliography({ authors: [`A${" ".repeat(299)}B`] }),
     withBibliography({ authors: Array.from({ length: 51 }, (_, index) => `Author ${index}`) }),
     withBibliography({ url: `https://example.org/${"u".repeat(2_029)}` }),
     withBibliography({ url: 3 }),
     withJournal({ title: "J".repeat(501) }),
+    withJournal({ title: `A${" ".repeat(499)}B` }),
   ]
   for (const value of invalid) assert.throws(() => normalizeDiscoveryRecord(value), TypeError)
 })

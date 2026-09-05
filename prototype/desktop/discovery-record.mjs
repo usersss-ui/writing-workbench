@@ -86,6 +86,7 @@ function readDenseArray(value, maximum, label) {
 function text(value, maximum, label, { nullable = false, lowercase = false } = {}) {
   if (value === null && nullable) return null
   if (typeof value !== "string") fail(label)
+  if ([...value].length > maximum) fail(label)
   const normalized = value
     .replace(/[\u0000-\u001f\u007f\u2028\u2029]/gu, " ")
     .replace(/\s+/gu, " ")
@@ -148,11 +149,8 @@ function bibliographyDoi(value) {
 function normalizeAuthors(value) {
   const authors = readDenseArray(value, 50, "作者")
   const normalized = []
-  const seen = new Set()
   for (const author of authors) {
     const name = text(author, 300, "作者")
-    if (seen.has(name)) continue
-    seen.add(name)
     normalized.push(name)
   }
   return normalized
