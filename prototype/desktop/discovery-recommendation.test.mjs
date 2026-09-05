@@ -60,6 +60,24 @@ test('incomplete secondary ISSN coverage preserves a valid English Q1 recommenda
   const args = input(4,4); args.records[0].bibliography.journal.issns.push('2345-6789')
   assert.equal(evaluateDiscoveryRecommendation(args).status,'recommended')
 })
+for (const title of ['Control Theory & Applications','IEEE/CAA Journal of Automatica Sinica','Control Theory and Technology']) {
+  test(`current ${title} cannot hide conflicting identity behind preferred Acta Automatica Sinica`, () => {
+    const args = input(4,4); args.scope.language = 'all'; args.records[0].bibliography.language = 'zh'
+    args.records[0].bibliography.journal = {title:'Acta Automatica Sinica',issns:['0254-4156'],source_id:null,source_type:'journal'}
+    const other = structuredClone(args.records[0]); other.record_id = 'r-2'; other.bibliography.journal.title = title
+    args.records.push(other); args.result.record_ids.push('r-2')
+    const result = evaluateDiscoveryRecommendation(args)
+    assert.equal(result.status,'pending',title)
+    assert.deepEqual(result.confirmed_ids,[],title)
+  })
+}
+test('matching exact English whitelist aliases across current sources preserve eligibility', () => {
+  const args = input(4,4); args.scope.language = 'all'; args.records[0].bibliography.language = 'zh'
+  args.records[0].bibliography.journal = {title:'Acta Automatica Sinica',issns:['0254-4156'],source_id:null,source_type:'journal'}
+  const other = structuredClone(args.records[0]); other.record_id = 'r-2'
+  args.records.push(other); args.result.record_ids.push('r-2')
+  assert.equal(evaluateDiscoveryRecommendation(args).status,'recommended')
+})
 for (const [chinese,english,issn] of [['自动化学报','Acta Automatica Sinica','0254-4156'],['控制理论与应用','Control Theory & Applications','1000-8152']]) {
   test(`merged ${chinese} and ${english} sources retain alias reviews with current evidence`, () => {
     const args = input(4,4); args.scope.language = 'all'; args.result.alias_ids = ['before-merge']

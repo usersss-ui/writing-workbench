@@ -64,9 +64,11 @@ function sourceConflicts(records) {
   for (let i = 0; i < records.length; i++) {
     for (let j = i+1; j < records.length; j++) {
       const a = records[i].bibliography.journal, b = records[j].bibliography.journal
+      const knownIdentity = canonicalChineseJournalTitle(a.title) || canonicalChineseJournalTitle(b.title)
       if ((a.issns.length && b.issns.length && !a.issns.some(issn => b.issns.includes(issn)))
         || (a.source_type && b.source_type && a.source_type !== b.source_type)
-        || (a.title && b.title && journalTitleIdentity(a.title) !== journalTitleIdentity(b.title) && /[\p{Script=Han}]/u.test(a.title + b.title))
+        || (a.title && b.title && journalTitleIdentity(a.title) !== journalTitleIdentity(b.title)
+          && (knownIdentity || /[\p{Script=Han}]/u.test(a.title + b.title)))
         || (records[i].provenance.provider === records[j].provenance.provider && a.source_id && b.source_id && a.source_id !== b.source_id)) {
         reasons.push('来源期刊身份冲突')
       }
