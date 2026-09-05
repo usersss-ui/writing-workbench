@@ -16,6 +16,8 @@ function publicationLabel(value) {
   const label = "(?:correction|corrigendum|erratum|retraction|preprint(?:\\s+version\\s+\\d+)?|version\\s+\\d+)"
   // Require a publication label at a title boundary, not a word in the subject.
   const match = title.match(new RegExp(`^(?:a\\s+)?(${label})(?:\\s+(?:to|of))?\\s*:`, "u")) ??
+    title.match(new RegExp(`^[[(]\\s*(${label})\\s*[\\])]\\s*`, "u")) ??
+    title.match(/^(version\s+\d+)\s+of\s+/u) ??
     title.match(/^(?:a\s+)?(correction|corrigendum|erratum|retraction)\s+(?:to|of)\s+/u) ??
     title.match(new RegExp(`(?:[:;,]\\s*(?:a\\s+)?(${label})|[[(]\\s*(${label})\\s*[\\])])\\.?$`, "u"))
   return titleText(match?.[1] ?? match?.[2] ?? "")

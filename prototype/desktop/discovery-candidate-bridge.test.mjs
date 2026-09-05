@@ -118,6 +118,21 @@ test("same DOI still rejects explicit publication labels and comparable unrelate
   }
 })
 
+for (const prefix of ["[Preprint]", "Version 2 of"]) {
+  for (const side of ["original", "API"]) {
+    test(`same DOI rejects publication prefix ${prefix} on the ${side} title`, async () => {
+      const original = recordInput()
+      const baseTitle = original.bibliography.title
+      const labelledTitle = `${prefix} ${baseTitle}`
+      if (side === "original") original.bibliography.title = labelledTitle
+      const outcome = await convert({ records: [original], fetchImpl: async () => response(officialWork({
+        title: side === "API" ? labelledTitle : baseTitle,
+      })) })
+      assert.deepEqual(outcome, { status: "conflict", reason: "title_mismatch" })
+    })
+  }
+}
+
 test("conversion returns unverified for 404 and invalid response but propagates retryable failures and abort", async () => {
   for (const [body, status] of [[null, 404], [officialWork({ id: "W123" }), 200]]) {
     assert.equal((await convert({ fetchImpl: async () => response(body, status) })).status, "unverified")
