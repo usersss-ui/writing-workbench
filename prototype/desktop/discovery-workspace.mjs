@@ -222,6 +222,20 @@ export function createDiscoveryWorkspaceStore(storage) {
     if (!matches(before.raw)) write(before.raw)
     return failure(matches(before.raw) ? 'persistence_failed' : 'rollback_failed')
   }
+  function restoreMissingValidated() {
+    const before = inspect()
+    const failure = status => ({ replaced: false, status, state: read() })
+    if (before.status === 'invalid' || before.status === 'unavailable') return failure(before.status)
+    if (!known || before.raw !== baseline) return failure('stale')
+    if (before.raw !== null && typeof storage.removeItem !== 'function') return failure('unavailable')
+    if (before.raw !== null) write(null)
+    if (matches(null)) {
+      state = createEmptyDiscoveryWorkspaceState(); loadStatus = 'missing'; baseline = null; known = true
+      return { replaced: true, state: read() }
+    }
+    if (!matches(before.raw)) write(before.raw)
+    return failure(matches(before.raw) ? 'persistence_failed' : 'rollback_failed')
+  }
   return {
     read,
     getLoadStatus: () => loadStatus,
@@ -236,6 +250,7 @@ export function createDiscoveryWorkspaceStore(storage) {
       return { status: inspected.status, state: clone(inspected.state) }
     },
     replaceValidated: nextState => replace(nextState, false),
+    restoreMissingValidated,
     commit(nextState) {
       const result = replace(nextState, true)
       return result.replaced ? { persisted: true, state: result.state }

@@ -171,6 +171,65 @@ test('write proof accepts write-then-throw, rejects silent loss and proves rollb
   assert.equal(brokenStore.read().records.length, 0)
 })
 
+test('restoreMissingValidated removes only the owned key, proves throw-after-delete and resets its session and CAS baseline', () => {
+  const initial = workspace(), storage = memoryStorage([[key, JSON.stringify(initial)], ['unrelated', 'preserved']])
+  const store = createStore(storage)
+  assert.equal(typeof store.restoreMissingValidated, 'function')
+  const remove = storage.removeItem.bind(storage)
+  storage.removeItem = target => { remove(target); throw Error('after delete') }
+  assert.deepEqual(store.restoreMissingValidated(), { replaced: true, state: empty() })
+  assert.equal(storage.getItem(key), null); assert.equal(storage.getItem('unrelated'), 'preserved')
+  assert.equal(store.getLoadStatus(), 'missing'); assert.deepEqual(store.read(), empty())
+  const committed = store.commit(initial)
+  assert.equal(committed.persisted, true); assert.equal(committed.state.revision, 1)
+})
+
+test('restoreMissingValidated no-ops on an absent key without creating it', () => {
+  const storage = memoryStorage(); let writes = 0
+  storage.setItem = storage.removeItem = () => { writes++; throw Error('must not write') }
+  const store = createStore(storage)
+  assert.equal(store.restoreMissingValidated?.().replaced, true)
+  assert.equal(writes, 0); assert.equal(storage.getItem(key), null)
+})
+
+for (const mode of ['drop-delete', 'throw-before-delete', 'corrupt-and-restore', 'rollback-fails']) {
+  test(`restoreMissingValidated distinguishes deletion proof from ${mode}`, () => {
+    const initial = workspace(), raw = JSON.stringify(initial, null, 2)
+    const storage = memoryStorage([[key, raw]])
+    const store = createStore(storage)
+    storage.removeItem = () => {
+      if (mode === 'throw-before-delete') throw Error('cannot delete')
+      if (mode !== 'drop-delete') storage.data.set(key, '{damaged')
+    }
+    if (mode === 'rollback-fails') storage.setItem = () => { throw Error('cannot restore') }
+    const result = store.restoreMissingValidated?.()
+    assert.equal(result?.replaced, false)
+    assert.equal(result.status, mode === 'rollback-fails' ? 'rollback_failed' : 'persistence_failed')
+    assert.equal(storage.getItem(key), mode === 'rollback-fails' ? '{damaged' : raw)
+    assert.deepEqual(store.read(), initial)
+  })
+}
+
+test('restoreMissingValidated rejects invalid, unavailable and stale current bytes without deleting anything', () => {
+  for (const mode of ['invalid', 'unavailable', 'stale-bytes', 'stale-missing']) {
+    const initial = workspace(), raw = JSON.stringify(initial)
+    const storage = memoryStorage(mode === 'stale-missing' ? [] : [[key, raw]])
+    const store = createStore(storage); let writes = 0
+    storage.removeItem = storage.setItem = () => { writes++ }
+    if (mode === 'invalid') storage.data.set(key, '{invalid')
+    if (mode === 'unavailable') storage.getItem = () => { throw Error('unavailable') }
+    if (mode === 'stale-bytes') storage.data.set(key, JSON.stringify(initial, null, 2))
+    if (mode === 'stale-missing') storage.data.set(key, raw)
+    const result = store.restoreMissingValidated?.()
+    assert.equal(result?.replaced, false)
+    assert.equal(result.status, mode.startsWith('stale') ? 'stale' : mode)
+    assert.equal(writes, 0)
+  }
+  const storage = memoryStorage([[key, JSON.stringify(workspace())]])
+  storage.removeItem = undefined
+  assert.equal(createStore(storage).restoreMissingValidated?.().status, 'unavailable')
+})
+
 test('loading batches recover interrupted in memory only and never schedule work', () => {
   const state = workspace(); state.batches[0].queries[0].status = 'loading'
   const raw = JSON.stringify(state); const storage = memoryStorage([[key, raw]])
