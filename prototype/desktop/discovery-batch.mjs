@@ -91,8 +91,9 @@ function validateStart({ plan, scope, sort, rules = DEFAULT_RULES }) {
 }
 
 export function createDiscoveryBatchController({ searchPage, onChange = () => {},
-  now = () => new Date().toISOString(), idFactory = () => crypto.randomUUID() } = {}) {
+  now = () => new Date().toISOString(), idFactory = () => crypto.randomUUID(), allowDeclaredPages = false } = {}) {
   if ([searchPage, onChange, now, idFactory].some(value => typeof value !== 'function')) fail('批次依赖')
+  if (typeof allowDeclaredPages !== 'boolean') fail('兼容来源声明')
   let generation = 0
   let session = null
   let batch = null
@@ -147,7 +148,8 @@ export function createDiscoveryBatchController({ searchPage, onChange = () => {}
     for (const record of incoming) {
       if (!isValidDiscoveryRecord(record) || record.provenance.batch_id !== batch.batch_id
         || record.provenance.query_id !== job.id || record.provenance.provider !== 'openalex'
-        || record.provenance.method !== 'api' || record.provenance.verification !== 'api'
+        || record.provenance.method !== 'api' || !(record.provenance.verification === 'api'
+          || (allowDeclaredPages && record.provenance.verification === 'declared'))
         || record.provenance.import_id !== null) fail('在线来源记录')
     }
     unique(incoming.map(record => record.record_id), '页面记录 ID')

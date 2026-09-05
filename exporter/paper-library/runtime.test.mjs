@@ -12,6 +12,13 @@ import {
 const institution = Object.freeze({ institution_id: "nuist", providers: [] })
 const workspaceRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const DESKTOP_RESOURCES = Object.freeze([
+  "bibliography-import.mjs",
+  "discovery-candidate-bridge.mjs",
+  "discovery-recommendation.mjs",
+  "discovery-results-ui.mjs",
+  "discovery-review-ui.mjs",
+  "discovery-session-ui.mjs",
+  "local-discovery.mjs",
   "discovery-workspace.mjs", "discovery-batch.mjs", "discovery-identity.mjs", "journal-review.mjs",
   "library.template.html", "discovery.template.html", "state-transfer.html", "styles.css", "library.mjs", "paper-inspector.mjs",
   "paper-math-renderer.mjs", "paper-library-model.mjs", "paper-library-storage.mjs", "paper-user-tags.mjs",

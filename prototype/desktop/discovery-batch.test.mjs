@@ -11,6 +11,20 @@ const plan = (...names) => ({ conditions: [], selected: names.map(name => ({
 const page = (records = [], total = records.length, nextCursor = null) => ({ records, works: [], total, nextCursor })
 const start = (c, ...names) => c.start({ plan: plan(...names), scope, sort: 'relevance' })
 const tick = () => new Promise(resolve => setImmediate(resolve))
+test('declared online compatibility is explicit and never gains provider ID identity trust', async () => {
+  const searchPage = async options => page([1, 2].map(number => {
+    const record = recordInput({ record_id: `declared-${number}`, provider_id: 'W123', provenance: { provider: 'openalex', method: 'api',
+      batch_id: options.batch_id, query_id: options.query_id, import_id: null, retrieved_at: timestamp, public_url: 'https://openalex.org/W123', verification: 'declared' } })
+    record.bibliography.doi = null; record.bibliography.title = `Unrelated title ${number}`; record.bibliography.year = null; record.bibliography.authors = []
+    return record
+  }))
+  const strict = createDiscoveryBatchController({ searchPage }); await start(strict, 'A')
+  assert.equal(strict.read().records.length, 0); assert.equal(strict.read().batch.queries[0].status, 'failed')
+  const compatible = createDiscoveryBatchController({ searchPage, allowDeclaredPages: true }); await start(compatible, 'A')
+  assert.equal(compatible.read().records.length, 2); assert.equal(compatible.read().results.length, 2)
+  assert.equal(compatible.read().records.every(record => record.provenance.verification === 'declared'), true)
+  assert.throws(() => createDiscoveryBatchController({ searchPage, allowDeclaredPages: 'true' }), TypeError)
+})
 function controller(searchPage, onChange = () => {}) {
   let id = 0
   return createDiscoveryBatchController({ searchPage, onChange, now: () => timestamp, idFactory: () => `id-${++id}` })
