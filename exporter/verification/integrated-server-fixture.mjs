@@ -42,6 +42,10 @@ export const FIXTURE_IDS = Object.freeze({
 const workspaceRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const fixturePrefix = "integrated-workbench-"
 const buildDesktopFiles = Object.freeze([
+  "discovery-workspace.mjs",
+  "discovery-batch.mjs",
+  "discovery-identity.mjs",
+  "journal-review.mjs",
   "library.template.html",
   "discovery.template.html",
   "state-transfer.html",
