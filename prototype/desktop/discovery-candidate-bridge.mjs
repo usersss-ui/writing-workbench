@@ -11,13 +11,35 @@ function titleText(value) {
   return value.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, " ").trim()
 }
 
+function publicationLabel(value) {
+  const title = value.normalize("NFKC").toLowerCase().trim()
+  const label = "(?:correction|corrigendum|erratum|retraction|preprint(?:\\s+version\\s+\\d+)?|version\\s+\\d+)"
+  // Require a publication label at a title boundary, not a word in the subject.
+  const match = title.match(new RegExp(`^(?:a\\s+)?(${label})(?:\\s+(?:to|of))?\\s*:`, "u")) ??
+    title.match(/^(?:a\s+)?(correction|corrigendum|erratum|retraction)\s+(?:to|of)\s+/u) ??
+    title.match(new RegExp(`(?:[:;,]\\s*(?:a\\s+)?(${label})|[[(]\\s*(${label})\\s*[\\])])\\.?$`, "u"))
+  return titleText(match?.[1] ?? match?.[2] ?? "")
+}
+
+function comparableTitleScript(value) {
+  const letters = value.match(/\p{L}/gu)?.length ?? 0
+  // Lexical dissimilarity is usable only for comparable title text. Other or
+  // mixed scripts remain unknown; a matching DOI is not disproved by translation.
+  if ((value.match(/\p{Script=Latin}/gu)?.length ?? 0) > letters / 2) return "latin"
+  if ((value.match(/\p{Script=Han}/gu)?.length ?? 0) > letters / 2) return "han"
+  return null
+}
+
 function titleConflict(left, right) {
   const a = titleText(left)
   const b = titleText(right)
   if (a === b) return false
+  // The API adapter's missing-title fallback is not bibliographic evidence.
+  if (!a || !b || a === "not reported" || b === "not reported") return false
   // Correction/retraction/version labels must not be hidden by a shared base title.
-  const version = value => value.match(/\b(?:correction|corrigendum|erratum|retraction|preprint|version\s+\d+)\b/gu)?.join(" ") ?? ""
-  if (version(a) !== version(b)) return true
+  if (publicationLabel(left) !== publicationLabel(right)) return true
+  const script = comparableTitleScript(a)
+  if (script === null || script !== comparableTitleScript(b)) return false
   if (a.includes(b) || b.includes(a)) return false
   const grams = value => {
     const characters = [...value]

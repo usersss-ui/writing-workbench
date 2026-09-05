@@ -84,6 +84,40 @@ test("conversion accepts harmless title typography and missing source fields wit
   assert.equal(openAlex.readVerifiedOpenAlexWork(outcome.token).bibliography.journal.source_id, null)
 })
 
+for (const [name, originalTitle, apiTitle] of [
+  ["Chinese to English title", "面向时变有向网络的分布式优化算法研究", "Distributed optimization over time varying directed networks"],
+  ["English to Chinese title", "Distributed optimization over time varying directed networks", "面向时变有向网络的分布式优化算法研究"],
+  ["ordinary correction subject", "Distributed optimization: error correction over unreliable links", "Distributed optimization"],
+  ["ordinary preprint subject", "Distributed optimization: preprint dissemination in networked control", "Distributed optimization"],
+  ["ordinary version subject", "Distributed optimization: version 2 of a consensus protocol", "Distributed optimization"],
+  ["missing API title", "Synthetic distributed optimization study", null],
+]) {
+  test(`same DOI conversion accepts ${name} without replacing API metadata`, async () => {
+    const original = recordInput()
+    original.bibliography.title = originalTitle
+    const outcome = await convert({ records: [original], fetchImpl: async () => response(officialWork({ title: apiTitle })) })
+    assert.equal(outcome.status, "verified")
+    assert.equal(outcome.work.title, apiTitle ?? "Not Reported")
+    assert.equal(openAlex.readVerifiedOpenAlexWork(outcome.token).work.doi, "10.1234/fixture.1")
+    assert.equal(original.bibliography.title, originalTitle)
+  })
+}
+
+test("same DOI still rejects explicit publication labels and comparable unrelated titles", async () => {
+  for (const title of [
+    "Correction: Synthetic distributed optimization study",
+    "Retraction of: Synthetic distributed optimization study",
+    "Preprint: Synthetic distributed optimization study",
+    "Synthetic distributed optimization study: a correction",
+    "Synthetic distributed optimization study [preprint]",
+    "Synthetic distributed optimization study (version 2)",
+    "Marine ecology of deep sea organisms",
+  ]) {
+    const outcome = await convert({ fetchImpl: async () => response(officialWork({ title })) })
+    assert.deepEqual(outcome, { status: "conflict", reason: "title_mismatch" }, title)
+  }
+})
+
 test("conversion returns unverified for 404 and invalid response but propagates retryable failures and abort", async () => {
   for (const [body, status] of [[null, 404], [officialWork({ id: "W123" }), 200]]) {
     assert.equal((await convert({ fetchImpl: async () => response(body, status) })).status, "unverified")
