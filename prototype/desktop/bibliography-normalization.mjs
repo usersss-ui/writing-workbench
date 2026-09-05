@@ -17,6 +17,45 @@ export function cleanText(value, maximum = 20_000) {
     .slice(0, maximum)
 }
 
+function identityTitleText(value) {
+  return (value ?? '').normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, ' ').trim()
+}
+
+function publicationLabel(value) {
+  const title = (value ?? '').normalize('NFKC').toLowerCase().trim()
+  const label = '(?:correction|corrigendum|erratum|retraction|preprint(?:\\s+version\\s+\\d+)?|version\\s+\\d+)'
+  // Publication labels must occur at a title boundary, never merely in its subject.
+  const match = title.match(new RegExp(`^(?:a\\s+)?(${label})(?:\\s+(?:to|of))?\\s*:`, 'u')) ??
+    title.match(new RegExp(`^[[(]\\s*(${label})\\s*[\\])]\\s*`, 'u')) ??
+    title.match(/^(version\s+\d+)\s+of\s+/u) ??
+    title.match(/^(?:a\s+)?(correction|corrigendum|erratum|retraction)\s+(?:to|of)\s+/u) ??
+    title.match(new RegExp(`(?:[:;,]\\s*(?:a\\s+)?(${label})|[[(]\\s*(${label})\\s*[\\])])\\.?$`, 'u'))
+  return identityTitleText(match?.[1] ?? match?.[2] ?? '')
+}
+
+function comparableTitleScript(value) {
+  const letters = value.match(/\p{L}/gu)?.length ?? 0
+  if ((value.match(/\p{Script=Latin}/gu)?.length ?? 0) > letters / 2) return 'latin'
+  if ((value.match(/\p{Script=Han}/gu)?.length ?? 0) > letters / 2) return 'han'
+  return null
+}
+
+/** Affirmative title contradictions only; a missing title or translation cannot disprove a DOI. */
+export function discoveryTitleConflict(left, right) {
+  const a = identityTitleText(left), b = identityTitleText(right)
+  if (a === b || !a || !b || a === 'not reported' || b === 'not reported') return false
+  if (publicationLabel(left) !== publicationLabel(right)) return true
+  const script = comparableTitleScript(a)
+  if (script === null || script !== comparableTitleScript(b)) return false
+  if (a.includes(b) || b.includes(a)) return false
+  const grams = value => {
+    const characters = [...value]
+    return new Set(characters.slice(1).map((character, index) => characters[index] + character))
+  }
+  const ag = grams(a), bg = grams(b), common = [...ag].filter(gram => bg.has(gram)).length
+  return [...a].length >= 12 && [...b].length >= 12 && 2 * common / (ag.size + bg.size) < 0.3
+}
+
 function rawPathHasDotSegment(value) {
   const match = value.match(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*(\/[^?#]*)?/iu)
   if (!match?.[1]) return false

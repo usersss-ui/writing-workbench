@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { makeElement, findElement, memoryStorage, recordInput, deferred } from './discovery-test-fixtures.mjs'
 import { createDiscoveryWorkspaceStore, createEmptyDiscoveryWorkspaceState, DISCOVERY_WORKSPACE_STORAGE_KEY } from './discovery-workspace.mjs'
 import { createCandidateStore } from './candidate-storage.mjs'
+import { evaluateDiscoveryRecommendation } from './discovery-recommendation.mjs'
 const ui = await import('./discovery-session-ui.mjs').catch(() => ({}))
 function setup({ storage = memoryStorage(), searchPage, searchWorks, batchController, candidateStore, confirmArchive, fetchImpl, initialDirection } = {}) {
   const elements = new Map()
@@ -17,6 +18,38 @@ function setup({ storage = memoryStorage(), searchPage, searchWorks, batchContro
     searchPage: searchPage ?? (async options => { calls++; const record = recordInput({ record_id: options.idFactory(), provider_id: 'W123', provenance: { ...recordInput().provenance, provider: 'openalex', method: 'api', verification: 'api', batch_id: options.batch_id, query_id: options.query_id } }); return { records: [record], works: [], total: 1, nextCursor: null } }), onQueueChange() {} })
   return { session, root, tabs, storage, workspaceStore, calls: () => calls }
 }
+test('title-only manual preview and confirmation preserve unknown publication and journal type', async () => {
+  const env = setup()
+  for (const id of ['preview', 'title', 'doi', 'year', 'author']) env.root.elements.set(`#discovery-manual-${id}`, makeElement())
+  env.root.elements.get('#discovery-manual-title').value = 'A title without publication metadata'
+  env.session.start()
+  await env.root.elements.get('#discovery-manual-preview').dispatch('click')
+  assert.equal(env.workspaceStore.read().records.length, 0)
+  const confirm = findElement(env.root.elements.get('#discovery-import-preview'), node => node.tagName === 'BUTTON' && node.textContent === '确认导入')
+  assert.ok(confirm); await confirm.dispatch('click')
+  const state = env.workspaceStore.read(), record = state.records[0]
+  assert.equal(record.bibliography.work_type, null)
+  assert.equal(record.bibliography.journal.source_type, null)
+  const current = state.batches[0]
+  // Even after independent scope/journal facts arrive, the missing work type
+  // must still stop admission at the publication gate.
+  record.bibliography.language = 'en'
+  record.bibliography.journal = { title: 'Synthetic Journal', source_id: null, issns: ['1234-5678'], source_type: 'journal' }
+  record.retraction = { state: 'screened_clear', source_url: 'https://example.org/status', checked_at: '2026-09-05T00:00:00.000Z' }
+  const evaluated = evaluateDiscoveryRecommendation({ ...state, result: state.results[0], conditions: current.plan.conditions, scope: current.scope })
+  assert.equal(evaluated.status, 'pending')
+  assert.match(evaluated.missing.join(' '), /文献类型/u)
+  assert.equal(env.calls(), 0)
+})
+test('loaded session count excludes known retractions while retaining their source records', async () => {
+  const env = setup({ searchPage: async options => ({ records: [recordInput({ record_id: options.idFactory(),
+    provenance: { ...recordInput().provenance, provider: 'openalex', method: 'api', verification: 'api', batch_id: options.batch_id, query_id: options.query_id },
+    retraction: { state: 'retracted', source_url: 'https://example.org/retraction', checked_at: '2026-09-05T00:00:00.000Z' } })], works: [], total: 1, nextCursor: null }) })
+  env.session.start(); await env.session.search()
+  assert.equal(env.workspaceStore.read().records.length, 1)
+  assert.match(env.root.elements.get('#keyword-search-status').textContent, /去重后已加载 0 篇/u)
+  assert.match(env.root.elements.get('#keyword-live-results-list').textContent, /已排除 1 篇/u)
+})
 test('default all view, keyboard tabs and read-only reload do not start new queries or create storage', async () => {
   assert.equal(typeof ui.createDiscoverySessionUI, 'function')
   const env = setup(); env.session.start(); assert.equal(env.storage.data.size, 0)

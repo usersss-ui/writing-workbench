@@ -1,57 +1,12 @@
 import { fetchOpenAlexWorkByDoi, readVerifiedOpenAlexWork } from "./openalex-search.mjs"
 import { isValidDiscoveryRecord, normalizeDiscoveryRecord } from "./discovery-record.mjs"
+import { discoveryTitleConflict } from "./bibliography-normalization.mjs"
 
 const unavailable = reason => ({ status: "unverified", reason })
 const conflict = reason => ({ status: "conflict", reason })
 const RESULT_KEYS = ["result_id", "record_ids", "preferred_record_id", "alias_ids", "identity_status", "conflicts"]
-const validId = value => typeof value === "string" && value.length > 0 && value.length <= 2048 &&
+const validId = value => typeof value === "string" && value.length > 0 && [...value].length <= 2048 &&
   value === value.trim() && !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
-
-function titleText(value) {
-  return value.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, " ").trim()
-}
-
-function publicationLabel(value) {
-  const title = value.normalize("NFKC").toLowerCase().trim()
-  const label = "(?:correction|corrigendum|erratum|retraction|preprint(?:\\s+version\\s+\\d+)?|version\\s+\\d+)"
-  // Require a publication label at a title boundary, not a word in the subject.
-  const match = title.match(new RegExp(`^(?:a\\s+)?(${label})(?:\\s+(?:to|of))?\\s*:`, "u")) ??
-    title.match(new RegExp(`^[[(]\\s*(${label})\\s*[\\])]\\s*`, "u")) ??
-    title.match(/^(version\s+\d+)\s+of\s+/u) ??
-    title.match(/^(?:a\s+)?(correction|corrigendum|erratum|retraction)\s+(?:to|of)\s+/u) ??
-    title.match(new RegExp(`(?:[:;,]\\s*(?:a\\s+)?(${label})|[[(]\\s*(${label})\\s*[\\])])\\.?$`, "u"))
-  return titleText(match?.[1] ?? match?.[2] ?? "")
-}
-
-function comparableTitleScript(value) {
-  const letters = value.match(/\p{L}/gu)?.length ?? 0
-  // Lexical dissimilarity is usable only for comparable title text. Other or
-  // mixed scripts remain unknown; a matching DOI is not disproved by translation.
-  if ((value.match(/\p{Script=Latin}/gu)?.length ?? 0) > letters / 2) return "latin"
-  if ((value.match(/\p{Script=Han}/gu)?.length ?? 0) > letters / 2) return "han"
-  return null
-}
-
-function titleConflict(left, right) {
-  const a = titleText(left)
-  const b = titleText(right)
-  if (a === b) return false
-  // The API adapter's missing-title fallback is not bibliographic evidence.
-  if (!a || !b || a === "not reported" || b === "not reported") return false
-  // Correction/retraction/version labels must not be hidden by a shared base title.
-  if (publicationLabel(left) !== publicationLabel(right)) return true
-  const script = comparableTitleScript(a)
-  if (script === null || script !== comparableTitleScript(b)) return false
-  if (a.includes(b) || b.includes(a)) return false
-  const grams = value => {
-    const characters = [...value]
-    return new Set(characters.slice(1).map((character, index) => characters[index] + character))
-  }
-  const ag = grams(a)
-  const bg = grams(b)
-  const common = [...ag].filter(gram => bg.has(gram)).length
-  return [...a].length >= 12 && [...b].length >= 12 && 2 * common / (ag.size + bg.size) < 0.3
-}
 
 export async function prepareExternalCandidateConversion({ result, records, fetchImpl, signal } = {}) {
   if (!result || Object.getPrototypeOf(result) !== Object.prototype ||
@@ -93,7 +48,7 @@ export async function prepareExternalCandidateConversion({ result, records, fetc
   if (verified.retraction.state === "retracted") return conflict("retracted")
   for (const record of selected) {
     const original = record.bibliography
-    if (titleConflict(original.title, verified.bibliography.title)) return conflict("title_mismatch")
+    if (discoveryTitleConflict(original.title, verified.bibliography.title)) return conflict("title_mismatch")
     if (original.work_type && verified.bibliography.work_type && original.work_type !== verified.bibliography.work_type) {
       return conflict("publication_type_mismatch")
     }

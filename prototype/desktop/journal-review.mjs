@@ -21,6 +21,11 @@ const year = value => Number.isInteger(value) && value >= 1000 && value <= 9999
 const text = (value, max = 2048) => typeof value === 'string' && !!value.trim() && value.length <= max
   && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
 const id = value => text(value) && value === value.trim() && !/\s/u.test(value)
+// Workspace evidence/rules share the owner's raw code-point and control contract.
+// CSV review rows retain their separate multiline schema above.
+const ownerText = (value, max = 2048) => typeof value === 'string' && !!value.trim() && [...value].length <= max
+  && !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
+const ownerId = value => ownerText(value) && value === value.trim()
 const instant = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value)
   && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value
 
@@ -60,14 +65,14 @@ export function validateJournalReview(value) {
 
 function validEvidence(value) {
   return exact(value, EVIDENCE_KEYS) && array(value.record_ids, 1000) && value.record_ids.length > 0
-    && value.record_ids.every(id) && new Set(value.record_ids).size === value.record_ids.length
-    && text(value.locator, 2000) && text(value.reason, 2000)
+    && value.record_ids.every(ownerId) && new Set(value.record_ids).size === value.record_ids.length
+    && ownerText(value.locator, 2048) && ownerText(value.reason, 2000)
     && ['manual', 'local_tag'].includes(value.method) && instant(value.checked_at)
 }
 
 function readRules(rules) {
   if (!exact(rules, ['version', 'data_year', 'category', 'low_match_limit']) || rules.version !== 1
-    || rules.low_match_limit !== 5 || (rules.data_year !== null && !year(rules.data_year)) || !text(rules.category, 500)) {
+    || rules.low_match_limit !== 5 || (rules.data_year !== null && !year(rules.data_year)) || !ownerText(rules.category, 500)) {
     throw new TypeError('推荐规则无效')
   }
 }

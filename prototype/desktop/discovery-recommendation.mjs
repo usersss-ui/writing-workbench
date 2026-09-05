@@ -6,7 +6,7 @@ const EVALUATION_KEYS = ['result_id', 'status', 'confirmed_ids', 'missing', 'rea
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const unique = values => [...new Set(values)]
 const fail = label => { throw new TypeError(`${label} 无效`) }
-const nonempty = (value, max = 2048) => typeof value === 'string' && !!value.trim() && value.length <= max
+const nonempty = (value, max = 2048) => typeof value === 'string' && !!value.trim() && [...value].length <= max
   && !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
 const conditionId = value => typeof value === 'string' && value.length <= 160 && /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u.test(value)
 const journalTitleIdentity = value => canonicalChineseJournalTitle(value) ?? value
@@ -32,7 +32,7 @@ function validEvidence(value, ownedIds) {
   return exact(value, ['record_ids', 'locator', 'reason', 'method', 'checked_at'])
     && array(value.record_ids) && value.record_ids.length > 0
     && unique(value.record_ids).length === value.record_ids.length && value.record_ids.every(id => ownedIds.has(id))
-    && nonempty(value.locator, 2000) && nonempty(value.reason, 2000) && ['manual', 'local_tag'].includes(value.method)
+    && nonempty(value.locator, 2048) && nonempty(value.reason, 2000) && ['manual', 'local_tag'].includes(value.method)
     && typeof value.checked_at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value.checked_at)
     && Number.isFinite(Date.parse(value.checked_at)) && new Date(value.checked_at).toISOString() === value.checked_at
 }
@@ -53,7 +53,7 @@ function validResult(result) {
     && unique(result.record_ids).length === result.record_ids.length
     && result.record_ids.includes(result.preferred_record_id) && array(result.alias_ids)
     && result.alias_ids.every(id => nonempty(id)) && array(result.conflicts)
-    && result.conflicts.every(value => nonempty(value)) && ['clear', 'conflict'].includes(result.identity_status)
+    && result.conflicts.every(value => nonempty(value, 10000)) && ['clear', 'conflict'].includes(result.identity_status)
 }
 
 function sourceConflicts(records) {
@@ -107,6 +107,17 @@ export function evaluateDiscoveryRecommendation({ result, records, conditions, c
   }
   const preferred = byId.get(result.preferred_record_id)
   const bibliography = structuredClone(preferred.bibliography)
+  // Compatible current sources may complete missing fields only. Keep originals
+  // and the record owning each supplement available in the evaluation basis.
+  for (const field of ['title', 'source_type', 'issns']) {
+    const missing = field === 'issns' ? !bibliography.journal[field].length : bibliography.journal[field] === null
+    if (!missing) continue
+    const source = current.find(record => field === 'issns' ? record.bibliography.journal[field].length : record.bibliography.journal[field] !== null)
+    if (source) {
+      bibliography.journal[field] = structuredClone(source.bibliography.journal[field])
+      output.reasons.push(`期刊 ${field} 补充依据：${source.provenance.provider} · ${source.record_id}`)
+    }
+  }
   const journalIdentities = unique(eligibleScopes.filter(review => review.field === 'journal_identity').map(review => journalTitleIdentity(review.value)))
   if (journalIdentities.length > 1 || (bibliography.journal.title && journalIdentities.length
     && journalTitleIdentity(bibliography.journal.title) !== journalIdentities[0])) return finish('pending', [], ['期刊身份核验证据冲突'])

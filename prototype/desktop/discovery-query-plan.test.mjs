@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { validateDiscoveryQueryPlan } from './discovery-batch.mjs'
 import { buildDiscoveryQueryPlan, translateDiscoveryKeywords, directionToConditions, encodeDirectionAxes, decodeDirectionAxes, buildExternalSearchLinks } from './discovery-query-plan.mjs'
 
 const conditions = [
@@ -9,6 +10,40 @@ const conditions = [
   { id: 'm1', label: '梯度跟踪', terms: ['gradient tracking'], role: 'method' },
   { id: 'm2', label: '零阶', terms: ['zeroth-order'], role: 'method' },
 ]
+
+const longIdConditions = () => Array.from({ length: 20 }, (_, i) => ({
+  id: `condition-${i}-${'a'.repeat(145)}`, label: `Condition ${i}`, terms: [`term${i}`], role: 'problem',
+}))
+test('selected generated IDs exceeding the executable contract are rejected without dropping conditions', () => {
+  assert.throws(() => buildDiscoveryQueryPlan({ raw: 'original', conditions: longIdConditions(), expand: true }), /查询 ID.*过长|查询 ID.*无效/u)
+})
+test('oversized unselected IDs leave the original plan executable with an explicit warning', () => {
+  const plan = buildDiscoveryQueryPlan({ raw: 'original', conditions: longIdConditions(), expand: false })
+  assert.deepEqual(validateDiscoveryQueryPlan(plan), plan)
+  assert.deepEqual(plan.selected.map(query => query.expression), ['original'])
+  assert.equal(plan.conditions.length, 20)
+  assert.match(plan.warnings.join(' '), /查询 ID/u)
+})
+test('planner rejects owner-invalid control text and retains valid astral condition labels', () => {
+  for (const control of ['\n', '\t', '\u2028', '\u2029']) {
+    assert.throws(() => buildDiscoveryQueryPlan({ raw: 'original', conditions: [{ id: 'c1', label: `a${control}b`, terms: ['term'], role: 'problem' }] }), /条件/u)
+    assert.throws(() => buildDiscoveryQueryPlan({ raw: `a${control}b` }), /控制/u)
+  }
+  const plan = buildDiscoveryQueryPlan({ raw: 'original', conditions: [{ id: 'c1', label: '😀'.repeat(500), terms: ['term'], role: 'problem' }] })
+  assert.deepEqual(validateDiscoveryQueryPlan(plan), plan)
+})
+test('large duplicate unselected groups leave a downstream-valid warning and executable original', () => {
+  const conditions = Array.from({ length: 50 }, (_, i) => ({ id: `condition-${i}-${'a'.repeat(140)}`,
+    label: `Condition ${i}`, terms: [i < 48 ? `t${i}` : 'shared'], role: i < 48 ? 'problem' : 'network' }))
+  const plan = buildDiscoveryQueryPlan({ raw: 'original', conditions })
+  assert.deepEqual(validateDiscoveryQueryPlan(plan), plan)
+  assert.equal(plan.selected[0].expression, 'original')
+  assert.equal(plan.conditions.length, 50)
+  assert.match(plan.warnings.join(' '), /相同检索式对应不同条件组/u)
+})
+test('a sparse term list cannot become an executable undefined term', () => {
+  assert.throws(() => buildDiscoveryQueryPlan({ raw: 'original', conditions: [{ id: 'c1', label: 'Condition', terms: new Array(1), role: 'problem' }] }), /术语/u)
+})
 
 test('unparsed raw Boolean expression retains whitespace, NOT and parentheses and has no inferred condition counts', () => {
   const raw = '  ("online optimization" AND NOT ("gradient tracking" OR stochastic))  '

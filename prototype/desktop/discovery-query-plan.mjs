@@ -28,7 +28,7 @@ function checkedQuery(raw) {
   let size
   try { size = encodeURIComponent(raw).length } catch { throw new Error('检索式包含无效字符，请修改') }
   if ([...raw].length > 1000 || size > 8000) throw new Error('检索式过长，请缩短检索式后重试；未裁剪任何词语')
-  if (/[\u0000-\u001f\u007f]/u.test(raw)) throw new Error('检索式包含无效控制字符')
+  if (/[\u0000-\u001f\u007f\u2028\u2029]/u.test(raw)) throw new Error('检索式包含无效控制字符')
   return raw
 }
 
@@ -96,10 +96,10 @@ function normalizeConditions(values) {
   for (const c of values) {
     if (!exactObject(c, ['id', 'label', 'terms', 'role']) || Object.keys(c).length !== 4
       || typeof c.id !== 'string' || c.id.length > 160 || !safeId.test(c.id)
-      || typeof c.label !== 'string' || !c.label.trim() || c.label.length > 500
+      || typeof c.label !== 'string' || !c.label.trim() || [...c.label].length > 500 || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(c.label)
       || !['problem', 'network', 'method', 'other'].includes(c.role)
       || !Array.isArray(c.terms) || !c.terms.length || c.terms.length > 20
-      || c.terms.some(t => typeof t !== 'string' || !t.trim() || t.length > 500 || /["\\\u0000-\u001f\u007f]/u.test(t))) {
+      || [...c.terms].some(t => typeof t !== 'string' || !t.trim() || [...t].length > 500 || /["\\\u0000-\u001f\u007f\u2028\u2029]/u.test(t))) {
       throw new Error('研究条件或术语无效；请修改需要引号转义的词语')
     }
     const copy = { id: c.id, label: c.label, terms: [...new Set(c.terms)], role: c.role }
@@ -127,7 +127,8 @@ export function buildDiscoveryQueryPlan({ raw = '', conditions: input = [], expa
     const ids = ordered.map(c => c.id)
     const previousIds = generatedGroups.get(expression)
     if (previousIds && JSON.stringify(previousIds) !== JSON.stringify(ids)) {
-      warnings.push(`相同检索式对应不同条件组（${previousIds.join(', ')} / ${ids.join(', ')}）；保留首次生成组，未合并条件 ID。`)
+      const detail = `（${previousIds.join(', ')} / ${ids.join(', ')}）`
+      warnings.push(`相同检索式对应不同条件组${detail.length < 9500 ? detail : `（${previousIds.length} 条条件 / ${ids.length} 条条件；详见条件清单）`}；保留首次生成组，未合并条件 ID。`)
     }
     if (!previousIds) generatedGroups.set(expression, ids)
     const existing = queries.find(q => q.expression === expression)
@@ -157,10 +158,16 @@ export function buildDiscoveryQueryPlan({ raw = '', conditions: input = [], expa
   if (!queries.length) throw new Error('请输入研究方向或关键词')
   let selected = expand === true ? queries.slice(0, 6) : [original ?? intersection]
   if (expand === true && intersection && !selected.includes(intersection)) selected[selected.length - 1] = intersection
-  for (const query of selected) checkedQuery(query.expression)
+  const checkExecutable = query => {
+    checkedQuery(query.expression)
+    // All references/kinds are constructed above from checked conditions. The
+    // concatenated ID has its own downstream limit, independent of expression size.
+    if ([...query.query_id].length > 2048) throw new Error('查询 ID 过长，请减少该条件组；未裁剪条件或改变检索含义')
+  }
+  for (const query of selected) checkExecutable(query)
   const suggested = queries.filter(q => !selected.includes(q)).filter(query => {
     try {
-      checkedQuery(query.expression)
+      checkExecutable(query)
       return true
     } catch (error) {
       warnings.push(`建议条件组（${query.condition_ids.join(', ')}）未执行且未列入可执行建议：${error.message}`)

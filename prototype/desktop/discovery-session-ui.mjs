@@ -128,7 +128,11 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
       page: recommendationPage, hasMore: recommendation.has_more, onPage: page => { recommendationPage = page; render(); node('#keyword-search-results')?.focus?.() },
       candidates: state.external_candidates, selected: exportSelection, onSelect: select, onReview: review.open,
       onView: changeView, onExportSelect: setExportSelected, onConvert: convert })
-    message(`${results.length} 篇唯一已加载结果`, '[data-live-result-count]')
+    const excluded = evaluations.filter(evaluation => evaluation.status === 'excluded').length
+    const loaded = results.length - excluded
+    message(`${loaded} 篇唯一已加载结果${excluded ? `；已排除 ${excluded} 篇` : ''}`, '[data-live-result-count]')
+    const loadedMessage = `去重后已加载 ${loaded} 篇${excluded ? `；已排除 ${excluded} 篇，依据见排除摘要` : ''}；仅代表本轮已加载范围。`
+    if (node('#keyword-search-status')?.textContent.startsWith('去重后已加载')) message(loadedMessage, '#keyword-search-status')
     for (const tab of root.querySelectorAll?.('[data-discovery-view]') ?? []) {
       const selected = tab.dataset.discoveryView === view; tab.setAttribute('aria-selected', String(selected)); tab.setAttribute('tabindex', selected ? '0' : '-1')
     }
@@ -158,6 +162,7 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
       if (!candidate.openalex_id && source?.bibliography.doi) row.append(button('核验并转入归档候选', () => { show(); return convert(result.result_id) }))
       return row
     }))
+    return { loaded, excluded, loadedMessage }
   }
   function changeView(value) { view = value === 'curated' ? 'curated' : 'all'; recommendationPage = 1; render() }
   function invalidate() {
@@ -193,10 +198,10 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
     const accepted = new Set(snapshot.records.map(record => record.record_id))
     for (const key of cache.keys()) if (!accepted.has(key)) cache.delete(key)
     const next = mergeBatch(snapshot); activeBatchId = snapshot.batch.batch_id; state = next
-    commit({ state: next, expectedGeneration: owner, expectedRevision: next.revision }); render()
+    commit({ state: next, expectedGeneration: owner, expectedRevision: next.revision }); const counts = render()
     const failed = snapshot.batch.queries.filter(query => query.status === 'failed')
     message(failed.length ? `${failed.map(query => query.error).join('；')}；已有结果已保留，可重试加载下一页。`
-      : currentResults().length ? `去重后已加载 ${currentResults().length} 篇；仅代表本轮已加载范围。` : '未找到匹配论文，可减少关键词或先搜索本地论文。', '#keyword-search-status')
+      : counts.loaded || counts.excluded ? counts.loadedMessage : '未找到匹配论文，可减少关键词或先搜索本地论文。', '#keyword-search-status')
   }
   async function search(append = false, suggested = null) {
     if (busy) return
@@ -385,7 +390,7 @@ export function createDiscoverySessionUI({ root, workspaceStore = createDiscover
     node('#discovery-manual-preview')?.addEventListener('click', () => {
       const value = name => node(`#discovery-manual-${name}`)?.value?.trim() ?? ''
       const clean = value => value.replace(/[\r\n]/g, ' ')
-      return previewImport({ text: `TY  - JOUR\nTI  - ${clean(value('title'))}\nDO  - ${clean(value('doi'))}\nPY  - ${clean(value('year'))}\nAU  - ${clean(value('author'))}\nER  -\n`, format: 'ris', provider: 'manual' })
+      return previewImport({ text: `TY  - GEN\nTI  - ${clean(value('title'))}\nDO  - ${clean(value('doi'))}\nPY  - ${clean(value('year'))}\nAU  - ${clean(value('author'))}\nER  -\n`, format: 'ris', provider: 'manual' })
     })
     for (const provider of ['scholar', 'cnki']) node(`#discovery-open-${provider}`)?.addEventListener('click', event => {
       try { const links = buildExternalSearchLinks({ query: rawQuery(), scope: readScope() }); event.currentTarget.href = links[provider]; message(`${provider} 待导入；${links.scope_notice}`, '#discovery-external-status') }

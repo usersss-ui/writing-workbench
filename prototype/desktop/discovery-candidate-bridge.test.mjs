@@ -14,6 +14,14 @@ const officialWork = (patch = {}) => ({
   type: "article", is_retracted: false, ...patch,
 })
 const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body })
+
+test('conversion accepts owner-valid astral result IDs at the code-point boundary and rejects excessive raw IDs', async () => {
+  for (const [result_id, status] of [['😀'.repeat(2048), 'verified'], ['😀'.repeat(2049), 'unverified'], ['a'.repeat(2048) + ' ', 'unverified']]) {
+    assert.equal((await convert({ result: { ...resultInput(), result_id } })).status, status)
+  }
+  const recordId = '😀'.repeat(2048)
+  assert.equal((await convert({ result: { ...resultInput(), record_ids: [recordId], preferred_record_id: recordId, alias_ids: ['𐐀'.repeat(2048)] }, records: [recordInput({ record_id: recordId })] })).status, 'verified')
+})
 async function convert(options = {}) {
   assert.equal(typeof bridge.prepareExternalCandidateConversion, "function")
   return bridge.prepareExternalCandidateConversion({ result: resultInput(), records: [recordInput()], fetchImpl: async () => response(officialWork()), ...options })

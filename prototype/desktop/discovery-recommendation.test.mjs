@@ -2,6 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { evaluateDiscoveryRecommendation, selectDiscoveryRecommendations } from './discovery-recommendation.mjs'
 import { recordInput } from './discovery-test-fixtures.mjs'
+import { createEmptyDiscoveryWorkspaceState, isValidDiscoveryWorkspaceState } from './discovery-workspace.mjs'
+import { evaluateJournalGate } from './journal-review.mjs'
+import { mergeDiscoveryRecords } from './discovery-identity.mjs'
 
 const now = '2026-09-05T00:00:00.000Z'
 const rules = { version: 1, data_year: 2025, category: 'Automation & Control Systems', low_match_limit: 5 }
@@ -24,6 +27,107 @@ function input(k = 4, n = 5, role = null) {
     rules, scope: { startYear: 2020, endYear: 2026, language: 'en' },
   }
 }
+
+function ownerState(args) {
+  const state = createEmptyDiscoveryWorkspaceState()
+  const query = { query_id: 'q-1', expression: 'optimization', condition_ids: [], kind: 'original' }
+  Object.assign(state, { records: args.records, results: [args.result], rules: args.rules,
+    condition_reviews: args.condition_reviews, scope_reviews: args.scope_reviews,
+    representative_reviews: args.representative_reviews, journal_reviews: args.journal_reviews })
+  state.batches = [{ batch_id: 'b-1', created_at: now, scope: args.scope,
+    plan: { conditions: args.conditions, selected: [query], suggested: [], warnings: [] }, rule_snapshot: args.rules,
+    queries: [{ query, cursor: null, total: null, accepted_cursors: [], loaded: 0, status: 'finished', error: null }],
+    record_ids: args.records.map(record => record.record_id), excluded_record_ids: [] }]
+  return state
+}
+for (const [field, boundary] of [['locator', 2048], ['reason', 2000]]) {
+  for (const char of ['a', '😀']) {
+    test(`owner-valid ${field} of ${boundary} ${char} code points stays usable as condition evidence`, () => {
+      const args = input(); args.condition_reviews[0].evidence[field] = char.repeat(boundary)
+      assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), true)
+      assert.equal(evaluateDiscoveryRecommendation(args).status, 'recommended')
+      args.condition_reviews[0].evidence[field] += char
+      assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), false)
+      assert.equal(evaluateDiscoveryRecommendation(args).status, 'pending')
+    })
+  }
+}
+test('owner-valid condition and rule text uses raw code points through recommendation and journal gates', () => {
+  const args = input(); args.conditions[0].label = '😀'.repeat(500); args.conditions[0].terms = ['😀'.repeat(500)]
+  args.rules = { ...args.rules, category: '😀'.repeat(500) }
+  // JCR row text is a separate schema; a whitelist paper isolates the shared rule contract.
+  args.scope.language = 'all'; args.records[0].bibliography.language = 'zh'
+  args.records[0].bibliography.journal = { title: '自动化学报', source_id: null, issns: ['0254-4156'], source_type: 'journal' }
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), true)
+  assert.equal(evaluateDiscoveryRecommendation(args).status, 'recommended')
+  args.conditions[0].label += ' '
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), false)
+  assert.throws(() => evaluateDiscoveryRecommendation(args), /条件/u)
+})
+test('shared journal evidence accepts owner record references and exact locator/reason limits with astral text', () => {
+  for (const locator of ['a'.repeat(2048), '😀'.repeat(2048)]) {
+    const args = input(), recordId = 'record with space'
+    args.records[0].record_id = recordId; args.result.record_ids = [recordId]; args.result.preferred_record_id = recordId
+    for (const review of args.condition_reviews) review.evidence.record_ids = [recordId]
+    args.scope.language = 'all'; args.records[0].bibliography.language = 'zh'
+    args.records[0].bibliography.journal = { title: '自动化学报', source_id: null, issns: [], source_type: 'journal' }
+    args.scope_reviews = [{ result_id: 'result-1', field: 'journal_identity', value: '自动化学报',
+      evidence: { ...evidence([recordId]), locator, reason: '😀'.repeat(2000) } }]
+    assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), true)
+    const gate = () => evaluateJournalGate({ ...args, bibliography: args.records[0].bibliography, result_id: 'result-1' })
+    assert.equal(gate().status, 'pass')
+    assert.equal(evaluateDiscoveryRecommendation(args).status, 'recommended')
+    for (const bad of [locator + 'x', 'a\nb', 'a\tb', 'a\u2028b']) {
+      args.scope_reviews[0].evidence.locator = bad
+      assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), false)
+      assert.equal(gate().status, 'pending')
+      assert.equal(evaluateDiscoveryRecommendation(args).status, 'pending')
+    }
+  }
+})
+test('owner-valid scope text is evaluated as a conflicting identity, not discarded as malformed evidence', () => {
+  const args = input()
+  args.scope_reviews = [{ result_id: 'result-1', field: 'journal_identity', value: '😀'.repeat(2048), evidence: evidence() }]
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), true)
+  assert.deepEqual(evaluateDiscoveryRecommendation(args).missing, ['期刊身份核验证据冲突'])
+  args.scope_reviews[0].value += ' '
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), false)
+  assert.deepEqual(evaluateDiscoveryRecommendation(args).missing, ['范围核验证据缺失或已失效'])
+})
+test('owner-valid astral record, result and alias references preserve current evidence ownership', () => {
+  const args = input(), recordId = '😀'.repeat(2048), resultId = '𐐀'.repeat(2048), alias = '𐐁'.repeat(2048)
+  args.records[0].record_id = recordId
+  args.result = { ...args.result, result_id: resultId, alias_ids: [alias], record_ids: [recordId], preferred_record_id: recordId }
+  for (const review of args.condition_reviews) { review.result_id = alias; review.evidence.record_ids = [recordId] }
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), true)
+  assert.equal(evaluateDiscoveryRecommendation(args).status, 'recommended')
+  args.condition_reviews[0].evidence.record_ids = ['split-away']
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), false)
+  assert.equal(evaluateDiscoveryRecommendation(args).status, 'pending')
+})
+test('compatible complete journal evidence survives an incomplete preferred API source without mutating provenance', () => {
+  const args = input(), complete = args.records[0], sparse = structuredClone(complete)
+  sparse.record_id = 'api-source'; sparse.provenance = { ...sparse.provenance, provider: 'openalex', method: 'api', verification: 'api' }
+  sparse.bibliography.journal = { title: null, source_id: null, issns: [], source_type: null }
+  const merged = mergeDiscoveryRecords({ records: [], results: [], incoming: [complete, sparse], idFactory: () => 'result-1' })
+  args.records = merged.records; args.result = merged.results[0]
+  assert.equal(args.result.preferred_record_id, 'api-source')
+  assert.equal(isValidDiscoveryWorkspaceState(ownerState(args)), true)
+  const before = structuredClone(args.records)
+  for (const preferred_record_id of ['api-source', 'r-1']) {
+    args.result.preferred_record_id = preferred_record_id
+    const output = evaluateDiscoveryRecommendation(args)
+    assert.equal(output.status, 'recommended')
+    if (preferred_record_id === 'api-source') assert.match(output.reasons.join(' '), /r-1/u)
+  }
+  assert.deepEqual(args.records, before)
+  for (const patch of [{ issns: ['8765-4321'] }, { source_type: 'repository' }, { title: '控制理论与应用' }]) {
+    args.result.preferred_record_id = 'api-source'; Object.assign(sparse.bibliography.journal, patch)
+    args.records = [complete, sparse]
+    assert.equal(evaluateDiscoveryRecommendation(args).status, 'pending')
+    sparse.bibliography.journal = { title: null, source_id: null, issns: [], source_type: null }
+  }
+})
 for (const [k,n,role,status,limit] of [[0,5,null,'not_recommended',5],[1,1,null,'pending',5],[1,1,'origin','recommended',5],
   [1,5,'baseline','recommended',5],[1,5,'survey','recommended',5],[1,5,'intersection','pending',5],
   [2,2,null,'pending',5],[2,5,'intersection','recommended',5],[3,5,'intersection','recommended',5],

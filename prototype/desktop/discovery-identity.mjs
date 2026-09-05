@@ -1,4 +1,5 @@
 import { isValidDiscoveryRecord, normalizeDiscoveryRecord } from "./discovery-record.mjs"
+import { discoveryTitleConflict } from "./bibliography-normalization.mjs"
 
 const RESULT_KEYS = ["result_id", "record_ids", "preferred_record_id", "alias_ids", "identity_status", "conflicts"]
 const compareIds = (a, b) => a < b ? -1 : a > b ? 1 : 0
@@ -76,16 +77,6 @@ function similarTitles(left, right) {
   return titleOverlap(titleText(left), titleText(right)) >= 0.7
 }
 
-function obviouslyConflictingTitles(left, right) {
-  const a = titleText(left)
-  const b = titleText(right)
-  // A shortened label is incomplete evidence, not a contradictory title.
-  if (a.includes(b) || b.includes(a)) return false
-  // Failure to meet the similarity threshold is not enough to reject a strong ID.
-  // Require substantial titles with very little shared text; leave ambiguous pairs alone.
-  return Array.from(a).length >= 12 && Array.from(b).length >= 12 && titleOverlap(a, b) < 0.3
-}
-
 function sameVerifiedProviderId(a, b) {
   return a.provenance.verification === "api" && b.provenance.verification === "api" &&
     a.provider_id !== null && a.provider_id === b.provider_id && a.provenance.provider === b.provenance.provider
@@ -108,7 +99,7 @@ function metadataConflicts(a, b) {
   if (left.doi && right.doi && left.doi !== right.doi) reasons.push("doi_mismatch")
   if (left.year !== null && right.year !== null && left.year !== right.year) reasons.push("year_mismatch")
   if (left.work_type && right.work_type && left.work_type !== right.work_type) reasons.push("publication_type_mismatch")
-  if (obviouslyConflictingTitles(left.title, right.title)) reasons.push("title_mismatch")
+  if (discoveryTitleConflict(left.title, right.title)) reasons.push("title_mismatch")
   const j = left.journal
   const k = right.journal
   const sharedIssn = j.issns.some(issn => k.issns.includes(issn))

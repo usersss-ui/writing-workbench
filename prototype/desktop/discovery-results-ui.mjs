@@ -4,9 +4,11 @@ function displayReasons(values) {
   const conflictLabels = { doi_mismatch: 'DOI 不一致', year_mismatch: '发表年份不一致',
     publication_type_mismatch: '文献类型不一致', title_mismatch: '题名不一致',
     journal_mismatch: '期刊身份不一致', title_similarity: '题名相似，身份待核对' }
+  const exclusionLabels = { retracted: '来源已标记撤稿', year_before_start: '发表年份早于本轮起始年份',
+    year_after_end: '发表年份晚于本轮结束年份', language_mismatch: '语言不在本轮范围' }
   return [...new Set(values.map(value => {
     const code = /^([a-z_]+):\[/u.exec(value)?.[1]
-    return code ? conflictLabels[code] ?? '来源身份不一致，需核对来源' : value
+    return code ? conflictLabels[code] ?? '来源身份不一致，需核对来源' : exclusionLabels[value] ?? value
   }))].join('；')
 }
 
@@ -20,12 +22,34 @@ export function renderDiscoveryResults({ root, results, records, evaluations, vi
   const byRecord = new Map(records.map(record => [record.record_id, record]))
   const byEvaluation = new Map(evaluations.map(item => [item.result_id, item]))
   const byResult = new Map(results.map(result => [result.result_id, result]))
-  const visible = view === 'all' ? results : visibleIds
+  const excluded = results.filter(result => byEvaluation.get(result.result_id)?.status === 'excluded')
+  const available = results.filter(result => byEvaluation.get(result.result_id)?.status !== 'excluded')
+  const visible = (view === 'all' ? available : visibleIds
     ? visibleIds.map(id => byResult.get(id)).filter(Boolean)
-    : results.filter(result => byEvaluation.get(result.result_id)?.status === 'recommended')
-  const summary = make('p', `去重后已加载 ${results.length} 篇；仅代表本轮已加载范围`)
+    : available.filter(result => byEvaluation.get(result.result_id)?.status === 'recommended'))
+    .filter(result => byEvaluation.get(result.result_id)?.status !== 'excluded')
+  const summary = make('p', `去重后已加载 ${available.length} 篇；仅代表本轮已加载范围`)
   summary.className = 'discovery-loaded-summary'
   const children = [summary]
+  if (excluded.length) {
+    const section = make('details'); section.dataset.exclusionSummary = 'true'
+    section.append(make('summary', `已排除 ${excluded.length} 篇 · 撤稿或不在本轮范围；来源与既有候选仍保留`))
+    for (const result of excluded) {
+      const row = make('div'); row.dataset.excludedResult = result.result_id
+      row.append(make('p', byRecord.get(result.preferred_record_id)?.bibliography.title ?? '来源题名未报告'),
+        make('p', displayReasons(byEvaluation.get(result.result_id)?.reasons ?? [])))
+      for (const id of result.record_ids) {
+        const record = byRecord.get(id); if (!record) continue
+        row.append(make('p', `${record.provenance.provider} · ${record.provenance.method} · ${record.provenance.retrieved_at}`))
+        const url = safeHttpsUrl(record.retraction.source_url ?? record.provenance.public_url)
+        if (url) { const link = make('a', '来源与核验出处 ↗'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; row.append(link) }
+      }
+      const review = make('button', '查看排除依据'); review.type = 'button'
+      review.addEventListener('click', () => onReview(result.result_id)); row.append(review)
+      section.append(row)
+    }
+    children.push(section)
+  }
   if (view === 'curated' && !visible.length) {
     children.push(make('p', unavailableReason || `暂无符合严格规则的重点推荐。${displayReasons(evaluations.flatMap(item => [...item.missing, ...item.reasons])) || '请先设置条件，并补充期刊、范围和人工条件证据。'}`))
     const back = make('button', '回到全部结果'); back.type = 'button'; back.dataset.returnAll = 'true'

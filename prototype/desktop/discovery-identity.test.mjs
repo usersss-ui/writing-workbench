@@ -21,6 +21,36 @@ function merge(incoming, state = { records: [], results: [] }, idFactory = ids()
   return mergeDiscoveryRecords({ ...state, incoming, idFactory })
 }
 
+for (const title of ['Not Reported', '时变有向网络上的分布式在线优化方法']) {
+  test(`same DOI with non-comparable title ${title} retains a clear identity on initial and late merge`, () => {
+    const factory = ids(), a = record('a'), b = record('b', { title })
+    assert.equal(merge([a, b]).results.length, 1)
+    const initial = merge([a], undefined, factory)
+    const next = merge([b], initial, factory)
+    assert.equal(next.results.length, 1)
+    assert.equal(next.results[0].result_id, initial.results[0].result_id)
+    assert.equal(next.results[0].identity_status, 'clear')
+    assert.deepEqual(next.records, [a, b])
+  })
+}
+for (const title of ['Correction: Synthetic distributed optimization study',
+  'Version 2 of Synthetic distributed optimization study', '[Preprint] Synthetic distributed optimization study']) {
+  test(`explicit publication label blocks DOI merge: ${title}`, () => {
+    const factory = ids(), initial = merge([record('a'), record('b')], undefined, factory)
+    const next = merge([record('c', { title, work_type: 'article' })], initial, factory)
+    assert.equal(next.results.length, 2)
+    assert.deepEqual(next.results[0].record_ids, ['a', 'b'])
+    assert.ok(next.results.every(result => result.identity_status === 'conflict' && result.conflicts.some(clue => clue.startsWith('title_mismatch:'))))
+    assert.equal(next.records.length, 3)
+  })
+}
+test('ordinary error correction subtitles are incomplete title evidence rather than publication labels', () => {
+  const state = merge([record('a', { title: 'Distributed optimization' }),
+    record('b', { title: 'Distributed optimization: error correction over unreliable links' })])
+  assert.equal(state.results.length, 1)
+  assert.equal(state.results[0].identity_status, 'clear')
+})
+
 test("same normalized DOI retains both original sources in one exact Result", () => {
   const a = record("r-1", { doi: "https://doi.org/10.1234/FIXTURE.1" })
   const b = record("r-2")

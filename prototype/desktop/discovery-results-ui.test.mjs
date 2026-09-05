@@ -1,12 +1,38 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeElement, findElement, recordInput } from './discovery-test-fixtures.mjs'
+import { evaluateDiscoveryRecommendation } from './discovery-recommendation.mjs'
 const ui = await import('./discovery-results-ui.mjs').catch(() => ({}))
 const record = recordInput()
 const result = { result_id: 'result-1', record_ids: ['r-1'], preferred_record_id: 'r-1', alias_ids: [], identity_status: 'clear', conflicts: [] }
 function setup() {
   const list = makeElement()
   return { list, root: { createElement: tagName => makeElement({ tagName }), querySelector: () => list } }
+}
+for (const [reason, patch] of [['来源已标记撤稿', 'retracted'], ['发表年份早于本轮起始年份', 'year'], ['语言不在本轮范围', 'language']]) {
+  test(`excluded papers leave ordinary cards and counts but retain provenance: ${reason}`, () => {
+    const { root, list } = setup()
+    const candidates = [{ result_id: 'result-1', selected_at: '2026-09-05T00:00:00.000Z', openalex_id: null }]
+    const before = structuredClone({ result, record, candidates })
+    const source = structuredClone(record)
+    source.retraction = { state: patch === 'retracted' ? 'retracted' : 'screened_clear', source_url: 'https://example.org/status', checked_at: '2026-09-05T00:00:00.000Z' }
+    source.bibliography.language = patch === 'language' ? 'zh' : 'en'
+    const evaluation = evaluateDiscoveryRecommendation({ result, records: [source], conditions: [], condition_reviews: [], scope_reviews: [],
+      representative_reviews: [], journal_reviews: [], rules: { version: 1, data_year: null, category: 'Automation & Control Systems', low_match_limit: 5 },
+      scope: { startYear: patch === 'year' ? 2025 : null, endYear: null, language: 'en' } })
+    assert.equal(evaluation.status, 'excluded')
+    ui.renderDiscoveryResults({ root, results: [result], records: [source], candidates,
+      evaluations: [evaluation],
+      onSelect() {}, onReview() {}, onConvert() {} })
+    assert.equal(findElement(list, node => node.tagName === 'ARTICLE'), null)
+    assert.match(list.textContent, /去重后已加载 0 篇/u)
+    const summary = findElement(list, node => node.dataset?.exclusionSummary)
+    assert.ok(summary); assert.match(summary.textContent, /已排除 1 篇/u)
+    assert.ok(summary.textContent.includes(reason)); assert.match(summary.textContent, /manual/u)
+    assert.ok(summary.textContent.includes(record.bibliography.title))
+    assert.equal(findElement(summary, node => node.dataset?.selectResult || node.dataset?.convertResult), null)
+    assert.deepEqual({ result, record, candidates }, before)
+  })
 }
 test('conflict cards summarize types and source count without exposing internal record IDs or hiding evidence', () => {
   const { root, list } = setup()
