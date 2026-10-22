@@ -1,0 +1,105 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+
+import { buildProjectModel, sectionModels, sourceLinks, splitValues } from "./paper-project-model.mjs"
+
+const PAPERS = [
+  {
+    paper_id: "Liu24-LCT",
+    title_original: "Linear convergence over unbalanced graphs",
+    authors: ["Liu Y"],
+    publication_year: 2024,
+    doi_or_url: "https://doi.org/10.1109/tcns.2024.1",
+    source_documents: {
+      pdf: [{ url: "../../local_library_data/sources/liu24-lct/pdf/a.pdf" }],
+      ocr: [{ url: "../../local_library_data/sources/liu24-lct/ocr/b.html" }],
+    },
+    artifact_availability: { note: true },
+  },
+  { paper_id: "Wei25-DPZO", title_original: "A different local paper", authors: ["Other A"], publication_year: 2023, doi_or_url: null, source_documents: { pdf: [], ocr: [] } },
+]
+
+const reference = (code, location = null, known = true) => ({ text: location ? `${code}·${location}` : code, reference: { code, location, known } })
+
+const PROJECT = {
+  references: [
+    { 短码: "Liu24-LCT", 作者: "Liu Y；Chen X", 年份: "2024", 题名: "Linear convergence over unbalanced graphs", DOI: "10.1109/tcns.2024.1", 核实: "已核实（PDF）" },
+    { 短码: "Wei25-DPZO", 作者: "Wei M", 年份: "2025", 题名: "Privacy zeroth-order optimization", DOI: "", 核实: "未核实" },
+    { 短码: "Kim20-ABC", 作者: "Kim J", 年份: "2020", 题名: "Something not local", DOI: "", 核实: "已核实（题录）" },
+  ],
+  tables: [
+    { key: "references", title: "文献清单", path: "相关论文/文献清单.md", tables: [
+      { heading: "文献", status: "ok", headers: ["短码", "作者"], rows: [[[reference("Liu24-LCT")], [{ text: "Liu Y" }]]] },
+    ] },
+    { key: "benchmark", title: "期刊基准表", path: "03_范文对照/期刊基准表.md", tables: [
+      { heading: "检查项", status: "ok", headers: ["检查项", "Liu24-LCT", "本刊常见水平"], code_columns: ["Liu24-LCT"],
+        rows: [[[{ text: "是否有朴素基线" }], [{ text: "无" }, { text: "〔p.7〕", reference: { code: "Liu24-LCT", location: "p.7", known: true } }], [{ text: "多数没有" }]]] },
+      { heading: "硬性规定", status: "missing" },
+    ] },
+    { key: "mapping", title: "小节范文映射表", path: "03_范文对照/小节范文映射表.md", tables: [
+      { heading: "映射", status: "ok", headers: ["小节编号", "本文小节", "稿件文件", "本刊范文", "非本刊范文", "本刊容忍度要点", "目标篇幅", "起草方式"],
+        rows: [[[{ text: "2.1" }], [{ text: "网络模型" }], [{ text: "02_问题描述.md" }], [reference("Liu24-LCT", "§II-A")], [], [{ text: "一句带过" }], [{ text: "600字" }], [{ text: "整节" }]]] },
+    ] },
+  ],
+  reviews: [],
+  drafts: [{ path: "01_稿件/02_问题描述.md", codes: ["Liu24-LCT"] }],
+}
+
+test("multiple values split on the full-width semicolon", () => {
+  assert.deepEqual(splitValues("Liu Y；Chen X；"), ["Liu Y", "Chen X"])
+})
+
+test("only a unique DOI confirms a local paper; an equal short code is a hint", () => {
+  const { references } = buildProjectModel(PROJECT, PAPERS)
+  const liu = references.get("Liu24-LCT").library
+  assert.equal(liu.status, "confirmed")
+  assert.equal(liu.paperId, "Liu24-LCT")
+  assert.equal(liu.pdfUrl, "../../local_library_data/sources/liu24-lct/pdf/a.pdf")
+  assert.equal(liu.hasOcr, true)
+  assert.equal(liu.hasNote, true)
+
+  const wei = references.get("Wei25-DPZO").library
+  assert.equal(wei.status, "code_hint")
+  assert.equal(wei.pdfUrl, null)
+  assert.match(wei.reason, /人工核对/)
+
+  assert.equal(references.get("Kim20-ABC").library.status, "not_found")
+})
+
+test("every table and draft use of a code is listed once, except the reference row itself", () => {
+  const { uses } = buildProjectModel(PROJECT, PAPERS)
+  assert.deepEqual(uses.get("Liu24-LCT"), [
+    { path: "03_范文对照/期刊基准表.md", title: "期刊基准表", heading: "检查项", row: "是否有朴素基线", column: "Liu24-LCT", location: "p.7" },
+    { path: "03_范文对照/小节范文映射表.md", title: "小节范文映射表", heading: "映射", row: "2.1", column: "本刊范文", location: "§II-A" },
+    { path: "01_稿件/02_问题描述.md", title: "稿件", heading: null, row: "01_稿件/02_问题描述.md", column: null, location: null },
+  ])
+})
+
+test("page locations open the PDF page; other locations open the library source tab", () => {
+  const { references } = buildProjectModel(PROJECT, PAPERS)
+  const liu = references.get("Liu24-LCT")
+  assert.deepEqual(sourceLinks({ code: "Liu24-LCT", location: "p.7" }, liu), {
+    pdfPage: "../../local_library_data/sources/liu24-lct/pdf/a.pdf#page=7",
+    library: "../../local_library_output/desktop/library.html?paper_id=Liu24-LCT&tab=source",
+  })
+  assert.equal(sourceLinks({ code: "Liu24-LCT", location: "§V" }, liu).pdfPage, null)
+  const hint = sourceLinks({ code: "Wei25-DPZO", location: "p.3" }, references.get("Wei25-DPZO"))
+  assert.equal(hint.pdfPage, null)
+  assert.match(hint.library, /paper_id=Wei25-DPZO/)
+  assert.deepEqual(sourceLinks({ code: "Kim20-ABC", location: "p.1" }, references.get("Kim20-ABC")), { pdfPage: null, library: null })
+})
+
+test("an unavailable library index leaves every reference unmatched", () => {
+  const { references } = buildProjectModel(PROJECT, null)
+  assert.equal(references.get("Liu24-LCT").library.status, "unknown")
+})
+
+test("mapping rows become per-section models", () => {
+  const [section] = sectionModels(PROJECT)
+  assert.equal(section.id, "2.1")
+  assert.equal(section.title, "网络模型")
+  assert.equal(section.journalExamples[0].reference.location, "§II-A")
+  assert.deepEqual(section.otherExamples, [])
+  assert.deepEqual([section.tolerance, section.length, section.mode], ["一句带过", "600字", "整节"])
+  assert.deepEqual(sectionModels({ tables: [] }), [])
+})

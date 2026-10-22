@@ -321,7 +321,7 @@ function redactBarePrivateLocators(value, delimitedRanges = []) {
   return `${output}${value.slice(cursor)}`
 }
 
-function redactPrivateLocators(value) {
+export function redactPrivateLocators(value) {
   const lines = String(value ?? "").split("\n")
   let fence = null
   return lines.map((line) => {

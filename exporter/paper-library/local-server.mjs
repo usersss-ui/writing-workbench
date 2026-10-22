@@ -26,6 +26,7 @@ import {
   saveSubmissionProjectState,
 } from "./submission-project.mjs"
 import { WORKBENCH_STATE_REQUEST_MAX_BYTES, createWorkbenchStateStore } from "./workbench-state.mjs"
+import { listPaperProjects, readPaperProject, readPaperProjectFile } from "./paper-project.mjs"
 
 export const SOURCE_PATH_REQUEST_MAX_BYTES = 16 * 1024
 export const ARCHIVE_REQUEST_MAX_BYTES = 65_536
@@ -94,6 +95,11 @@ export const APPROVED_PROTOTYPE_FILES = Object.freeze([
   "paper-math-renderer.mjs",
   "paper-user-tags.mjs",
   "workbench-storage.mjs",
+  "paper-project.html",
+  "paper-project.css",
+  "paper-project.mjs",
+  "paper-project-model.mjs",
+  "local-paper-match.mjs",
   ...KATEX_BROWSER_FILES,
 ])
 
@@ -189,6 +195,12 @@ const ERROR_STATUS = Object.freeze({
   WORKBENCH_STATE_CONFLICT: 409,
   WORKBENCH_STATE_CORRUPT: 500,
   WORKBENCH_STATE_WRITE_FAILED: 500,
+  PAPER_PROJECT_CONFIG_INVALID: 500,
+  PAPER_PROJECT_NOT_FOUND: 404,
+  PAPER_PROJECT_UNAVAILABLE: 404,
+  PAPER_PROJECT_FILE_NOT_FOUND: 404,
+  PAPER_PROJECT_FILE_TOO_LARGE: 413,
+  PAPER_PROJECT_FILE_UNREADABLE: 422,
   INTERNAL_ERROR: 500,
 })
 
@@ -232,6 +244,12 @@ const ERROR_MESSAGE = Object.freeze({
   WORKBENCH_STATE_CONFLICT: "研究状态已在其他页面更新，已重新载入最新内容",
   WORKBENCH_STATE_CORRUPT: "本机研究状态文件已损坏；已停止读写以保留原文件",
   WORKBENCH_STATE_WRITE_FAILED: "研究状态写入磁盘失败",
+  PAPER_PROJECT_CONFIG_INVALID: "论文项目配置无效，请检查 paper-projects.local.json",
+  PAPER_PROJECT_NOT_FOUND: "未登记这个论文项目",
+  PAPER_PROJECT_UNAVAILABLE: "论文项目目录不存在或不可读",
+  PAPER_PROJECT_FILE_NOT_FOUND: "项目文件不存在或不允许读取",
+  PAPER_PROJECT_FILE_TOO_LARGE: "项目文件超过读取大小上限",
+  PAPER_PROJECT_FILE_UNREADABLE: "项目文件不是有效的 UTF-8 普通文件",
   INTERNAL_ERROR: "本地论文库请求失败",
 })
 
@@ -763,6 +781,17 @@ export function createPrivateLibraryRequestHandler({
         }
         if (request.method === "GET" && target === "/api/v1/workbench-state") {
           sendJson(response, 200, await workbenchState.load())
+          return
+        }
+        if (request.method === "GET" && target === "/api/v1/paper-projects") {
+          sendJson(response, 200, await listPaperProjects({ repoRoot }))
+          return
+        }
+        const paperProject = /^\/api\/v1\/paper-projects\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\/files\/([^/]+))?$/u.exec(target)
+        if (request.method === "GET" && paperProject) {
+          sendJson(response, 200, paperProject[2] === undefined
+            ? await readPaperProject({ repoRoot, projectId: paperProject[1] })
+            : await readPaperProjectFile({ repoRoot, projectId: paperProject[1], encodedPath: paperProject[2] }))
           return
         }
         if (request.method === "GET" && target === "/api/v1/capabilities") {

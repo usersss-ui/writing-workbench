@@ -3239,14 +3239,15 @@ export function createLibraryController({
         store.setSelectedPaper(papers[0].paper_id)
         persistedSelection = papers[0].paper_id
       }
-      const requestedPaperId = new URLSearchParams(
+      const requestParams = new URLSearchParams(
         typeof location?.search === "string" ? location.search : "",
-      ).get("paper_id")
+      )
+      const requestedPaperId = requestParams.get("paper_id")
       if (validPaperId(requestedPaperId) && paperById(papers, requestedPaperId)) {
         store.setSelectedPaper(requestedPaperId)
         detailOpen = true
         detailPaperId = requestedPaperId
-        activeReaderTab = "note"
+        activeReaderTab = requestParams.get("tab") === "source" ? "source" : "note"
         sourceViewMode = defaultSourceViewMode(paperById(papers, requestedPaperId)?.source_documents)
         sourcePdfIndex = 0
         sourceOcrIndex = 0

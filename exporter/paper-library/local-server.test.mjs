@@ -108,6 +108,11 @@ const EXPECTED_PROTOTYPE_FILES = [
   "paper-math-renderer.mjs",
   "paper-user-tags.mjs",
   "workbench-storage.mjs",
+  "paper-project.html",
+  "paper-project.css",
+  "paper-project.mjs",
+  "paper-project-model.mjs",
+  "local-paper-match.mjs",
   ...EXPECTED_KATEX_FILES,
 ]
 const EXPECTED_GENERATED_ASSETS = [

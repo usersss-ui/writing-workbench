@@ -57,6 +57,8 @@ const EXPECTED_FILES = [
   "exporter/paper-library/overrides.mjs",
   "exporter/paper-library/package-audit.mjs",
   "exporter/paper-library/package-audit.test.mjs",
+  "exporter/paper-library/paper-project.mjs",
+  "exporter/paper-library/paper-project.test.mjs",
   "exporter/paper-library/paper-tag-migration.mjs",
   "exporter/paper-library/paper-tag-migration.test.mjs",
   "exporter/paper-library/runtime.mjs",
@@ -158,6 +160,11 @@ const EXPECTED_FILES = [
   "prototype/desktop/paper-math-renderer.mjs",
   "prototype/desktop/paper-math-renderer.test.mjs",
   "prototype/desktop/paper-note-draft.test.mjs",
+  "prototype/desktop/paper-project-model.mjs",
+  "prototype/desktop/paper-project-model.test.mjs",
+  "prototype/desktop/paper-project.css",
+  "prototype/desktop/paper-project.html",
+  "prototype/desktop/paper-project.mjs",
   "prototype/desktop/paper-user-tags.mjs",
   "prototype/desktop/paper-user-tags.test.mjs",
   "prototype/desktop/papers-data.mjs",
@@ -479,9 +486,9 @@ async function collectGeneratedPageSourceClosure(templatePath) {
   }
 }
 
-test("keeps the manifest and both independent policies at the exact lexical 176-file workbench union", async () => {
+test("keeps the manifest and both independent policies at the exact lexical 183-file workbench union", async () => {
   const manifest = JSON.parse(await readFile(new URL("../config/github-package-files.json", import.meta.url), "utf8"))
-  assert.equal(EXPECTED_FILES.length, 176)
+  assert.equal(EXPECTED_FILES.length, 183)
   assert.equal(TASK_13_NET_NEW_FILES.length, 43)
   assert.deepEqual(TASK_13_NET_NEW_FILES, [...TASK_13_NET_NEW_FILES].sort())
   assert.deepEqual(
@@ -497,7 +504,7 @@ test("keeps the manifest and both independent policies at the exact lexical 176-
   assert.deepEqual(manifest.files, EXPECTED_FILES)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, EXPECTED_FILES)
   for (const files of [EXPECTED_FILES, manifest.files, EXPECTED_PACKAGE_FILES]) {
-    assert.equal(new Set(files).size, 176)
+    assert.equal(new Set(files).size, 183)
   }
   assert.equal(Object.isFrozen(EXPECTED_PACKAGE_FILES), true)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, [...EXPECTED_FILES].sort())
