@@ -1,4 +1,5 @@
 import { defaultDirectionSelection } from "./papers-data.mjs"
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import { directionToConditions, encodeDirectionAxes } from "./discovery-query-plan.mjs"
 import {
   createDirectionSaveController,
@@ -6,7 +7,7 @@ import {
   wireDirectionSaveButtons,
 } from "./direction-snapshot.mjs"
 
-export function initializeDirections({ document, window }) {
+export function initializeDirections({ document, window, storage: providedStorage = null }) {
   const selected = {}
   const filters = document.querySelector("#direction-filters")
   const form = document.querySelector("#direction-search-form")
@@ -22,8 +23,8 @@ export function initializeDirections({ document, window }) {
   const language = document.querySelector("#search-language")
   const toast = document.querySelector("#toast")
   let toastTimeout = null
-  let storage = null
-  try { storage = window.localStorage } catch {}
+  let storage = providedStorage
+  if (!storage) try { storage = window.localStorage } catch {}
   const directionStore = createDirectionSnapshotStore(storage)
   const selectionValues = () => Object.values(selected).flat()
 
@@ -169,5 +170,5 @@ export function initializeDirections({ document, window }) {
 }
 
 if (typeof document !== "undefined" && typeof window !== "undefined") {
-  initializeDirections({ document, window })
+  initializeDirections({ document, window, storage: openWorkbenchStorage({ windowRef: window }) })
 }

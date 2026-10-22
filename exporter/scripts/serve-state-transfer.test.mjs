@@ -39,6 +39,7 @@ const EXPECTED_ASSETS = Object.freeze([
   "paper-library-storage.mjs",
   "paper-user-tags.mjs",
   "candidate-storage.mjs",
+  "workbench-storage.mjs",
   "paper-library-model.mjs",
   "styles.css",
 ])
@@ -162,7 +163,7 @@ test("transitional CLI accepts only an explicit old-port choice and is import-sa
   assert.deepEqual(imported, { code: 0, signal: null, stdout: "", stderr: "" })
 })
 
-test("transitional server serves only the page and exact sixteen-file closure by GET and HEAD", async (t) => {
+test("transitional server serves only the page and exact seventeen-file closure by GET and HEAD", async (t) => {
   const repoRoot = await makeFixture(t)
   const fixture = await listenFixture(t, { repoRoot })
   assert.match(fixture.origin, /^http:\/\/127\.0\.0\.1:\d+$/u)

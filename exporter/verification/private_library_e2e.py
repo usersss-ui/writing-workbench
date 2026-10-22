@@ -20,6 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_LAUNCHER = REPO_ROOT / "exporter/verification/integrated-server-fixture.mjs"
 SCREENSHOT_ROOT = REPO_ROOT / "output/playwright/workbench-integration"
 VIEWPORTS = ((1280, 720), (1440, 900))
+WORKBENCH_STATE_PATH = "/api/v1/workbench-state"
+WORKBENCH_STATE_CHANNEL = "research-console.workbench-state"
 RICH_PAPER_ID = "Fixture24-Rich"
 METADATA_PAPER_ID = "Fixture26-Meta"
 PRIVATE_PATH_MARKER = "/" + "".join(("Us", "ers")) + "/"
@@ -103,7 +105,8 @@ def assert_no_private_locator(value: Any, code: str = "private_locator") -> None
 def assert_browser_storage_privacy(page: Page, code: str) -> None:
     storage = page.evaluate(
         """
-        () => ({
+        async () => ({
+          workbenchState: await fetch('/api/v1/workbench-state', { cache: 'no-store' }).then(response => response.json()),
           localStorage: Object.fromEntries(
             Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
               .filter(key => key !== null)
@@ -118,6 +121,66 @@ def assert_browser_storage_privacy(page: Page, code: str) -> None:
         """
     )
     assert_no_private_locator(storage, code)
+
+
+def reset_workbench_state(origin: str) -> None:
+    """Start a new browser context from empty research state, as a fresh localStorage used to."""
+    entries = public_request(origin, WORKBENCH_STATE_PATH).json()["entries"]
+    for key, entry in entries.items():
+        if entry["value"] is not None:
+            public_request(
+                origin,
+                WORKBENCH_STATE_PATH,
+                method="POST",
+                payload={"key": key, "expectedRevision": entry["revision"], "value": None},
+            )
+
+
+def workbench_state_script(key: str) -> str:
+    """Page script returning the parsed disk-backed value for key, or null."""
+    return (
+        "async () => {"
+        f" const response = await fetch('{WORKBENCH_STATE_PATH}', {{ cache: 'no-store' }});"
+        f" const value = (await response.json()).entries[{json.dumps(key)}]?.value ?? null;"
+        " return value === null ? null : JSON.parse(value);"
+        " }"
+    )
+
+
+def read_workbench_state(page: Page, key: str) -> Any:
+    return page.evaluate(workbench_state_script(key))
+
+
+def write_workbench_state(page: Page, key: str, state: Any) -> None:
+    """Save state to disk as another open tab would and wait until this page has applied it."""
+    page.evaluate(
+        """
+        async ({ endpoint, channelName, key, state }) => {
+          const current = await fetch(endpoint, { cache: 'no-store' }).then(response => response.json());
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, expectedRevision: current.entries[key]?.revision ?? 0, value: state === null ? null : JSON.stringify(state) }),
+          });
+          if (!response.ok) throw new Error('workbench_state_write_failed');
+          const saved = await response.json();
+          const applied = new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('workbench_state_broadcast_timeout')), 5000);
+            window.addEventListener('storage', function listener(event) {
+              if (event.key !== key) return;
+              clearTimeout(timer);
+              window.removeEventListener('storage', listener);
+              resolve();
+            });
+          });
+          const channel = new BroadcastChannel(channelName);
+          channel.postMessage(saved);
+          channel.close();
+          await applied;
+        }
+        """,
+        {"endpoint": WORKBENCH_STATE_PATH, "channelName": WORKBENCH_STATE_CHANNEL, "key": key, "state": state},
+    )
 
 
 @dataclass(frozen=True)
@@ -698,6 +761,23 @@ def assert_personal_tags(page: Page) -> None:
         page.locator("#library-inspector [data-user-tags]").get_by_text("临时验收标签", exact=True).count() == 1,
         "user_tag_persist",
     )
+    # A new browser profile starts with empty localStorage; the tag lives on disk.
+    fresh_context = page.context.browser.new_context()
+    try:
+        fresh = fresh_context.new_page()
+        fresh.goto(page.url, wait_until="networkidle")
+        ensure(fresh.evaluate("() => localStorage.length") == 0, "fresh_browser_empty_local_storage")
+        # The selection was saved too; reading it back must not write.
+        fresh.wait_for_function(
+            "paperId => document.querySelector('#library-inspector [data-inspector-content] code')?.textContent === paperId",
+            arg=RICH_PAPER_ID,
+        )
+        ensure(
+            fresh.locator("#library-inspector [data-user-tags]").get_by_text("临时验收标签", exact=True).count() == 1,
+            "user_tag_survives_new_browser",
+        )
+    finally:
+        fresh_context.close()
     page.locator("#library-inspector [data-action='remove-user-tag'][data-user-tag-label='临时验收标签']").click()
     ensure(
         page.locator("#library-inspector [data-user-tags]").get_by_text("临时验收标签", exact=True).count() == 0,
@@ -726,6 +806,7 @@ def verify_library_viewport(
     width: int,
     height: int,
 ) -> None:
+    reset_workbench_state(origin)
     context = browser.new_context(viewport={"width": width, "height": height})
     context.grant_permissions(["clipboard-read", "clipboard-write"], origin=origin)
     network = StrictNetwork(context, origin)

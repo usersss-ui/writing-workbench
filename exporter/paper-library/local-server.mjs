@@ -25,6 +25,7 @@ import {
   readSubmissionDocument,
   saveSubmissionProjectState,
 } from "./submission-project.mjs"
+import { WORKBENCH_STATE_REQUEST_MAX_BYTES, createWorkbenchStateStore } from "./workbench-state.mjs"
 
 export const SOURCE_PATH_REQUEST_MAX_BYTES = 16 * 1024
 export const ARCHIVE_REQUEST_MAX_BYTES = 65_536
@@ -92,6 +93,7 @@ export const APPROVED_PROTOTYPE_FILES = Object.freeze([
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
   "paper-user-tags.mjs",
+  "workbench-storage.mjs",
   ...KATEX_BROWSER_FILES,
 ])
 
@@ -134,6 +136,7 @@ const APPROVED_GENERATED_ASSET_SET = new Set([
   "discovery-record.mjs",
   "local-paper-match.mjs",
   "nuist.institution.json",
+  "workbench-storage.mjs",
   ...KATEX_BROWSER_FILES,
 ])
 const NOTE_CATEGORY = "(?:note|derivation|source_map|modeling|simulation|code_compare|reproduction_report)"
@@ -182,6 +185,10 @@ const ERROR_STATUS = Object.freeze({
   SUBMISSION_WRITE_FAILED: 500,
   SUBMISSION_DOCUMENT_NOT_FOUND: 404,
   SUBMISSION_DOCUMENT_TOO_LARGE: 413,
+  WORKBENCH_STATE_INVALID: 400,
+  WORKBENCH_STATE_CONFLICT: 409,
+  WORKBENCH_STATE_CORRUPT: 500,
+  WORKBENCH_STATE_WRITE_FAILED: 500,
   INTERNAL_ERROR: 500,
 })
 
@@ -221,6 +228,10 @@ const ERROR_MESSAGE = Object.freeze({
   SUBMISSION_WRITE_FAILED: "投稿项目保存失败",
   SUBMISSION_DOCUMENT_NOT_FOUND: "投稿材料不存在或不允许读取",
   SUBMISSION_DOCUMENT_TOO_LARGE: "投稿材料超过读取大小上限",
+  WORKBENCH_STATE_INVALID: "研究状态保存请求无效",
+  WORKBENCH_STATE_CONFLICT: "研究状态已在其他页面更新，已重新载入最新内容",
+  WORKBENCH_STATE_CORRUPT: "本机研究状态文件已损坏；已停止读写以保留原文件",
+  WORKBENCH_STATE_WRITE_FAILED: "研究状态写入磁盘失败",
   INTERNAL_ERROR: "本地论文库请求失败",
 })
 
@@ -722,6 +733,7 @@ export function createPrivateLibraryRequestHandler({
     throw new TypeError("本地论文库服务配置无效")
   }
   const staticIo = { ...DEFAULT_STATIC_FILE_SYSTEM, ...staticFileSystem }
+  const workbenchState = createWorkbenchStateStore({ repoRoot })
 
   return async function privateLibraryRequestHandler(request, response) {
     const target = requestPath(request)
@@ -749,6 +761,10 @@ export function createPrivateLibraryRequestHandler({
           response.end(document.body)
           return
         }
+        if (request.method === "GET" && target === "/api/v1/workbench-state") {
+          sendJson(response, 200, await workbenchState.load())
+          return
+        }
         if (request.method === "GET" && target === "/api/v1/capabilities") {
           let recovery = coordinator.getState().recovery
           let context = null
@@ -761,6 +777,7 @@ export function createPrivateLibraryRequestHandler({
         }
         const route = new Map([
           ["/api/v1/submission-project/state", SUBMISSION_STATE_REQUEST_MAX_BYTES],
+          ["/api/v1/workbench-state", WORKBENCH_STATE_REQUEST_MAX_BYTES],
           ["/api/v1/papers/source-path", SOURCE_PATH_REQUEST_MAX_BYTES],
           ["/api/v1/notes/inspect", INSPECT_REQUEST_MAX_BYTES],
           ["/api/v1/notes/import", IMPORT_REQUEST_MAX_BYTES],
@@ -785,6 +802,11 @@ export function createPrivateLibraryRequestHandler({
         if (target === "/api/v1/submission-project/state") {
           const result = await coordinator.run(() => saveSubmissionProjectState({ repoRoot, request: rawBody }))
           sendJson(response, 200, result)
+          return
+        }
+
+        if (target === "/api/v1/workbench-state") {
+          sendJson(response, 200, await workbenchState.save(rawBody))
           return
         }
 

@@ -1,6 +1,6 @@
 # 浏览器状态改存本机磁盘 · 设计草案
 
-日期：2026-10-22 · 状态：待确认，尚未实施
+日期：2026-10-22 · 状态：已实施（实现与草案的差异见“实施说明”）
 
 ## 目标
 
@@ -29,18 +29,29 @@
 **服务端**（新增 `exporter/paper-library/workbench-state.mjs`）
 
 - `GET /api/v1/workbench-state`：一次返回上表 6 个键的当前值与 revision。
-- `PUT /api/v1/workbench-state/<key>`：请求体 `{ expectedRevision, value }`。只接受白名单内的键，每个键的字节上限沿用现有前端上限；revision 不一致时返回冲突。
+- `POST /api/v1/workbench-state`：请求体 `{ key, expectedRevision, value }`。只接受白名单内的键；revision 不一致时返回冲突。
 - 每个键写入 `local_library_config/workbench-state/<key>.json`，采用投稿项目同样的写法：临时文件、fsync、rename、权限 0600，并经过现有写入协调器串行执行。
 - 目录已被 `.gitignore` 排除，也不在 GitHub 打包白名单内。
 
 **页面端**（新增 `prototype/desktop/server-storage.mjs`）
 
-- 页面启动时先 `await` 拉取一次全部状态，生成一个内存对象，对外仍是同步的 `getItem` / `setItem` / `removeItem`。
-- 写入先更新内存，再按键排队 PUT 到服务端。失败时页面明确显示“未保存到磁盘”，不静默吞掉。
+- 页面打开时拉取一次全部状态，生成一个内存快照，对外仍是同步的 `getItem` / `setItem` / `removeItem`。
+- 写入以同步请求直接写盘，成功后才更新快照。失败时页面明确显示“未保存到磁盘”，不静默吞掉。
 - 不在白名单内的键（即 P02 研究记录）直接转交 `localStorage`，所以同一页面可以混用。
 - 多标签页同步：现有代码监听 `storage` 事件，改为由适配器通过 `BroadcastChannel` 发出同名事件。冲突时以磁盘为准，重新读取后提示。
 
 **需要改动接入点的页面**：`library.template.html`、`discovery.mjs`、`directions.mjs`、`research-home.mjs`、`agent-tasks.mjs`、`p02-workflow-ui.mjs`、`p02-writing.mjs`、`state-transfer.mjs`。改动都只是把 `window.localStorage` 换成适配器。
+
+## 实施说明
+
+与草案相比，实现有以下调整：
+
+- **写入改为同步请求。** 适配器用同步 `XMLHttpRequest` 写盘，`setItem` 在写入完成后才返回，失败时直接抛错。这样各模块原有的“未保存”提示能看到真实结果，关闭标签页也不会丢掉尚未发出的写入。本机回环请求只需毫秒级时间，Chrome 155 也不会因此输出控制台警告。读取仍来自页面打开时加载的快照。
+- **写入接口是 `POST /api/v1/workbench-state`**，请求体 `{ key, expectedRevision, value }`，与服务端其他写接口共用同源、JSON 和请求体上限检查。统一请求体上限为 16 MiB；各键的业务上限仍由前端模块自己校验。
+- **研究任务输入还使用派生键**（`.current`、`.snapshot.<id>`、`.pending.<id>`），白名单按模式匹配这些键；服务端和浏览器各写一份规则，由测试保证二者一致。
+- **删除以 `value: null` 写入并保留 revision**，避免删除后重建的文件把 revision 归零。
+- **状态写入不经过论文库写入协调器**，而是按键在模块内串行。论文库重建期间仍可保存阅读状态。
+- **备份与恢复页**在主服务上使用适配器；在没有状态接口的独立旧端口导出服务上，回退到该来源的 localStorage。
 
 ## 旧数据
 

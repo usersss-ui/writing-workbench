@@ -107,6 +107,7 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "direction-snapshot.mjs",
   "agent-task-input.mjs",
   "candidate-storage.mjs",
+  "workbench-storage.mjs",
   "discovery.mjs",
   "discovery-query-plan.mjs",
   "institution-access.mjs",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, Page, sync_playwright
 
@@ -10,6 +11,7 @@ from private_library_e2e import (
     RICH_PAPER_ID,
     StrictNetwork,
     VIEWPORTS,
+    WORKBENCH_STATE_PATH,
     assert_browser_storage_privacy,
     assert_no_document_overflow,
     assert_no_private_locator,
@@ -17,9 +19,13 @@ from private_library_e2e import (
     ensure,
     fetch_fixture_index,
     launch_chromium,
+    read_workbench_state,
+    reset_workbench_state,
     screenshot_path,
     select_paper,
     temporary_fixture,
+    workbench_state_script,
+    write_workbench_state,
 )
 
 
@@ -31,6 +37,7 @@ HOME_PATH = "/prototype/desktop/index.html"
 DISCOVERY_PATH = "/local_library_output/desktop/discovery.html"
 P02_WORKFLOW_STORAGE_KEY = "research-console.p02-workflow.v1"
 WORKSPACE_STORAGE_KEY = "research-console.paper-library.v1"
+DISCOVERY_WORKSPACE_STORAGE_KEY = "research-console.discovery-workspace.v1"
 P02_WORKFLOW_STAGES = (
     "algorithm",
     "theory_target",
@@ -384,19 +391,8 @@ def assert_p02_workflow_flow(page: Page, width: int, height: int) -> None:
         "personalReading": {},
         "selectedPaperId": RICH_PAPER_ID,
     }
-    page.evaluate(
-        """
-        ({ workflowKey, workspaceKey, workspaceState }) => {
-          localStorage.removeItem(workflowKey);
-          localStorage.setItem(workspaceKey, JSON.stringify(workspaceState));
-        }
-        """,
-        {
-            "workflowKey": P02_WORKFLOW_STORAGE_KEY,
-            "workspaceKey": WORKSPACE_STORAGE_KEY,
-            "workspaceState": workspace_state,
-        },
-    )
+    page.evaluate("key => localStorage.removeItem(key)", P02_WORKFLOW_STORAGE_KEY)
+    write_workbench_state(page, WORKSPACE_STORAGE_KEY, workspace_state)
     page.reload(wait_until="networkidle")
     page.locator("#workflow-loop").wait_for(state="visible")
     assert_p02_stage_state(page, "algorithm", "draft", "p02_workflow_boot")
@@ -544,17 +540,9 @@ def assert_p02_workflow_flow(page: Page, width: int, height: int) -> None:
     for stage in P02_WORKFLOW_STAGES:
         assert_p02_stage_state(page, stage, "accepted", f"p02_multitab_restore_{stage}")
 
-    page.evaluate(
-        """
-        ({ key }) => {
-          const state = JSON.parse(localStorage.getItem(key));
-          delete state.shelf['Fixture25-Theory'];
-          localStorage.setItem(key, JSON.stringify(state));
-          window.dispatchEvent(new StorageEvent('storage', { key }));
-        }
-        """,
-        {"key": WORKSPACE_STORAGE_KEY},
-    )
+    workspace_after_source_change = read_workbench_state(page, WORKSPACE_STORAGE_KEY)
+    del workspace_after_source_change["shelf"]["Fixture25-Theory"]
+    write_workbench_state(page, WORKSPACE_STORAGE_KEY, workspace_after_source_change)
     assert_p02_stage_state(page, "algorithm", "accepted", "p02_source_change_keeps_algorithm")
     assert_p02_stage_state(page, "theory_target", "draft", "p02_source_change_reopens_theory")
     for stage in ("theory_analysis", "simulation", "writing"):
@@ -655,6 +643,7 @@ def verify_search_and_local_matches(browser: Browser, origin: str, width: int, h
     retracted_work = {**work("W9100000017", "Withdrawn Synthetic Lunar Analysis", "10.1234/fixture.retracted"), "is_retracted": True}
     later_retraction_query = "controlled later retraction"
     later_retraction_work = work("W9100000018", "Synthetic Later Retraction Fixture", "10.1234/fixture.later-retraction")
+    reset_workbench_state(origin)
     context = browser.new_context(viewport={"width": width, "height": height})
     network = StrictNetwork(
         context,
@@ -672,7 +661,8 @@ def verify_search_and_local_matches(browser: Browser, origin: str, width: int, h
     page = context.new_page()
     audit = BrowserAudit(page, origin)
     writes: list[str] = []
-    page.on("request", lambda request: writes.append(request.method) if request.method not in {"GET", "HEAD", "OPTIONS"} else None)
+    # Saving research state is expected; these checks guard library and archive writes.
+    page.on("request", lambda request: writes.append(request.method) if request.method not in {"GET", "HEAD", "OPTIONS"} and urlparse(request.url).path != WORKBENCH_STATE_PATH else None)
     try:
         page.goto(f"{origin}{DIRECTIONS_PATH}", wait_until="networkidle")
         ensure(page.locator("#direction-advanced").get_attribute("open") is None, "search_direction_options_optional")
@@ -814,13 +804,15 @@ def verify_search_and_local_matches(browser: Browser, origin: str, width: int, h
         page.locator("#keyword-query").fill(secondary_query)
         page.locator("#keyword-live-search").click()
         page.wait_for_function("() => !document.querySelector('#keyword-live-search').disabled && document.querySelectorAll('#keyword-live-results-list article').length === 2")
-        before_stale = page.evaluate("() => JSON.stringify(Object.entries(localStorage))")
+        stored_state = f"async () => JSON.stringify({{ disk: await ({workbench_state_script(DISCOVERY_WORKSPACE_STORAGE_KEY)})(), local: Object.entries(localStorage) }})"
+        before_stale = page.evaluate(stored_state)
         stale_confirm.evaluate("button => button.click()")
-        ensure(page.evaluate("() => JSON.stringify(Object.entries(localStorage))") == before_stale, "broad_stale_confirmation_no_storage_change")
+        ensure(page.evaluate(stored_state) == before_stale, "broad_stale_confirmation_no_storage_change")
         ensure("stale.fixture" not in before_stale and "Stale Controlled Import" not in page.locator("#keyword-live-results-list").inner_text(), "broad_stale_record_not_committed")
         ensure(secondary_query in page.locator("#actual-search-query").inner_text() and page.locator('#keyword-live-results-list [data-paper-id="W9100000016"]').count() == 1, "broad_current_generation_preserved")
-        current_identity = page.evaluate("""() => {
-          const state = JSON.parse(localStorage.getItem('research-console.discovery-workspace.v1'));
+        current_identity = page.evaluate("""async () => {
+          const response = await fetch('/api/v1/workbench-state', { cache: 'no-store' });
+          const state = JSON.parse((await response.json()).entries['research-console.discovery-workspace.v1'].value);
           const batch = state.batches.at(-1);
           const record = state.records.find(record => batch.record_ids.includes(record.record_id) && record.provider_id === 'W9100000016');
           return { expression: batch.plan.selected[0].expression, title: record.bibliography.title, doi: record.bibliography.doi };
@@ -885,7 +877,7 @@ def assert_late_conflict_revokes_recommendation(
     note_card.locator("[data-select-result]").click()
     ensure(note_card.locator("[data-convert-result]").is_enabled(), "late_conflict_initial_conversion_eligible")
 
-    read_state = "() => JSON.parse(localStorage.getItem('research-console.discovery-workspace.v1'))"
+    read_state = workbench_state_script(DISCOVERY_WORKSPACE_STORAGE_KEY)
     before = page.evaluate(read_state)
     original_record = next(record for record in before["records"] if record["provider_id"] == "W9100000016")
     original_result = next(result for result in before["results"] if original_record["record_id"] in result["record_ids"])
@@ -969,7 +961,7 @@ def assert_later_retraction_excludes_saved_result(
     panel.locator('[data-review-field="save"]').click()
     ensure("核验已保存" in panel.inner_text(), "later_retraction_evidence_saved")
     card.locator("[data-select-result]").click()
-    read_state = "() => JSON.parse(localStorage.getItem('research-console.discovery-workspace.v1'))"
+    read_state = workbench_state_script(DISCOVERY_WORKSPACE_STORAGE_KEY)
     before = page.evaluate(read_state)
     original = next(record for record in before["records"] if record["provider_id"] == "W9100000018")
     result = next(result for result in before["results"] if original["record_id"] in result["record_ids"])
@@ -1005,6 +997,7 @@ def verify_workbench_viewport(
     width: int,
     height: int,
 ) -> None:
+    reset_workbench_state(origin)
     context = browser.new_context(viewport={"width": width, "height": height})
     network = StrictNetwork(context, origin)
     page = context.new_page()

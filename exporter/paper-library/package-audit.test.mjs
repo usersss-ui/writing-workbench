@@ -70,6 +70,8 @@ const EXPECTED_FILES = [
   "exporter/paper-library/tag-catalog.mjs",
   "exporter/paper-library/tag-catalog.test.mjs",
   "exporter/paper-library/unified-local-server.e2e.test.mjs",
+  "exporter/paper-library/workbench-state.mjs",
+  "exporter/paper-library/workbench-state.test.mjs",
   "exporter/paper-library/write-coordinator.mjs",
   "exporter/paper-library/write-coordinator.test.mjs",
   "exporter/scripts/audit-github-package.mjs",
@@ -195,6 +197,8 @@ const EXPECTED_FILES = [
   "prototype/desktop/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
   "prototype/desktop/vendor/katex/katex.min.css",
   "prototype/desktop/vendor/katex/katex.mjs",
+  "prototype/desktop/workbench-storage.mjs",
+  "prototype/desktop/workbench-storage.test.mjs",
 ]
 
 const TASK_13_NET_NEW_FILES = Object.freeze([
@@ -291,6 +295,7 @@ const REGULAR_DESKTOP_ASSET_SOURCES = Object.freeze([
   "prototype/desktop/paper-user-tags.mjs",
   "prototype/desktop/state-transfer.mjs",
   "prototype/desktop/styles.css",
+  "prototype/desktop/workbench-storage.mjs",
 ])
 
 const GENERATED_PAGE_CLOSURES = Object.freeze([
@@ -306,6 +311,7 @@ const GENERATED_PAGE_CLOSURES = Object.freeze([
       "prototype/desktop/paper-math-renderer.mjs",
       "prototype/desktop/paper-user-tags.mjs",
       "prototype/desktop/styles.css",
+      "prototype/desktop/workbench-storage.mjs",
     ]),
     vendor: Object.freeze([
       "prototype/desktop/vendor/katex/katex.min.css",
@@ -343,6 +349,7 @@ const GENERATED_PAGE_CLOSURES = Object.freeze([
   "prototype/desktop/paper-math-renderer.mjs",
   "prototype/desktop/paper-user-tags.mjs",
   "prototype/desktop/styles.css",
+  "prototype/desktop/workbench-storage.mjs",
 ]),
     vendor: Object.freeze([
       "prototype/desktop/vendor/katex/katex.mjs",
@@ -368,6 +375,7 @@ const GENERATED_PAGE_CLOSURES = Object.freeze([
       "prototype/desktop/paper-user-tags.mjs",
       "prototype/desktop/state-transfer.mjs",
       "prototype/desktop/styles.css",
+      "prototype/desktop/workbench-storage.mjs",
     ]),
     vendor: Object.freeze([]),
   }),
@@ -471,9 +479,9 @@ async function collectGeneratedPageSourceClosure(templatePath) {
   }
 }
 
-test("keeps the manifest and both independent policies at the exact lexical 172-file workbench union", async () => {
+test("keeps the manifest and both independent policies at the exact lexical 176-file workbench union", async () => {
   const manifest = JSON.parse(await readFile(new URL("../config/github-package-files.json", import.meta.url), "utf8"))
-  assert.equal(EXPECTED_FILES.length, 172)
+  assert.equal(EXPECTED_FILES.length, 176)
   assert.equal(TASK_13_NET_NEW_FILES.length, 43)
   assert.deepEqual(TASK_13_NET_NEW_FILES, [...TASK_13_NET_NEW_FILES].sort())
   assert.deepEqual(
@@ -489,7 +497,7 @@ test("keeps the manifest and both independent policies at the exact lexical 172-
   assert.deepEqual(manifest.files, EXPECTED_FILES)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, EXPECTED_FILES)
   for (const files of [EXPECTED_FILES, manifest.files, EXPECTED_PACKAGE_FILES]) {
-    assert.equal(new Set(files).size, 172)
+    assert.equal(new Set(files).size, 176)
   }
   assert.equal(Object.isFrozen(EXPECTED_PACKAGE_FILES), true)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, [...EXPECTED_FILES].sort())
@@ -537,7 +545,7 @@ for (const closure of GENERATED_PAGE_CLOSURES) {
   })
 }
 
-test("the three generated pages use exactly the 30 regular desktop assets", () => {
+test("the three generated pages use exactly the 31 regular desktop assets", () => {
   const union = [...new Set(GENERATED_PAGE_CLOSURES.flatMap((closure) => closure.regular))].sort()
   assert.deepEqual(union, REGULAR_DESKTOP_ASSET_SOURCES)
 })

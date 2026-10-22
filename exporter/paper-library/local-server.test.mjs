@@ -107,6 +107,7 @@ const EXPECTED_PROTOTYPE_FILES = [
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
   "paper-user-tags.mjs",
+  "workbench-storage.mjs",
   ...EXPECTED_KATEX_FILES,
 ]
 const EXPECTED_GENERATED_ASSETS = [
@@ -141,6 +142,7 @@ const EXPECTED_GENERATED_ASSETS = [
   "discovery-record.mjs",
   "local-paper-match.mjs",
   "nuist.institution.json",
+  "workbench-storage.mjs",
   ...EXPECTED_KATEX_FILES,
 ]
 

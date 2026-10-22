@@ -1,3 +1,4 @@
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import * as directionModule from "./direction-snapshot.mjs"
 import * as taskInputModule from "./agent-task-input.mjs"
 import * as workspaceModule from "./paper-library-storage.mjs"
@@ -849,6 +850,9 @@ async function loadKnownPaperIds(windowRef, current) {
 }
 
 function wireOperatorPage(documentRef, windowRef) {
+  // Disk-backed state on the main server; this origin's localStorage on the
+  // standalone legacy export server, which has no state API.
+  const storage = openWorkbenchStorage({ windowRef, legacyFallback: true })
   const elements = {
     root: documentRef.querySelector("#state-transfer-app"),
     origin: documentRef.querySelector("#state-transfer-origin"),
@@ -988,7 +992,7 @@ function wireOperatorPage(documentRef, windowRef) {
     if (!ALLOWED_ORIGINS.includes(origin) || !beginBusy()) return
     focusStatus(elements, "正在校验并导出…")
     try {
-      const bundle = await exportStateBundle({ storage: windowRef.localStorage, originLabel: origin, exportedAt: new Date().toISOString() })
+      const bundle = await exportStateBundle({ storage, originLabel: origin, exportedAt: new Date().toISOString() })
       const blob = new windowRef.Blob([JSON.stringify(bundle)], { type: "application/json" })
       const url = windowRef.URL.createObjectURL(blob)
       try {
@@ -1032,7 +1036,7 @@ function wireOperatorPage(documentRef, windowRef) {
     try {
       const imports = []
       for (const file of files) imports.push(await validateStateBundle(await file.arrayBuffer()))
-      const current = await exportStateBundle({ storage: windowRef.localStorage, originLabel: origin, exportedAt: new Date().toISOString() })
+      const current = await exportStateBundle({ storage, originLabel: origin, exportedAt: new Date().toISOString() })
       const nextPlan = await previewStateMerge({
         current,
         bundles: imports,
@@ -1060,7 +1064,7 @@ function wireOperatorPage(documentRef, windowRef) {
     elements.applyButton.disabled = true
     focusStatus(elements, "正在应用并验证浏览器状态…")
     try {
-      const result = await applyStateMerge({ storage: windowRef.localStorage, plan, decisions })
+      const result = await applyStateMerge({ storage, plan, decisions })
       if (result.status === "success") {
         applied = true
         focusStatus(elements, "状态迁移成功；本页不会再次应用。", "success")

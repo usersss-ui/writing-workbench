@@ -1,3 +1,4 @@
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import { WORKSPACE_STORAGE_KEY, createWorkspaceStore } from "./paper-library-storage.mjs"
 import {
   P02_WORKFLOW_STORAGE_KEY,
@@ -499,5 +500,5 @@ export function initializeP02Workflow({ document: documentRef, window: windowRef
 }
 
 if (typeof document !== "undefined" && typeof window !== "undefined") {
-  initializeP02Workflow({ document, window, storage: window.localStorage })
+  initializeP02Workflow({ document, window, storage: openWorkbenchStorage({ windowRef: window }) })
 }

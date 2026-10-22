@@ -1,3 +1,4 @@
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import { createCandidateStore } from "./candidate-storage.mjs"
 import { resolveInstitutionAccess } from "./institution-access.mjs"
 import {
@@ -552,4 +553,4 @@ export function createDiscoveryController({
   }
 }
 
-if (typeof document !== "undefined") createDiscoveryController({ root: document }).start()
+if (typeof document !== "undefined") createDiscoveryController({ root: document, storage: openWorkbenchStorage({ windowRef: window }) }).start()

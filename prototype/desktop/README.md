@@ -65,9 +65,9 @@ python3 -m http.server 4176 --bind 127.0.0.1
 
 “待核验”表示某个正式分面还没有足够证据，不能把它读作“不适用”或“论文没有提及”。`metadata-only` 表示候选已保存可追溯元数据和稳定论文 ID，但还没有 PDF、OCR 或笔记预览。正确流程是先归档 `metadata-only` 候选，再在同一论文 ID 下补充 PDF，并用受控笔记导入补充 Markdown/预览；补料并不自动把研究结论改成已核验。
 
-#### localStorage 备份与 Task 15 受控切换
+#### 研究状态备份与 Task 15 受控切换
 
-个人标签以及方向、书架、阅读状态、候选、Agent 输入快照、P02 研究记录（含写作草稿）和广泛检索工作区都可能保存在浏览器 localStorage。更换浏览器、电脑或端口前，先用“更多工具 → 备份与恢复”（`http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html`）导出浏览器状态 JSON 备份，保存在私有位置。此备份不包含磁盘上的应用投稿项目；应从[项目页](http://127.0.0.1:4176/prototype/desktop/submission-project.html)另行导出包含正文、证据与材料快照的完整 JSON。“导出标签”只备份个人标签。个人标签导入只合并已知论文并统计跳过的未知论文；浏览器状态包 version 3 会先生成预览，再要求用户对每个状态 owner 的冲突作出显式决定。P02 与广泛检索工作区按各自整份文档冲突处理并默认保留当前状态；旧 version 1／2 缺少的 owner 不会清空当前内容。原备份不应自动删除。
+个人标签以及方向、书架、阅读状态、候选、Agent 输入快照和广泛检索工作区由本机 Node 服务（`workbench-storage.mjs` 适配器与 `/api/v1/workbench-state`）同步写入 `local_library_config/workbench-state/`，换浏览器或端口不会丢失；P02 研究记录（含写作草稿）仍在浏览器 localStorage。旧浏览器 localStorage 中这些键的历史内容不会自动迁移。更换电脑前，复制 `local_library_config/workbench-state/`，或用“更多工具 → 备份与恢复”（`http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html`）导出状态 JSON 备份（含磁盘状态与 P02 研究记录），保存在私有位置。此备份不包含磁盘上的应用投稿项目；应从[项目页](http://127.0.0.1:4176/prototype/desktop/submission-project.html)另行导出包含正文、证据与材料快照的完整 JSON。“导出标签”只备份个人标签。个人标签导入只合并已知论文并统计跳过的未知论文；浏览器状态包 version 3 会先生成预览，再要求用户对每个状态 owner 的冲突作出显式决定。P02 与广泛检索工作区按各自整份文档冲突处理并默认保留当前状态；旧 version 1／2 缺少的 owner 不会清空当前内容。原备份不应自动删除。
 
 日常启动不迁移旧端口。只有 **Task 15 受控切换** 才可迁移 4176/4177/4178 的状态：记录旧 PID、命令、cwd 和重启命令；针对当前端口临时执行 `node exporter/scripts/serve-state-transfer.mjs --port 4176`、`--port 4177` 或 `--port 4178` 中的一个命令，在 `http://127.0.0.1:<port>/state-transfer.html` 导出 JSON 并记录 SHA-256；释放端口、启动最终 Node 服务后，在 `http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html` 预览、核对并按每个状态 owner 显式解决冲突再导入。若导出、摘要校验、端口所有权或新服务检查失败，停止本次切换进程，按记录恢复旧服务，保留备份；绝不静默跨源复制。
 
@@ -90,7 +90,7 @@ node exporter/scripts/build-private-library.mjs
 
 ### 我的标签
 
-- 标签只保存在当前浏览器的 `research-console.paper-user-tags.v1`，不会写入论文目录、`paper-tags.json` 或正式研究分面。
+- 标签以 `research-console.paper-user-tags.v1` 保存在本机 `local_library_config/workbench-state/`，不会写入论文目录、`paper-tags.json` 或正式研究分面。
 - 单标签最多 24 个 Unicode 码点；每篇论文最多 20 个；整个库最多 500 个标签记录。
 - 标签参与页面顶部搜索，可在论文检查器或详情页“快速概览”中添加和移除。
 - “导出标签”下载只含论文编号与个人标签的 JSON；“导入标签”只合并，不会删除已有标签。

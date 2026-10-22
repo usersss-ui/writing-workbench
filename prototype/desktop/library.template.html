@@ -472,11 +472,13 @@
     <script type="module">
       import { createCandidateStore } from "./assets/candidate-storage.mjs"
       import { createLibraryController } from "./assets/library.mjs"
+      import { openWorkbenchStorage } from "./assets/workbench-storage.mjs"
 
+      const storage = openWorkbenchStorage({ windowRef: window })
       const controller = createLibraryController({
         document,
-        storage: window.localStorage,
-        candidateStore: createCandidateStore(window.localStorage),
+        storage,
+        candidateStore: createCandidateStore(storage),
         fetchImpl: window.fetch.bind(window),
       })
       await controller.start()

@@ -81,7 +81,7 @@ node exporter/scripts/build-private-library.mjs
 
 新构建输出 index version 3 和 facet schema version 2；桌面页面仍可临时读取旧的 `2/1` 生成物，并把缺失状态按“未记录”处理。
 
-个人标签只保存在当前浏览器，不会进入论文目录、正式分面或公开包；导入为严格的仅合并 JSON。限额、备份和未知论文处理见[“我的标签”说明](prototype/desktop/README.md#我的标签)。
+个人标签由本机 Node 服务保存在 `local_library_config/workbench-state/`，不会进入论文目录、正式分面或公开包；导入为严格的仅合并 JSON。限额、备份和未知论文处理见[“我的标签”说明](prototype/desktop/README.md#我的标签)。
 
 ## 浏览 PDF 与 OCR
 
@@ -213,7 +213,7 @@ python3 -m http.server 4176 --bind 127.0.0.1
 
 ### 浏览器本地状态备份与 Task 15 迁移
 
-个人标签保存在浏览器的 localStorage；方向、书架角色、阅读状态、候选、Agent 输入快照、P02 研究记录（含写作草稿）和广泛检索工作区也属于浏览器来源状态。更换浏览器前，通过“更多工具 → 备份与恢复”（`http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html`）导出浏览器状态 JSON，并把文件保存在私有位置。此备份不包含磁盘上的应用投稿项目；该项目应从[项目页](http://127.0.0.1:4176/prototype/desktop/submission-project.html)另行导出包含正文、证据与材料快照的完整 JSON。“导出标签”只备份个人标签。个人标签导入只合并已知论文并统计跳过的未知论文；浏览器 version 3 状态包先生成预览，再要求用户对每个状态 owner 的冲突作出显式决定。P02 和新检索工作区按各自整份文档处理，默认保留当前状态；旧 version 1／2 包缺少的 owner 保留当前内容。两种导入都严格校验，也都不会自动删除原备份。
+研究方向、书架角色、阅读状态、个人标签、候选、Agent 输入快照和广泛检索工作区由本机 Node 服务保存在 `local_library_config/workbench-state/`（已被 `.gitignore` 排除，也不在公开包内），换浏览器、端口或清理浏览器数据都不会丢失；复制该目录即可备份。每次修改都同步写入磁盘，写入失败时页面底部会提示“未保存到磁盘”。同一浏览器的多个标签页会相互同步；两个不同浏览器同时修改同一项时，后保存的一方会收到冲突提示并载入最新内容。P02 研究记录（含写作草稿）仍保存在浏览器 localStorage。更换浏览器前，通过“更多工具 → 备份与恢复”（`http://127.0.0.1:4176/local_library_output/desktop/state-transfer.html`）导出状态 JSON（包含上述磁盘状态与 P02 研究记录），并把文件保存在私有位置。此备份不包含磁盘上的应用投稿项目；该项目应从[项目页](http://127.0.0.1:4176/prototype/desktop/submission-project.html)另行导出包含正文、证据与材料快照的完整 JSON。“导出标签”只备份个人标签。个人标签导入只合并已知论文并统计跳过的未知论文；浏览器 version 3 状态包先生成预览，再要求用户对每个状态 owner 的冲突作出显式决定。P02 和新检索工作区按各自整份文档处理，默认保留当前状态；旧 version 1／2 包缺少的 owner 保留当前内容。两种导入都严格校验，也都不会自动删除原备份。
 
 旧端口（4176、4177、4178）的导出/导入不是日常启动步骤，只能在 **Task 15 受控切换** 中执行：先记录每个旧进程的 PID、命令、cwd 与重启命令；再针对当前要迁移的那个端口，临时运行下列三个命令之一：
 

@@ -1,3 +1,4 @@
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import { P02_WRITING_DATA, validateP02WritingData } from "./p02-writing-data.mjs"
 import { buildWritingMaterials, createP02WorkflowStore, isValidP02WorkflowState, P02_WORKFLOW_STORAGE_KEY, summarizeP02Shelf } from "./p02-workflow.mjs"
 import { createWorkspaceStore, WORKSPACE_STORAGE_KEY } from "./paper-library-storage.mjs"
@@ -391,6 +392,6 @@ function initializeCurrentWriting({ document: documentRef, storage, window: wind
 
 if (typeof document !== "undefined") {
   let storage
-  try { storage = globalThis.localStorage } catch { /* The editor remains available for Markdown export. */ }
+  try { storage = openWorkbenchStorage({ windowRef: globalThis }) } catch { /* The editor remains available for Markdown export. */ }
   initializeP02Writing({ document, data: P02_WRITING_DATA, storage, window: globalThis.window })
 }

@@ -60,6 +60,8 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   "exporter/paper-library/tag-catalog.mjs",
   "exporter/paper-library/tag-catalog.test.mjs",
   "exporter/paper-library/unified-local-server.e2e.test.mjs",
+  "exporter/paper-library/workbench-state.mjs",
+  "exporter/paper-library/workbench-state.test.mjs",
   "exporter/paper-library/write-coordinator.mjs",
   "exporter/paper-library/write-coordinator.test.mjs",
   "exporter/scripts/audit-github-package.mjs",
@@ -185,6 +187,8 @@ export const EXPECTED_PACKAGE_FILES = Object.freeze([
   "prototype/desktop/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
   "prototype/desktop/vendor/katex/katex.min.css",
   "prototype/desktop/vendor/katex/katex.mjs",
+  "prototype/desktop/workbench-storage.mjs",
+  "prototype/desktop/workbench-storage.test.mjs",
 ])
 
 const EXPECTED_PACKAGE_FILE_SET = new Set(EXPECTED_PACKAGE_FILES)
@@ -266,6 +270,7 @@ const GENERATED_ASSET_SOURCE = new Map([
   ["local_library_output/desktop/assets/paper-library-storage.mjs", "prototype/desktop/paper-library-storage.mjs"],
   ["local_library_output/desktop/assets/paper-user-tags.mjs", "prototype/desktop/paper-user-tags.mjs"],
   ["local_library_output/desktop/assets/candidate-storage.mjs", "prototype/desktop/candidate-storage.mjs"],
+  ["local_library_output/desktop/assets/workbench-storage.mjs", "prototype/desktop/workbench-storage.mjs"],
   ["local_library_output/desktop/assets/discovery.mjs", "prototype/desktop/discovery.mjs"],
   ["local_library_output/desktop/assets/discovery-query-plan.mjs", "prototype/desktop/discovery-query-plan.mjs"],
   ["local_library_output/desktop/assets/institution-access.mjs", "prototype/desktop/institution-access.mjs"],

@@ -13,6 +13,7 @@ from private_library_e2e import (
     ensure,
     launch_chromium,
     openalex_payload,
+    reset_workbench_state,
     screenshot_path,
     temporary_fixture,
 )
@@ -258,6 +259,7 @@ def verify_discovery_viewport(
     *,
     archive_candidate: bool,
 ) -> None:
+    reset_workbench_state(origin)
     context = browser.new_context(viewport={"width": width, "height": height})
     context.grant_permissions(["clipboard-read", "clipboard-write"], origin=origin)
     network = StrictNetwork(

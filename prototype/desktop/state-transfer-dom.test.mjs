@@ -62,7 +62,7 @@ test("operator page is a Chinese desktop-only surface linked only from secondary
   }
 })
 
-test("the recursive runtime import graph is exactly fifteen approved modules and has no dynamic or escaping import", async () => {
+test("the recursive runtime import graph is exactly sixteen approved modules and has no dynamic or escaping import", async () => {
   const expected = [
     "agent-task-input.mjs",
     "bibliography-normalization.mjs",
@@ -79,6 +79,7 @@ test("the recursive runtime import graph is exactly fifteen approved modules and
     "paper-library-storage.mjs",
     "paper-user-tags.mjs",
     "state-transfer.mjs",
+    "workbench-storage.mjs",
   ]
   const pending = [moduleUrl]
   const visited = new Map()

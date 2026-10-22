@@ -24,7 +24,7 @@ const DESKTOP_RESOURCES = Object.freeze([
   "paper-math-renderer.mjs", "paper-library-model.mjs", "paper-library-storage.mjs", "paper-user-tags.mjs",
   "direction-snapshot.mjs", "agent-task-input.mjs",
   "bibliography-normalization.mjs", "discovery-record.mjs",
-  "candidate-storage.mjs", "discovery.mjs", "discovery-query-plan.mjs", "institution-access.mjs", "openalex-search.mjs", "local-paper-match.mjs", "state-transfer.mjs", "p02-workflow.mjs",
+  "candidate-storage.mjs", "workbench-storage.mjs", "discovery.mjs", "discovery-query-plan.mjs", "institution-access.mjs", "openalex-search.mjs", "local-paper-match.mjs", "state-transfer.mjs", "p02-workflow.mjs",
 ])
 
 test("loads one configured context and indexes one scan by stable paper id", async () => {

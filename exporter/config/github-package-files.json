@@ -48,6 +48,8 @@
     "exporter/paper-library/tag-catalog.mjs",
     "exporter/paper-library/tag-catalog.test.mjs",
     "exporter/paper-library/unified-local-server.e2e.test.mjs",
+    "exporter/paper-library/workbench-state.mjs",
+    "exporter/paper-library/workbench-state.test.mjs",
     "exporter/paper-library/write-coordinator.mjs",
     "exporter/paper-library/write-coordinator.test.mjs",
     "exporter/scripts/audit-github-package.mjs",
@@ -172,6 +174,8 @@
     "prototype/desktop/vendor/katex/fonts/KaTeX_Size4-Regular.woff2",
     "prototype/desktop/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
     "prototype/desktop/vendor/katex/katex.min.css",
-    "prototype/desktop/vendor/katex/katex.mjs"
+    "prototype/desktop/vendor/katex/katex.mjs",
+    "prototype/desktop/workbench-storage.mjs",
+    "prototype/desktop/workbench-storage.test.mjs"
   ]
 }

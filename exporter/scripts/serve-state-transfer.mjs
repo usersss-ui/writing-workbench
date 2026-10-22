@@ -19,6 +19,7 @@ export const STATE_TRANSFER_ASSET_FILES = Object.freeze([
   "paper-library-storage.mjs",
   "paper-user-tags.mjs",
   "candidate-storage.mjs",
+  "workbench-storage.mjs",
   "paper-library-model.mjs",
   "styles.css",
 ])

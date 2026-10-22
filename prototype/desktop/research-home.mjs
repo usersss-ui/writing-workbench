@@ -1,3 +1,4 @@
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import { createDirectionSnapshotStore, DIRECTION_STORAGE_KEY } from "./direction-snapshot.mjs"
 import { createWorkspaceStore, WORKSPACE_STORAGE_KEY } from "./paper-library-storage.mjs"
 import { createP02WorkflowStore, P02_WORKFLOW_STORAGE_KEY } from "./p02-workflow.mjs"
@@ -102,6 +103,6 @@ export async function initializeResearchHome({ document: doc, window: win, stora
 
 if (typeof document !== "undefined" && document.getElementById("home-continue")) {
   let storage
-  try { storage = window.localStorage } catch { storage = undefined }
+  try { storage = openWorkbenchStorage({ windowRef: window }) } catch { storage = undefined }
   initializeResearchHome({ document, window, storage, fetchImpl: window.fetch.bind(window) })
 }

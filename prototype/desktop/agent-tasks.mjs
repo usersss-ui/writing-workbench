@@ -1,3 +1,4 @@
+import { openWorkbenchStorage } from "./workbench-storage.mjs"
 import {
   TASK_INPUT_STORAGE_KEY,
   buildTaskInputPreview,
@@ -179,9 +180,9 @@ export function renderAgentTaskPage({ document: documentRef, session }) {
 export async function initializeAgentTasks({
   document: documentRef,
   window: windowRef,
+  storage = safeBrowserStorage(windowRef),
   loadIndex = loadAgentTaskPaperIndex,
 } = {}) {
-  const storage = safeBrowserStorage(windowRef)
   let paperIndex
   try {
     paperIndex = await loadIndex()
@@ -231,5 +232,5 @@ export async function initializeAgentTasks({
 }
 
 if (typeof document !== "undefined" && typeof window !== "undefined") {
-  initializeAgentTasks({ document, window })
+  initializeAgentTasks({ document, window, storage: openWorkbenchStorage({ windowRef: window }) })
 }

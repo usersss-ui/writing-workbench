@@ -51,6 +51,7 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "paper-library-storage.mjs",
   "paper-user-tags.mjs",
   "candidate-storage.mjs",
+  "workbench-storage.mjs",
   "discovery.mjs",
   "discovery-query-plan.mjs",
   "institution-access.mjs",
