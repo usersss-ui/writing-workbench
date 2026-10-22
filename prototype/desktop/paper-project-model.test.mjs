@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { buildProjectModel, sectionModels, sourceLinks, splitValues } from "./paper-project-model.mjs"
+import { ROOT_GROUP, buildProjectModel, defaultProjectPath, groupProjectFiles, resolveProjectLink, sectionModels, sourceLinks, splitValues, tableFilesByPath } from "./paper-project-model.mjs"
 
 const PAPERS = [
   {
@@ -102,4 +102,39 @@ test("mapping rows become per-section models", () => {
   assert.deepEqual(section.otherExamples, [])
   assert.deepEqual([section.tolerance, section.length, section.mode], ["一句带过", "600字", "整节"])
   assert.deepEqual(sectionModels({ tables: [] }), [])
+})
+
+test("files group by workflow folder in skill order, root first, others last", () => {
+  const project = { files: [
+    { path: "code/run.py" }, { path: "审稿/修改说明.md" }, { path: "README.md" }, { path: "01_稿件/引言草稿.md" },
+    { path: "相关论文/文献清单.md" }, { path: "相关论文/[01] A.pdf" }, { path: "相关论文/[02] B.pdf" }, { path: "02_规划与记录/讨论记录.md" },
+  ] }
+  assert.deepEqual(groupProjectFiles(project), [
+    { name: ROOT_GROUP, markdown: ["README.md"], otherCount: 0 },
+    { name: "01_稿件", markdown: ["01_稿件/引言草稿.md"], otherCount: 0 },
+    { name: "02_规划与记录", markdown: ["02_规划与记录/讨论记录.md"], otherCount: 0 },
+    { name: "审稿", markdown: ["审稿/修改说明.md"], otherCount: 0 },
+    { name: "相关论文", markdown: ["相关论文/文献清单.md"], otherCount: 2 },
+    { name: "code", markdown: [], otherCount: 1 },
+  ])
+})
+
+test("the reader opens a parsed table first, then README, then the first Markdown file", () => {
+  const parsed = { files: [{ path: "README.md" }], tables: [{ path: "相关论文/文献清单.md", status: "ok", tables: [{ status: "ok" }] }], reviews: [] }
+  assert.equal(defaultProjectPath(parsed), "相关论文/文献清单.md")
+  const legacy = { files: [{ path: "README.md" }, { path: "01_稿件/引言草稿.md" }], tables: [{ path: "相关论文/文献清单.md", status: "partial", tables: [{ status: "missing" }] }], reviews: [] }
+  assert.equal(defaultProjectPath(legacy), "README.md")
+  assert.equal(defaultProjectPath({ files: [{ path: "01_稿件/引言草稿.md" }], tables: [], reviews: [] }), "01_稿件/引言草稿.md")
+  assert.equal(defaultProjectPath({ files: [], tables: [], reviews: [] }), null)
+  assert.deepEqual([...tableFilesByPath(legacy).keys()], ["相关论文/文献清单.md"])
+})
+
+test("Markdown links resolve to project files relative to the file they are in", () => {
+  assert.equal(resolveProjectLink("README.md", "01_稿件/引言草稿.md"), "01_稿件/引言草稿.md")
+  assert.equal(resolveProjectLink("相关论文/文献清单.md", "../02_规划与记录/引言框架.md"), "02_规划与记录/引言框架.md")
+  assert.equal(resolveProjectLink("README.md", "./02_%E8%A7%84%E5%88%92.md#part"), "02_规划.md")
+  assert.equal(resolveProjectLink("README.md", "01_稿件/"), "01_稿件")
+  for (const target of ["https://example.org/a.md", "../outside.md", "/etc/passwd", "#section", "mailto:a@b.c"]) {
+    assert.equal(resolveProjectLink("README.md", target), null, target)
+  }
 })

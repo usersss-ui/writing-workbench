@@ -1,13 +1,42 @@
 .pp-shell { grid-template-columns: 242px minmax(640px, 1fr) 320px; }
-.pp-main { padding-bottom: 48px; }
+.pp-main { padding-bottom: 32px; }
 
 .pp-project-picker { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 .pp-project-picker select { min-width: 200px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: white; color: var(--ink); }
 
-.pp-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-.pp-jump a { padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-solid); color: var(--blue-deep); font-size: 12px; font-weight: 600; }
+/* Fixed-header files collapse into one row; missing ones stay grey and inert. */
+.pp-table-status { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.pp-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-solid); font: inherit; font-size: 12px; color: var(--ink-soft); }
+.pp-chip strong { color: var(--ink); font-weight: 650; }
+.pp-chip span { font-size: 11px; }
+button.pp-chip { cursor: pointer; }
+button.pp-chip:hover { border-color: rgba(22,119,255,.4); }
+.pp-chip--ok span { color: var(--green); }
+.pp-chip--partial span, .pp-chip--unreadable span { color: var(--amber-deep); }
+.pp-chip--missing { background: var(--surface-subtle); border-style: dashed; }
+.pp-chip--missing strong { color: var(--muted); font-weight: 500; }
+.pp-chip--missing span { color: var(--muted); }
 
-.pp-section .section-heading { align-items: flex-start; }
+.pp-browser { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 16px; }
+.pp-tree { position: sticky; top: 0; max-height: calc(100vh - 120px); overflow-y: auto; padding: 10px 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); font-size: 12px; }
+.pp-tree-group + .pp-tree-group { margin-top: 4px; }
+.pp-tree-group > summary { display: flex; justify-content: space-between; gap: 8px; padding: 5px 6px; border-radius: 7px; color: var(--ink); font-weight: 700; cursor: pointer; list-style-position: inside; }
+.pp-tree-group > summary:hover { background: var(--surface-subtle); }
+.pp-tree-count { color: var(--muted); font-weight: 500; }
+.pp-tree ul { margin: 2px 0 6px; padding: 0 0 0 12px; list-style: none; }
+.pp-tree-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; padding: 4px 6px; border: 0; border-radius: 7px; background: none; color: var(--ink-soft); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.pp-tree-item:hover { background: var(--surface-subtle); color: var(--ink); }
+.pp-tree-item[aria-current="true"] { background: var(--blue-soft); color: var(--blue-deep); font-weight: 650; }
+.pp-tree-badge { flex: none; padding: 0 5px; border-radius: 5px; background: var(--green-soft); color: var(--green); font-size: 10px; font-weight: 700; }
+.pp-tree-note { margin: 4px 6px; color: var(--muted); font-size: 11px; }
+
+.pp-reader { min-width: 0; padding: 18px 22px 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); box-shadow: 0 8px 28px rgba(47,68,92,.055); }
+.pp-reader-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.pp-reader-head h2 { margin: 0; font-size: 18px; }
+.pp-reader-head .eyebrow { letter-spacing: 0; overflow-wrap: anywhere; }
+.pp-reader-actions { display: flex; flex: none; gap: 8px; }
+.pp-reader-body { min-width: 0; }
+
 .pp-table-title { margin: 18px 0 8px; font-size: 13px; }
 .pp-table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
 .pp-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.6; }
@@ -21,9 +50,21 @@
 .pp-ref--broken { background: #fdecec; color: #b42318; cursor: help; }
 
 .pp-muted { color: var(--muted); font-size: 12px; }
-.pp-warning { margin: 8px 0 0; padding: 8px 12px; border-radius: 9px; background: var(--amber-soft); color: var(--amber-deep); font-size: 12px; }
+.pp-warning { margin: 12px 0 0; padding: 8px 12px; border-radius: 9px; background: var(--amber-soft); color: var(--amber-deep); font-size: 12px; line-height: 1.6; }
 
-.pp-section-view { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line-strong); }
+.pp-markdown { margin-top: 6px; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.pp-markdown h1 { font-size: 20px; }
+.pp-markdown h2 { font-size: 17px; }
+.pp-markdown h3 { font-size: 15px; }
+.pp-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 12px; line-height: 1.6; }
+.pp-markdown th, .pp-markdown td { min-width: 5em; padding: 5px 8px; border: 1px solid var(--line); vertical-align: top; }
+.pp-inline-link { display: inline; padding: 0; border: 0; background: none; color: var(--blue-deep); font: inherit; text-decoration: underline; text-decoration-color: rgba(22,119,255,.35); text-underline-offset: 2px; cursor: pointer; }
+.pp-inline-link:hover { text-decoration-color: currentColor; }
+.pp-markdown pre { padding: 10px 12px; border-radius: 9px; background: var(--surface-subtle); overflow-x: auto; font-size: 12px; }
+.pp-markdown blockquote { margin: 10px 0; padding: 6px 12px; border-left: 3px solid var(--line-strong); color: var(--ink-soft); }
+.pp-markdown .math-display { overflow-x: auto; }
+
+.pp-section-view { margin-top: 20px; padding-top: 14px; border-top: 1px dashed var(--line-strong); }
 .pp-section-picker { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; }
 .pp-section-picker select { padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: white; }
 .pp-section-detail h4 { margin: 16px 0 8px; font-size: 12px; }
@@ -34,12 +75,4 @@
 
 .pp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pp-use-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.7; }
-
-.pp-file-list { columns: 2; margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.8; }
-.pp-file-link { padding: 0; border: 0; background: none; color: var(--blue-deep); font: inherit; text-align: left; cursor: pointer; }
-.pp-file-link:hover { text-decoration: underline; }
-.pp-file-body { font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
-.pp-file-body table { border-collapse: collapse; font-size: 12px; }
-.pp-file-body th, .pp-file-body td { padding: 5px 8px; border: 1px solid var(--line); }
-
 .pp-config-example { padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font-size: 12px; overflow-x: auto; }

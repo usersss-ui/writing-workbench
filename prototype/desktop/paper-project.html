@@ -70,16 +70,18 @@
             <p>保存后刷新本页即可，不需要重启服务。该文件不进 git，也不在公开包内。</p>
           </section>
 
-          <nav class="pp-jump" id="pp-jump" aria-label="页内跳转" hidden></nav>
-          <div id="pp-sections"></div>
+          <div class="pp-table-status" id="pp-table-status" aria-label="固定表头文件状态" hidden></div>
 
-          <section class="panel pp-file-view" id="pp-file-view" aria-labelledby="pp-file-title" hidden>
-            <div class="section-heading">
-              <div><p class="eyebrow">文件内容</p><h2 id="pp-file-title"></h2></div>
-              <button class="button button--secondary button--small" id="pp-file-close" type="button">关闭</button>
-            </div>
-            <div class="pp-file-body" id="pp-file-body"></div>
-          </section>
+          <div class="pp-browser" id="pp-browser" hidden>
+            <nav class="pp-tree" id="pp-tree" aria-label="项目文件"></nav>
+            <article class="pp-reader" aria-labelledby="pp-reader-title">
+              <header class="pp-reader-head">
+                <div><p class="eyebrow" id="pp-reader-path"></p><h2 id="pp-reader-title">选择一个文件</h2></div>
+                <div class="pp-reader-actions" id="pp-reader-actions"></div>
+              </header>
+              <div class="pp-reader-body" id="pp-reader-body" aria-live="polite"></div>
+            </article>
+          </div>
         </section>
 
         <aside class="inspector pp-inspector" aria-labelledby="pp-inspector-title">

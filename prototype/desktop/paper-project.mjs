@@ -1,10 +1,13 @@
 import { renderPreviewMath } from "./paper-math-renderer.mjs"
-import { buildProjectModel, sectionModels, segmentsText, sourceLinks } from "./paper-project-model.mjs"
+import { ROOT_GROUP, buildProjectModel, defaultProjectPath, groupProjectFiles, resolveProjectLink, sectionModels, segmentsText, sourceLinks, tableFilesByPath } from "./paper-project-model.mjs"
 
 const PROJECTS_ENDPOINT = "/api/v1/paper-projects"
 const INDEX_URL = "../../local_library_data/paper-index.json"
 const FILE_STATUS = Object.freeze({ ok: "已读取", partial: "部分可读", missing: "尚未生成", unreadable: "无法读取" })
 const TABLE_STATUS = Object.freeze({ missing: "缺少这张表", unparseable: "无法解析" })
+// The controlled renderer leaves Markdown links as text; the reader turns them
+// into in-project navigation, external links, or plain labels.
+const MARKDOWN_LINK = /\[([^\]\n]{1,200})\]\(([^)\s]{1,500})\)/gu
 const LIBRARY_STATUS = Object.freeze({
   confirmed: "论文库已有（DOI 一致）",
   code_hint: "论文库有同编号论文，未经 DOI 核验",
@@ -35,12 +38,13 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     title: $("#pp-title"),
     summary: $("#pp-summary"),
     empty: $("#pp-empty"),
-    jump: $("#pp-jump"),
-    sections: $("#pp-sections"),
-    fileView: $("#pp-file-view"),
-    fileTitle: $("#pp-file-title"),
-    fileBody: $("#pp-file-body"),
-    fileClose: $("#pp-file-close"),
+    tableStatus: $("#pp-table-status"),
+    browser: $("#pp-browser"),
+    tree: $("#pp-tree"),
+    readerPath: $("#pp-reader-path"),
+    readerTitle: $("#pp-reader-title"),
+    readerActions: $("#pp-reader-actions"),
+    readerBody: $("#pp-reader-body"),
     inspectorTitle: $("#pp-inspector-title"),
     inspectorBody: $("#pp-inspector-body"),
   }
@@ -138,60 +142,164 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     return box
   }
 
-  function fileSection(file) {
-    const section = element(documentRef, "section", "panel pp-section")
-    section.id = `pp-${file.key}-${file.path.replace(/[^A-Za-z0-9]+/gu, "-")}`
-    const heading = element(documentRef, "div", "section-heading")
-    const titleBox = element(documentRef, "div")
-    titleBox.append(element(documentRef, "p", "eyebrow", file.path), element(documentRef, "h2", null, file.title))
-    const status = element(documentRef, "span", `status ${file.status === "ok" ? "status--published" : "status--warning"}`, FILE_STATUS[file.status] ?? file.status)
-    heading.append(titleBox, status)
-    section.append(heading)
-    if (file.status === "missing" || file.status === "unreadable") {
-      section.append(element(documentRef, "p", "pp-muted", file.status === "missing" ? `目录中还没有 ${file.path}。` : `${file.path} 不是有效的 UTF-8 文本或超过大小上限。`))
-      return section
+  function statusChip(file) {
+    const available = file.status !== "missing"
+    const chip = element(documentRef, available ? "button" : "span", `pp-chip pp-chip--${file.status}`)
+    const label = file.status === "partial" && !file.tables.some((table) => table.status === "ok") ? "未按固定表头" : FILE_STATUS[file.status] ?? file.status
+    chip.append(element(documentRef, "strong", null, file.title), element(documentRef, "span", null, label))
+    if (available) {
+      chip.type = "button"
+      chip.addEventListener("click", () => openPath(file.path))
+    } else {
+      chip.title = `目录中还没有 ${file.path}`
     }
+    return chip
+  }
+
+  function renderTree() {
+    ui.tree.replaceChildren()
+    const tableFiles = tableFilesByPath(current)
+    for (const group of groupProjectFiles(current)) {
+      const details = element(documentRef, "details", "pp-tree-group")
+      details.open = group.markdown.length > 0 && group.markdown.length <= 40
+      const summary = element(documentRef, "summary")
+      summary.append(element(documentRef, "span", null, group.name), element(documentRef, "span", "pp-tree-count", String(group.markdown.length + group.otherCount)))
+      details.append(summary)
+      const list = element(documentRef, "ul")
+      for (const path of group.markdown) {
+        const item = element(documentRef, "li")
+        const button = element(documentRef, "button", "pp-tree-item", group.name === ROOT_GROUP ? path : path.slice(group.name.length + 1))
+        button.type = "button"
+        button.dataset.path = path
+        button.title = path
+        if (tableFiles.has(path)) button.append(element(documentRef, "span", "pp-tree-badge", "表"))
+        button.addEventListener("click", () => openPath(path))
+        item.append(button)
+        list.append(item)
+      }
+      if (group.otherCount) list.append(element(documentRef, "li", "pp-tree-note", `另有 ${group.otherCount} 个非 Markdown 文件`))
+      details.append(list)
+      ui.tree.append(details)
+    }
+    for (const name of current.collapsed_directories ?? []) ui.tree.append(element(documentRef, "p", "pp-tree-note", `${name}/ 未展开：不属于写作流程`))
+    if (current.skipped_links > 0) ui.tree.append(element(documentRef, "p", "pp-tree-note", `跳过了 ${current.skipped_links} 个符号链接`))
+    if (current.truncated) ui.tree.append(element(documentRef, "p", "pp-tree-note", "文件过多，只列出前 2000 个"))
+    if (current.files.length === 0) ui.tree.append(element(documentRef, "p", "pp-tree-note", "目录是空的。"))
+  }
+
+  function setReader(path, title) {
+    // After scrolling deep into a long file, bring the next file's title back into view.
+    const main = ui.browser.closest(".main-column")
+    const headTop = ui.readerTitle.getBoundingClientRect().top
+    const mainTop = main?.getBoundingClientRect().top ?? 0
+    if (main && headTop < mainTop) main.scrollTop += headTop - mainTop - 60
+    ui.readerPath.textContent = path
+    ui.readerTitle.textContent = title
+    ui.readerActions.replaceChildren()
+    ui.readerBody.replaceChildren()
+    for (const button of ui.tree.querySelectorAll(".pp-tree-item")) {
+      if (button.dataset.path === path) button.setAttribute("aria-current", "true")
+      else button.removeAttribute("aria-current")
+    }
+    const url = new URL(windowRef.location.href)
+    url.searchParams.set("project", current.project_id)
+    url.searchParams.set("file", path)
+    windowRef.history.replaceState(null, "", url)
+  }
+
+  function readerButton(label, onClick) {
+    const button = element(documentRef, "button", "button button--secondary button--small", label)
+    button.type = "button"
+    button.addEventListener("click", onClick)
+    ui.readerActions.append(button)
+  }
+
+  function showTables(file) {
+    setReader(file.path, file.title)
+    readerButton("按原文显示", () => showMarkdown(file.path, { title: file.title, tableFile: file }))
     for (const table of file.tables) {
-      section.append(element(documentRef, "h3", "pp-table-title", table.heading))
-      if (table.status === "ok") section.append(tableNode(table))
-      else section.append(element(documentRef, "p", "pp-warning", `${TABLE_STATUS[table.status] ?? table.status}${table.reason ? `：${table.reason}` : `：文件中没有“## ${table.heading}”`}`))
+      ui.readerBody.append(element(documentRef, "h3", "pp-table-title", table.heading))
+      if (table.status === "ok") ui.readerBody.append(tableNode(table))
+      else ui.readerBody.append(element(documentRef, "p", "pp-warning", `${TABLE_STATUS[table.status] ?? table.status}${table.reason ? `：${table.reason}` : `：文件中没有“## ${table.heading}”`}`))
     }
     if (file.key === "mapping") {
       const viewer = sectionViewer()
-      if (viewer) section.append(viewer)
+      if (viewer) ui.readerBody.append(viewer)
     }
-    return section
   }
 
-  function filesSection() {
-    const section = element(documentRef, "section", "panel pp-section")
-    section.id = "pp-files"
-    const heading = element(documentRef, "div", "section-heading")
-    const titleBox = element(documentRef, "div")
-    titleBox.append(element(documentRef, "p", "eyebrow", "目录"), element(documentRef, "h2", null, "全部文件"))
-    heading.append(titleBox)
-    section.append(heading)
-    const notes = []
-    if (current.collapsed_directories?.length) notes.push(`未展开 ${current.collapsed_directories.map((name) => `${name}/`).join("、")}：不属于写作流程的目录只显示名称`)
-    if (current.skipped_links > 0) notes.push(`跳过了 ${current.skipped_links} 个符号链接`)
-    if (current.truncated) notes.push("文件过多，只列出前 2000 个")
-    if (notes.length) section.append(element(documentRef, "p", "pp-muted", `${notes.join("；")}。`))
-    const list = element(documentRef, "ul", "pp-file-list")
-    for (const file of current.files) {
-      const item = element(documentRef, "li")
-      if (file.path.endsWith(".md")) {
-        const button = element(documentRef, "button", "pp-file-link", file.path)
-        button.type = "button"
-        button.addEventListener("click", () => showFile(file.path))
-        item.append(button)
-      } else {
-        item.append(element(documentRef, "span", "pp-muted", file.path))
-      }
-      list.append(item)
+  function linkifyMarkdown(root, fromPath) {
+    const available = new Set(current.files.map((file) => file.path))
+    const walker = documentRef.createTreeWalker(root, windowRef.NodeFilter?.SHOW_TEXT ?? 4)
+    const nodes = []
+    while (walker.nextNode()) {
+      if (!walker.currentNode.parentElement?.closest("code, pre, .math-inline, .math-display")) nodes.push(walker.currentNode)
     }
-    if (current.files.length === 0) list.append(element(documentRef, "li", "pp-muted", "目录是空的。"))
-    section.append(list)
-    return section
+    for (const node of nodes) {
+      const text = node.nodeValue
+      const matches = [...text.matchAll(MARKDOWN_LINK)]
+      if (matches.length === 0) continue
+      const fragment = documentRef.createDocumentFragment()
+      let cursor = 0
+      for (const match of matches) {
+        const [whole, label, target] = match
+        fragment.append(text.slice(cursor, match.index))
+        const resolved = resolveProjectLink(fromPath, target)
+        if (resolved?.endsWith(".md") && available.has(resolved)) {
+          const button = element(documentRef, "button", "pp-inline-link", label)
+          button.type = "button"
+          button.title = resolved
+          button.addEventListener("click", () => openPath(resolved))
+          fragment.append(button)
+        } else if (/^https?:\/\//iu.test(target)) {
+          const link = element(documentRef, "a", "pp-inline-link", label)
+          link.href = target
+          link.target = "_blank"
+          link.rel = "noopener noreferrer"
+          fragment.append(link)
+        } else {
+          const plain = element(documentRef, "span", null, label)
+          plain.title = target
+          fragment.append(plain)
+        }
+        cursor = match.index + whole.length
+      }
+      fragment.append(text.slice(cursor))
+      node.replaceWith(fragment)
+    }
+  }
+
+  async function showMarkdown(path, { title = path.split("/").pop(), tableFile = null, notice = null } = {}) {
+    setReader(path, title)
+    if (tableFile?.tables.some((table) => table.status === "ok")) readerButton("按表格显示", () => showTables(tableFile))
+    if (notice) ui.readerBody.append(element(documentRef, "p", "pp-warning", notice))
+    const body = element(documentRef, "div", "pp-markdown")
+    body.append(element(documentRef, "p", "pp-muted", "正在读取…"))
+    ui.readerBody.append(body)
+    try {
+      const file = await fetchJson(fetchImpl, `${PROJECTS_ENDPOINT}/${encodeURIComponent(current.project_id)}/files/${encodeURIComponent(path)}`)
+      if (ui.readerPath.textContent !== path) return
+      // The server renders through the same controlled Markdown renderer as note previews.
+      const template = documentRef.createElement("template")
+      template.innerHTML = file.html
+      body.replaceChildren(template.content)
+      linkifyMarkdown(body, path)
+      renderPreviewMath(body)
+    } catch (error) {
+      body.replaceChildren(element(documentRef, "p", "pp-warning", error.message))
+    }
+  }
+
+  function openPath(path) {
+    const file = tableFilesByPath(current).get(path)
+    if (!file) { showMarkdown(path); return }
+    if (file.tables.some((table) => table.status === "ok")) { showTables(file); return }
+    const expected = file.tables.map((table) => `“## ${table.heading}”`).join("、")
+    showMarkdown(path, {
+      title: file.title,
+      tableFile: file,
+      notice: file.status === "unreadable" ? null : `这个文件还没按固定表头组织（缺少或无法解析 ${expected}），下面按原文显示，其中的出处不会变成链接。`,
+    })
   }
 
   function showReference({ code, location }) {
@@ -255,46 +363,26 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     ui.inspectorBody.append(usage)
   }
 
-  async function showFile(path) {
-    ui.fileView.hidden = false
-    ui.fileTitle.textContent = path
-    ui.fileBody.replaceChildren(element(documentRef, "p", "pp-muted", "正在读取…"))
-    ui.fileView.scrollIntoView({ block: "start" })
-    try {
-      const file = await fetchJson(fetchImpl, `${PROJECTS_ENDPOINT}/${encodeURIComponent(current.project_id)}/files/${encodeURIComponent(path)}`)
-      // The server renders through the same controlled Markdown renderer as note previews.
-      const template = documentRef.createElement("template")
-      template.innerHTML = file.html
-      ui.fileBody.replaceChildren(template.content)
-      renderPreviewMath(ui.fileBody)
-    } catch (error) {
-      ui.fileBody.replaceChildren(element(documentRef, "p", "pp-warning", error.message))
-    }
-  }
-
   function render() {
     ui.title.textContent = current.project_id
-    ui.sections.replaceChildren()
-    ui.jump.replaceChildren()
-    ui.fileView.hidden = true
-    const files = current.layout ? [...current.tables, ...current.reviews] : []
     const verified = current.references.filter((row) => row["核实"]?.startsWith("已核实")).length
     const local = [...model.references.values()].filter((entry) => entry.library.status === "confirmed").length
     ui.summary.textContent = current.layout
       ? `文献 ${current.references.length} 篇（已核实 ${verified}，论文库已有 ${local}）· 稿件 ${current.drafts.length} 个文件 · 目录共 ${current.files.length} 个文件`
-      : `这个目录未声明 paper-writing-workflow 布局，只列出文件，不解析表格。`
-    for (const file of files) {
-      const section = fileSection(file)
-      ui.sections.append(section)
-      const link = element(documentRef, "a", null, file.title)
-      link.href = `#${section.id}`
-      ui.jump.append(link)
+      : "这个目录未声明 paper-writing-workflow 布局，只列出文件，不解析表格。"
+    ui.tableStatus.replaceChildren()
+    for (const file of current.layout ? [...current.tables, ...current.reviews] : []) ui.tableStatus.append(statusChip(file))
+    ui.tableStatus.hidden = !current.layout
+    renderTree()
+    ui.browser.hidden = false
+    const requested = new URLSearchParams(windowRef.location?.search ?? "").get("file")
+    const available = new Set(current.files.map((file) => file.path))
+    const initial = requested?.endsWith(".md") && available.has(requested) ? requested : defaultProjectPath(current)
+    if (initial) openPath(initial)
+    else {
+      ui.readerTitle.textContent = "没有可阅读的 Markdown 文件"
+      ui.readerPath.textContent = ""
     }
-    ui.sections.append(filesSection())
-    const filesLink = element(documentRef, "a", null, "全部文件")
-    filesLink.href = "#pp-files"
-    ui.jump.append(filesLink)
-    ui.jump.hidden = false
   }
 
   async function loadProject(projectId) {
@@ -309,8 +397,8 @@ export function initializePaperProject({ document: documentRef, window: windowRe
       render()
     } catch (error) {
       current = null
-      ui.sections.replaceChildren()
-      ui.jump.hidden = true
+      ui.browser.hidden = true
+      ui.tableStatus.hidden = true
       ui.summary.textContent = error.message
     }
   }
@@ -340,10 +428,10 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     ui.select.addEventListener("change", () => {
       const url = new URL(windowRef.location.href)
       url.searchParams.set("project", ui.select.value)
+      url.searchParams.delete("file")
       windowRef.history.replaceState(null, "", url)
       loadProject(ui.select.value)
     })
-    ui.fileClose.addEventListener("click", () => { ui.fileView.hidden = true })
     await loadProject(initial.project_id)
   }
 

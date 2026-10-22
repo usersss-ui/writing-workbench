@@ -120,3 +120,56 @@ export function sectionModels(project) {
     mode: segmentsText(row[column("起草方式")]),
   }))
 }
+
+const WORKFLOW_ORDER = Object.freeze(["00_课题", "01_稿件", "02_规划与记录", "03_范文对照", "审稿", "相关论文", "试转", "latex", "figures", "归档"])
+export const ROOT_GROUP = "项目根目录"
+
+// Groups the file list by top-level folder, workflow folders first in their
+// skill order. Only Markdown files are opened in the reader; others are counted.
+export function groupProjectFiles(project) {
+  const groups = new Map()
+  for (const file of project.files ?? []) {
+    const slash = file.path.indexOf("/")
+    const name = slash === -1 ? ROOT_GROUP : file.path.slice(0, slash)
+    const group = groups.get(name) ?? { name, markdown: [], otherCount: 0 }
+    if (file.path.endsWith(".md")) group.markdown.push(file.path)
+    else group.otherCount += 1
+    groups.set(name, group)
+  }
+  const rank = (name) => name === ROOT_GROUP ? -1 : WORKFLOW_ORDER.includes(name) ? WORKFLOW_ORDER.indexOf(name) : WORKFLOW_ORDER.length
+  return [...groups.values()].sort((left, right) => rank(left.name) - rank(right.name) || left.name.localeCompare(right.name, "zh-CN"))
+}
+
+// The table files the reader can show as parsed tables, keyed by path.
+export function tableFilesByPath(project) {
+  return new Map([...(project.tables ?? []), ...(project.reviews ?? [])]
+    .filter((file) => file.status !== "missing")
+    .map((file) => [file.path, file]))
+}
+
+export function defaultProjectPath(project) {
+  const paths = new Set((project.files ?? []).map((file) => file.path))
+  const table = [...tableFilesByPath(project).values()].find((file) => file.tables.some((entry) => entry.status === "ok"))
+  if (table) return table.path
+  if (paths.has("README.md")) return "README.md"
+  return groupProjectFiles(project).find((group) => group.markdown.length)?.markdown[0] ?? null
+}
+
+// Resolves a Markdown link target written inside `fromPath` to another
+// project-relative path. External, anchor-only and escaping targets give null.
+export function resolveProjectLink(fromPath, target) {
+  let decoded
+  try { decoded = decodeURI(String(target ?? "").split("#")[0]) } catch { return null }
+  if (!decoded || /^[a-z][a-z0-9+.-]*:/iu.test(decoded) || decoded.startsWith("/") || decoded.includes("\\")) return null
+  const parts = String(fromPath).split("/").slice(0, -1)
+  for (const part of decoded.split("/")) {
+    if (part === "" || part === ".") continue
+    if (part === "..") {
+      if (parts.length === 0) return null
+      parts.pop()
+    } else {
+      parts.push(part)
+    }
+  }
+  return parts.length ? parts.join("/") : null
+}
