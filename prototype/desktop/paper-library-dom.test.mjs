@@ -1285,13 +1285,12 @@ test("library template embeds its favicon without another local or HTTP request"
   assert.equal(favicon.includes(`${["fi", "le"].join("")}:`), false)
 })
 
-test("library template links only the approved runtime assets and three prototype destinations", () => {
+test("library template links only the approved runtime assets and two prototype destinations", () => {
   assert.match(html, /href="\.\/assets\/styles\.css\?v=[a-z0-9._-]+"/u)
   assert.match(html, /src="\.\/assets\/library\.mjs"/u)
   for (const destination of [
     "../../prototype/desktop/index.html",
-    "../../prototype/desktop/directions.html",
-    "../../prototype/desktop/p02.html",
+    "../../prototype/desktop/paper-project.html",
   ]) assert.match(html, new RegExp(`href=["']${destination.replaceAll(".", "\\.")}["']`, "u"))
 })
 
@@ -1504,11 +1503,12 @@ test("window bar exposes inert status ornaments instead of dead buttons", () => 
   assert.match(html, /<span class="avatar-button"[^>]*aria-label="当前用户：杨"/u)
 })
 
-test("论文库侧栏保留学位论文入口", () => {
+test("论文库侧栏标记论文库为当前页，不再列出学位论文占位入口", () => {
   assert.match(
     html,
-    /<a class="nav-item" href="\.\.\/\.\.\/prototype\/desktop\/index\.html#thesis"><span aria-hidden="true">◇<\/span><span>学位论文<\/span><\/a>/u,
+    /<a class="nav-item nav-item--active" href="\.\/library\.html" aria-current="page"><span aria-hidden="true">▤<\/span><span>论文库<\/span><\/a>/u,
   )
+  assert.doesNotMatch(html, /index\.html#thesis/u)
 })
 
 test("template keeps four material-progress groups and exposes exactly five facet entries", () => {

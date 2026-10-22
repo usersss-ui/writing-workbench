@@ -2077,3 +2077,10 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
   .state-transfer-page .state-transfer-apply { grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); }
   .state-transfer-page .state-transfer-apply .button { grid-column: 2; justify-self: end; }
 }
+
+.home-project-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.home-project { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-subtle); }
+.home-project strong { font-size: 15px; }
+.home-project-unavailable { color: var(--amber-deep); font-size: 12px; }
+.home-project-empty { color: var(--muted); font-size: 13px; }
+.home-library-links { display: flex; gap: 16px; }

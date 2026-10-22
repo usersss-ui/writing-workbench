@@ -32,7 +32,7 @@ function createStaticServer() {
   })
 }
 
-test("研究首页与方向探索页可以通过公开链接互相到达", async (context) => {
+test("研究首页不再链接已隐藏的方向页，方向页仍可直接打开并能返回首页", async (context) => {
   const server = createStaticServer()
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   context.after(() => server.close())
@@ -43,7 +43,7 @@ test("研究首页与方向探索页可以通过公开链接互相到达", async
   const homeResponse = await fetch(`${baseUrl}/`)
   const homeHtml = await homeResponse.text()
   assert.equal(homeResponse.status, 200)
-  assert.match(homeHtml, /href="\.\/directions\.html"/)
+  assert.doesNotMatch(homeHtml, /href="\.\/directions\.html"/)
   assert.match(homeHtml, /id="global-search"/)
   assert.doesNotMatch(homeHtml, /aria-labelledby="search-dialog-title"/)
 
@@ -85,8 +85,8 @@ test("四个检索入口进入真实论文发现页，不再保存假的检索�
     fetch(`${baseUrl}/prototype/desktop/library.template.html`).then((response) => response.text()),
   ])
 
-  assert.match(homeHtml, /id="home-online-search" href="\.\.\/\.\.\/local_library_output\/desktop\/discovery\.html"/u)
-  assert.match(homeHtml, /id="home-local-search" href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html"/u)
+  assert.match(homeHtml, /href="\.\.\/\.\.\/local_library_output\/desktop\/discovery\.html">论文发现 →<\/a>/u)
+  assert.match(homeHtml, /href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html">打开论文库 →<\/a>/u)
   for (const html of [directionsHtml, p02Html]) {
     assert.match(
       html,
@@ -116,7 +116,10 @@ test("桌面页不会把尚未实现的装饰和状态继续伪装成可点击�
     assert.doesNotMatch(html, /<button[^>]*aria-label="(?:通知|用户菜单)"/u)
   }
   const [homeHtml, , p02Html] = pages
-  assert.match(homeHtml, /id="home-continue" href="\.\/directions\.html"/u)
+  assert.match(homeHtml, /id="home-projects"/u)
+  for (const hidden of ["directions", "p02", "p02-writing", "agent-tasks", "submission-project"]) {
+    assert.doesNotMatch(homeHtml, new RegExp(`href="\\./${hidden}\\.html`, "u"), hidden)
+  }
   assert.doesNotMatch(homeHtml, /<button[^>]*>查看全部项目<\/button>|<button[^>]*>查看章节映射 →<\/button>/u)
   assert.doesNotMatch(homeHtml, /<button[^>]*aria-label="课题设置"/u)
   assert.doesNotMatch(p02Html, /<button[^>]*aria-label="课题设置"/u)
@@ -263,23 +266,34 @@ test('带入方向后原生表单传递 OR 分组，手改词清除旧 axes', as
   assert.equal(fixture.writeCount(), 0)
 })
 
-test("论文发现与论文库生成模板都保留学位论文导航", async (context) => {
-  const server = createStaticServer()
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
-  context.after(() => server.close())
-  const address = server.address()
-  const baseUrl = `http://127.0.0.1:${address.port}/prototype/desktop`
-
-  const [discoveryHtml, libraryHtml] = await Promise.all([
-    fetch(`${baseUrl}/discovery.template.html`).then((response) => response.text()),
-    fetch(`${baseUrl}/library.template.html`).then((response) => response.text()),
-  ])
-
-  for (const html of [discoveryHtml, libraryHtml]) {
-    assert.match(
-      html,
-      /<a class="nav-item" href="\.\.\/\.\.\/prototype\/desktop\/index\.html#thesis"><span aria-hidden="true">◇<\/span><span>学位论文<\/span><\/a>/u,
-    )
+test("八个带侧栏的页面共用四项主导航，更多工具只留备份与恢复", async () => {
+  const pages = [
+    ["index.html", "./", "../../local_library_output/desktop/", "./index.html"],
+    ["paper-project.html", "./", "../../local_library_output/desktop/", "./paper-project.html"],
+    ["directions.html", "./", "../../local_library_output/desktop/", null],
+    ["p02.html", "./", "../../local_library_output/desktop/", null],
+    ["p02-writing.html", "./", "../../local_library_output/desktop/", null],
+    ["agent-tasks.html", "./", "../../local_library_output/desktop/", null],
+    ["library.template.html", "../../prototype/desktop/", "./", "./library.html"],
+    ["discovery.template.html", "../../prototype/desktop/", "./", "./discovery.html"],
+  ]
+  for (const [name, prototype, output, active] of pages) {
+    const html = await readFile(path.join(workspaceRoot, "prototype/desktop", name), "utf8")
+    const nav = html.match(/<nav class="primary-nav"[^>]*>([\s\S]*?)<\/nav>/u)?.[1]
+    assert.ok(nav, name)
+    const [main, more] = nav.split(/<details class="nav-more"[^>]*>/u)
+    const links = [...main.matchAll(/<a class="nav-item[^"]*" href="([^"]+)"[^>]*>[\s\S]*?<span>([^<]+)<\/span><\/a>/gu)].map((match) => [match[1], match[2]])
+    assert.deepEqual(links, [
+      [`${prototype}index.html`, "研究首页"],
+      [`${prototype}paper-project.html`, "论文项目"],
+      [`${output}library.html`, "论文库"],
+      [`${output}discovery.html`, "论文发现"],
+    ], name)
+    const activeLinks = [...main.matchAll(/<a class="nav-item nav-item--active" href="([^"]+)"/gu)].map((match) => match[1])
+    assert.deepEqual(activeLinks, active ? [active] : [], name)
+    const moreLinks = [...more.matchAll(/<a class="nav-item" href="([^"#][^"]*)"/gu)].map((match) => match[1])
+    assert.deepEqual(moreLinks, [`${output}state-transfer.html`], name)
+    assert.doesNotMatch(nav, /directions\.html|p02\.html|p02-writing\.html|agent-tasks\.html|#thesis/u, name)
   }
 })
 
@@ -306,7 +320,7 @@ test("所有主工作台页面内嵌 data favicon，不触发未授权的 favico
   }
 })
 
-test("研究任务输入页从五个工作台表面可达且方向页公开显式保存状态", async (context) => {
+test("研究任务输入页不在导航中但仍可直接打开，方向页公开显式保存状态", async (context) => {
   const server = createStaticServer()
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   context.after(() => server.close())
@@ -323,19 +337,15 @@ test("研究任务输入页从五个工作台表面可达且方向页公开显�
   ])
   const agentHtml = await agentResponse.text()
 
-  for (const html of [homeHtml, directionsHtml, p02Html]) assert.match(html, /href="\.\/agent-tasks\.html"/u)
-  for (const html of [libraryHtml, discoveryHtml]) {
-    assert.match(html, /href="\.\.\/\.\.\/prototype\/desktop\/agent-tasks\.html"/u)
-  }
+  for (const html of [homeHtml, directionsHtml, p02Html, libraryHtml, discoveryHtml]) assert.doesNotMatch(html, /agent-tasks\.html/u)
   assert.equal(agentResponse.status, 200)
   assert.match(agentHtml, /研究任务输入/u)
-  assert.match(agentHtml, /href="\.\/directions\.html"/u)
   assert.match(agentHtml, /href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html"/u)
   assert.match(directionsHtml, /id="direction-save-state"/u)
   assert.match(directionsHtml, /id="direction-save-axes"/u)
 })
 
-test("P02 工作台从首页可达并区分算法材料与理论结果", async (context) => {
+test("P02 工作台不在首页和导航中但仍可直接打开，并区分算法材料与理论结果", async (context) => {
   const server = createStaticServer()
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   context.after(() => server.close())
@@ -346,8 +356,7 @@ test("P02 工作台从首页可达并区分算法材料与理论结果", async (
   const homeResponse = await fetch(`${baseUrl}/`)
   const homeHtml = await homeResponse.text()
   assert.equal(homeResponse.status, 200)
-  assert.match(homeHtml, /href="\.\/p02\.html"/)
-  assert.match(homeHtml, /理论待系统核验/)
+  assert.doesNotMatch(homeHtml, /href="\.\/p02\.html"/)
   assert.doesNotMatch(homeHtml, /理论 62%/)
   assert.doesNotMatch(homeHtml, /引理 3\.2/)
 

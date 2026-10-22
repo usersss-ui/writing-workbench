@@ -289,7 +289,7 @@ def verify_discovery_viewport(
         ensure(network.institution_requests == 1, "institution_request_count")
 
         with page.expect_navigation(wait_until="networkidle"):
-            page.get_by_role("link", name="分析与笔记", exact=True).click()
+            page.get_by_role("link", name="论文库", exact=True).click()
         ensure(page.url == f"{origin}/local_library_output/desktop/library.html", "discovery_navigation")
         ensure(page.locator("#library-page-title").inner_text().strip() == "本地论文 · 分析与笔记", "discovery_navigation_target")
         assert_no_document_overflow(page, "discovery_navigation_overflow")

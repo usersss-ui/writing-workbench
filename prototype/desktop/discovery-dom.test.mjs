@@ -68,11 +68,12 @@ test("论文发现页面是中文桌面工作台，并包含可访问的双模�
   assert.doesNotMatch(template, /<iframe|<embed|<object/u)
 })
 
-test("论文发现页保留完整研究流程导航并使用稳定的论文库图标", () => {
+test("论文发现页使用四项主导航并使用稳定的论文库图标", () => {
   assert.match(
     template,
-    /<a class="nav-item" href="\.\.\/\.\.\/prototype\/desktop\/index\.html#thesis"><span aria-hidden="true">◇<\/span><span>学位论文<\/span><\/a>/u,
+    /<a class="nav-item nav-item--active" href="\.\/discovery\.html" aria-current="page"><span aria-hidden="true">⌕<\/span><span>论文发现<\/span><\/a>/u,
   )
+  assert.doesNotMatch(template, /index\.html#thesis/u)
   const libraryAction = template.match(
     /<a class="icon-button" href="\.\/library\.html" aria-label="打开论文库">([\s\S]*?)<\/a>/u,
   )?.[1]

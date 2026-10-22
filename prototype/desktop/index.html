@@ -7,7 +7,7 @@
       name="description"
       content="桌面端学术研究工作台：从研究方向、论文阅读和仿真复现推进到个人论文与学位论文。"
     />
-    <title>研究首页 · 从找论文到写论文</title>
+    <title>研究首页 · 学术研究工作台</title>
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231677ff'/%3E%3Cpath d='M18 47V17h15c8 0 13 4 13 11 0 5-3 9-8 10l10 9H37l-8-8h-2v8zm9-16h6c3 0 5-1 5-4s-2-4-5-4h-6z' fill='white'/%3E%3C/svg%3E"
@@ -44,87 +44,48 @@
           </a>
 
 <nav class="primary-nav" aria-label="主导航">
-            <p class="nav-caption">从方向到写作</p>
+            <p class="nav-caption">论文工作台</p>
             <a class="nav-item nav-item--active" href="./index.html" aria-current="page"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
-            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>确定方向</span></a>
-            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>搜索论文</span></a>
-            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>分析与笔记</span></a>
-            <a class="nav-item" href="./p02-writing.html"><span aria-hidden="true">✎</span><span>期刊与写作</span></a>
+            <a class="nav-item" href="./paper-project.html"><span aria-hidden="true">▧</span><span>论文项目</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>论文发现</span></a>
             <details class="nav-more">
               <summary>更多工具</summary>
-              <a class="nav-item" href="./paper-project.html"><span aria-hidden="true">▧</span><span>论文项目</span></a>
-<a class="nav-item" href="./p02.html"><span aria-hidden="true">□</span><span>P02 研究记录</span></a>
-              <a class="nav-item" href="./agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务输入</span></a>
               <a class="nav-item" href="../../local_library_output/desktop/state-transfer.html"><span aria-hidden="true">↺</span><span>备份与恢复</span></a>
-              <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
             </details>
           </nav>
 
           <section class="sidebar-plan" aria-labelledby="weekly-plan-title">
             <div class="plan-title-row">
-              <h2 id="weekly-plan-title">使用顺序</h2>
-              <strong>四步</strong>
+              <h2 id="weekly-plan-title">从哪里开始</h2>
+              <strong>三处</strong>
             </div>
-            <p>选方向 → 找论文 → 分析记笔记 → 选期刊写论文。高级研究记录放在“更多工具”。</p>
+            <p>论文项目看写作材料与小节—范文；论文库读原文和笔记；论文发现检索新论文。</p>
           </section>
         </aside>
 
         <section class="main-column home-main" id="dashboard">
           <div class="page-heading">
             <div>
-              <p class="eyebrow">你的研究，从这里继续</p>
-              <h1>从找论文，到写论文</h1>
-              <p>确定方向，找到资料，读懂并留下笔记，再选择期刊、开始写作。</p>
+              <p class="eyebrow">论文工作台</p>
+              <h1>从这里继续</h1>
+              <p>写作项目、论文库和论文发现。</p>
             </div>
-            <a class="button button--secondary" href="./directions.html">调整研究方向</a>
+            <a class="button button--secondary" href="../../local_library_output/desktop/discovery.html">论文发现</a>
           </div>
 
-          <section class="home-continue" aria-labelledby="submission-project-title">
-            <div>
-              <p class="eyebrow">本次论文 · 应用投稿</p>
-              <h2 id="submission-project-title">在线零阶优化：从应用路线到论文新稿</h2>
-              <p>比较四条应用路线，回查算法与代码核验，记录应用实验，并对照同刊范例开始写作。</p>
+          <section class="panel home-projects" aria-labelledby="home-projects-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">写作</p><h2 id="home-projects-title">写作项目</h2></div>
+              <a class="text-button" href="./paper-project.html">打开论文项目 →</a>
             </div>
-            <a class="button button--primary" href="./submission-project.html">继续投稿项目 →</a>
+            <ul class="home-project-list" id="home-projects"><li class="home-project-empty">正在读取已登记的写作项目…</li></ul>
           </section>
-
-          <section class="home-continue" aria-labelledby="home-next-title">
-            <div>
-              <p class="eyebrow">建议下一步 · 随时可以切换</p>
-              <h2 id="home-next-title">先确定一个想研究的方向</h2>
-              <p id="home-next-description">选择主题与问题条件，然后搜索本地已有论文和网上的新论文。</p>
-            </div>
-            <a class="button button--primary" id="home-continue" href="./directions.html">确定方向 →</a>
-          </section>
-          <p class="home-status" id="home-status" role="status" aria-live="polite">正在读取本机论文库与保存的记录…</p>
-
-          <ol class="home-step-grid" aria-label="从方向到写作的使用步骤">
-            <li class="home-step">
-              <span class="home-step-number">01</span>
-              <div><h2>确定方向</h2><p id="home-direction">还没有保存研究方向。先从一个问题开始。</p></div>
-              <a class="text-button" href="./directions.html">选择或修改方向 →</a>
-            </li>
-            <li class="home-step">
-              <span class="home-step-number">02</span>
-              <div><h2>搜索论文</h2><p>先看已有资料，再补充网上论文。两个入口都保留你的关键词。</p></div>
-              <div class="home-step-actions"><a class="text-button" id="home-local-search" href="../../local_library_output/desktop/library.html">本地论文库 →</a><a class="text-button" id="home-online-search" href="../../local_library_output/desktop/discovery.html">网上搜索 →</a></div>
-            </li>
-            <li class="home-step">
-              <span class="home-step-number">03</span>
-              <div><h2>分析与笔记</h2><p>打开一篇论文，阅读已有笔记，整理研究问题、方法与结果，再保存 Markdown。</p></div>
-              <a class="text-button" href="../../local_library_output/desktop/library.html#library-results">选择论文开始阅读 →</a>
-            </li>
-            <li class="home-step">
-              <span class="home-step-number">04</span>
-              <div><h2>选期刊，写论文</h2><p>记录候选期刊，将笔记整理进章节；草稿可以保存、继续编辑并导出。</p></div>
-              <a class="text-button" href="./p02-writing.html">打开写作页 →</a>
-            </li>
-          </ol>
 
           <section class="panel" id="library" aria-labelledby="home-library-title">
             <div class="section-heading">
               <div><p class="eyebrow">你的资料</p><h2 id="home-library-title">已有论文与笔记</h2></div>
-              <a class="text-button" href="../../local_library_output/desktop/library.html">打开论文库 →</a>
+              <div class="home-library-links"><a class="text-button" href="../../local_library_output/desktop/library.html">打开论文库 →</a><a class="text-button" href="../../local_library_output/desktop/discovery.html">论文发现 →</a></div>
             </div>
             <div class="home-library-stats">
               <div><strong id="home-paper-count">—</strong><span>本地论文</span></div>
@@ -133,15 +94,7 @@
             </div>
             <p class="home-help">已有笔记表示资料存在；读过由你自己标记。自动全文分析尚未接通，当前可手工整理、导入笔记和编辑写作材料。</p>
           </section>
-
-          <details class="home-project-details" id="projects">
-            <summary>需要推导算法或整理证明时，再打开 P02 研究工具</summary>
-            <p>理论待系统核验的内容可以继续保留为草稿。高级研究记录不影响阅读、记笔记或开始写作。</p>
-            <a class="button button--secondary" href="./p02.html">打开 P02 研究记录</a>
-            <div id="claims"><p>主张与证据：在研究记录中整理来源、适用条件与证明缺口。</p></div>
-            <div id="simulation"><p>仿真与代码：在研究记录中填写实验设计与实际运行观察。</p></div>
-            <div id="thesis"><p>学位论文章节映射仍是后续能力，目前没有独立编辑页。</p></div>
-          </details>
+          <p class="home-status" id="home-status" role="status" aria-live="polite"></p>
           <noscript><p>请启用 JavaScript 以读取已保存记录和使用笔记、写作编辑功能。</p></noscript>
         </section>
       </div>

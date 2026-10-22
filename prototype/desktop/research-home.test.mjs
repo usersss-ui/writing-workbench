@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { initializeResearchHome, readHomeState, summarizeHome } from "./research-home.mjs"
+import { initializeResearchHome, readHomeState, summarizeHome, summarizeProjects } from "./research-home.mjs"
 import { createDirectionSnapshot, DIRECTION_STORAGE_KEY } from "./direction-snapshot.mjs"
 import { createEmptyP02WorkflowState } from "./p02-workflow.mjs"
 
@@ -12,12 +12,10 @@ test("home reads actual library totals and counts only existing manually read pa
   assert.equal(view.paperCount, "2")
   assert.equal(view.noteCount, "1")
   assert.equal(view.readCount, "1")
-  assert.equal(new URL(view.localHref, "http://localhost").searchParams.get("q"), "分布式优化 有向网络")
-  assert.equal(new URL(view.onlineHref, "http://localhost").searchParams.get("q"), "分布式优化 有向网络")
 })
 
 test("missing library and broken browser state never masquerade as zero or completed research", () => {
-  const memory = new Map([[DIRECTION_STORAGE_KEY, "{bad"]])
+  const memory = new Map([["research-console.paper-library.v1", "{bad"]])
   const before = [...memory]
   const state = readHomeState({ getItem: (key) => memory.get(key) ?? null })
   assert.equal(state.trouble, true)
@@ -25,21 +23,11 @@ test("missing library and broken browser state never masquerade as zero or compl
   const view = summarizeHome({ ...state, papers: null })
   assert.equal(view.paperCount, "—")
   assert.equal(view.noteCount, "—")
-  assert.equal(view.next.href, "./directions.html")
 })
 
 test("existing notes alone do not imply the user has read or confirmed them", () => {
   const view = summarizeHome({ direction, papers, workspace: { personalReading: {}, selectedPaperId: "Example24-One" } })
   assert.equal(view.readCount, "0")
-  assert.match(view.next.href, /paper_id=Example24-One/u)
-})
-
-test("a saved writing draft is resumable without five-stage confirmation", () => {
-  const workflow = createEmptyP02WorkflowState()
-  workflow.writing.target_venue = "候选期刊"
-  const view = summarizeHome({ workflow, papers, workspace: { personalReading: {} } })
-  assert.equal(view.next.href, "./p02-writing.html")
-  assert.deepEqual(workflow.accepted_stages, [])
 })
 
 test("denied localStorage is shown as unavailable and is not cleared", () => {
@@ -120,4 +108,13 @@ test("a late old index response or failure cannot overwrite a newer homepage ref
   await oldFailure
   assert.equal(page.nodes.get("home-note-count").textContent, "1")
   assert.doesNotMatch(page.nodes.get("home-status").textContent, /暂未载入|刷新失败/u)
+})
+
+test("registered writing projects link to their section guide; an unreadable list is not shown as empty", () => {
+  assert.deepEqual(summarizeProjects({ version: 1, projects: [{ project_id: "v10", available: true }, { project_id: "old", available: false }] }), [
+    { id: "v10", available: true, href: "./paper-project.html?project=v10" },
+    { id: "old", available: false, href: "./paper-project.html?project=old" },
+  ])
+  assert.deepEqual(summarizeProjects({ version: 1, projects: [] }), [])
+  assert.equal(summarizeProjects({ error: {} }), null)
 })

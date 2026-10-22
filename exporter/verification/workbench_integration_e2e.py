@@ -555,10 +555,17 @@ def assert_p02_workflow_flow(page: Page, width: int, height: int) -> None:
     page.screenshot(path=str(screenshot_path(width, height, "p02-workflow-needs-review.png")), full_page=True)
 
 
+def open_hidden_page(page: Page, label: str, url: str) -> None:
+    """Hidden pages stay reachable by URL but are no longer offered in the navigation."""
+    ensure(page.locator(".primary-nav").get_by_role("link", name=label, exact=True).count() == 0, f"hidden_from_navigation:{label}")
+    page.goto(url, wait_until="networkidle")
+    ensure(page.url == url, f"hidden_page_url:{label}")
+
+
 def assert_direction_and_agent_flow(page: Page, origin: str, width: int, height: int) -> None:
     if page.locator("#library-detail").is_visible():
         page.locator("#library-detail-back").click()
-    navigate_by_link(page, "确定方向", f"{origin}{DIRECTIONS_PATH}")
+    open_hidden_page(page, "确定方向", f"{origin}{DIRECTIONS_PATH}")
     assert_workspace_layout(page, "#directions", None, "directions_layout")
     page.locator("#direction-advanced > summary").click()
     page.locator("#save-candidate").click()
@@ -569,7 +576,7 @@ def assert_direction_and_agent_flow(page: Page, origin: str, width: int, height:
     ensure("6 个条件" in page.locator("#selected-count").inner_text(), "direction_selection_count")
     page.screenshot(path=str(screenshot_path(width, height, "directions.png")), full_page=True)
 
-    navigate_by_link(page, "研究任务输入", f"{origin}{AGENT_PATH}")
+    open_hidden_page(page, "研究任务输入", f"{origin}{AGENT_PATH}")
     page.wait_for_function(
         "() => !document.querySelector('#save-input-snapshot')?.disabled",
         timeout=15_000,
@@ -588,13 +595,17 @@ def assert_direction_and_agent_flow(page: Page, origin: str, width: int, height:
     assert_no_private_locator(page.locator("body").inner_text(), "agent_page_privacy")
     page.screenshot(path=str(screenshot_path(width, height, "agent-tasks.png")), full_page=True)
 
-    navigate_by_link(page, "P02 研究记录", f"{origin}{P02_PATH}")
+    open_hidden_page(page, "P02 研究记录", f"{origin}{P02_PATH}")
     ensure(page.locator("#materials-title").inner_text().strip() == "从阅读笔记进入 P02", "p02_target")
     assert_workspace_layout(page, ".project-main", ".inspector", "p02_layout")
     assert_p02_workflow_flow(page, width, height)
     navigate_by_link(page, "研究首页", f"{origin}{HOME_PATH}")
-    ensure(page.get_by_role("heading", name="从找论文，到写论文", exact=True).is_visible(), "home_target")
-    ensure(page.locator(".home-step").count() == 4, "home_research_steps")
+    ensure(page.get_by_role("heading", name="从这里继续", exact=True).is_visible(), "home_target")
+    ensure(page.locator(".home-step").count() == 0, "home_steps_removed")
+    page.wait_for_function(
+        "() => document.querySelector('#home-projects li') && !document.querySelector('#home-projects').textContent.includes('正在读取')",
+        timeout=15_000,
+    )
     page.wait_for_function(
         "() => Number(document.querySelector('#home-paper-count')?.textContent) > 0",
         timeout=15_000,
