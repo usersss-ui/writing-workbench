@@ -15,6 +15,9 @@ const MAX_DEPTH = 6
 const LAYOUT = "paper-writing-workflow"
 const PROJECT_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const SKIPPED_DIRECTORIES = new Set(["__pycache__", "node_modules"])
+// In a workflow project only these top-level folders are listed in full;
+// others (code, datasets) can hold tens of thousands of files and are only named.
+const WORKFLOW_DIRECTORIES = new Set(["00_课题", "01_稿件", "02_规划与记录", "03_范文对照", "审稿", "相关论文", "试转", "latex", "figures", "归档"])
 const REVIEW_TABLE_PATH = /^审稿\/第\d+轮\/处理表\.md$/u
 
 const SHORT_CODE = "[A-Z][A-Za-z]*\\d{2}(?:-[A-Za-z0-9]+)+"
@@ -134,8 +137,9 @@ async function findProject(repoRoot, projectId) {
   return { ...project, root }
 }
 
-async function listFiles(root) {
+async function listFiles(root, { workflow }) {
   const files = []
+  const collapsed = []
   let skippedLinks = 0
   let truncated = false
   async function walk(directory, depth) {
@@ -149,7 +153,9 @@ async function listFiles(root) {
       const absolute = join(directory, entry.name)
       if (entry.isSymbolicLink()) { skippedLinks += 1; continue }
       if (entry.isDirectory()) {
-        if (!SKIPPED_DIRECTORIES.has(entry.name)) await walk(absolute, depth + 1)
+        if (SKIPPED_DIRECTORIES.has(entry.name)) continue
+        if (workflow && depth === 0 && !WORKFLOW_DIRECTORIES.has(entry.name)) { collapsed.push(entry.name); continue }
+        await walk(absolute, depth + 1)
         continue
       }
       if (!entry.isFile()) continue
@@ -160,7 +166,7 @@ async function listFiles(root) {
     }
   }
   await walk(root, 0)
-  return { files, skippedLinks, truncated }
+  return { files, collapsed, skippedLinks, truncated }
 }
 
 function splitRow(line) {
@@ -273,8 +279,8 @@ function cellText(segments) {
 
 export async function readPaperProject({ repoRoot, projectId }) {
   const project = await findProject(repoRoot, projectId)
-  const listing = await listFiles(project.root)
-  const base = { version: 1, project_id: project.project_id, layout: project.layout, files: listing.files, skipped_links: listing.skippedLinks, truncated: listing.truncated }
+  const listing = await listFiles(project.root, { workflow: project.layout === LAYOUT })
+  const base = { version: 1, project_id: project.project_id, layout: project.layout, files: listing.files, collapsed_directories: listing.collapsed, skipped_links: listing.skippedLinks, truncated: listing.truncated }
   if (project.layout !== LAYOUT) return { ...base, tables: [], reviews: [], drafts: [], references: [] }
 
   // The reference list is parsed first so every other table knows which codes exist.

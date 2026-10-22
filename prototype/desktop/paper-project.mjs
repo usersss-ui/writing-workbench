@@ -172,6 +172,7 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     heading.append(titleBox)
     section.append(heading)
     const notes = []
+    if (current.collapsed_directories?.length) notes.push(`未展开 ${current.collapsed_directories.map((name) => `${name}/`).join("、")}：不属于写作流程的目录只显示名称`)
     if (current.skipped_links > 0) notes.push(`跳过了 ${current.skipped_links} 个符号链接`)
     if (current.truncated) notes.push("文件过多，只列出前 2000 个")
     if (notes.length) section.append(element(documentRef, "p", "pp-muted", `${notes.join("；")}。`))

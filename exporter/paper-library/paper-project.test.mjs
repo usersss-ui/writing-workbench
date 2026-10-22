@@ -192,6 +192,16 @@ test("file reads refuse traversal, hidden files, symlinks and non-markdown files
   assert.equal(listing.skipped_links, 1)
 })
 
+test("large non-workflow folders are named but not listed, so workflow files are never crowded out", async (t) => {
+  const files = { "01_稿件/引言草稿.md": "引言", "审稿/修改说明.md": "修改" }
+  for (let index = 0; index < 2100; index += 1) files[`code/data/${index}.txt`] = "x"
+  const f = await fixture(t, { files })
+  const project = await f.get("/pilot").then((response) => response.json())
+  assert.deepEqual(project.files.map((file) => file.path), ["01_稿件/引言草稿.md", "审稿/修改说明.md"])
+  assert.deepEqual(project.collapsed_directories, ["code"])
+  assert.equal(project.truncated, false)
+})
+
 test("unknown projects and missing directories are distinct errors", async (t) => {
   const f = await fixture(t, { config: [{ project_id: "gone", path: "/nonexistent/paper-project" }] })
   assert.equal((await f.get("/other")).status, 404)
