@@ -218,3 +218,88 @@ test("directories without the workflow layout only list files", async (t) => {
   assert.deepEqual(project.files.map((file) => file.path), ["论文初稿.md"])
   assert.deepEqual([project.tables, project.reviews, project.drafts, project.references], [[], [], [], []])
 })
+
+const LEGACY_REFERENCES = `# 新稿文献清单
+
+### A 基础工作
+
+| ID             | 文献 |
+| -------------- | ---- |
+| Jiang25-Survey | Jiang X, Li Y. A survey of distributed optimization. Sci China Inf Sci, 2025 |
+`
+
+test("projects written before the fixed headers still resolve [短码] citations to PDFs and reference rows", async (t) => {
+  const f = await fixture(t, { files: {
+    "相关论文/文献清单.md": LEGACY_REFERENCES,
+    "相关论文/1_基础工作/[01] Jiang25-Survey - A survey of distributed optimization.pdf": "%PDF-1.4 survey",
+    "相关论文/[02] Mao21-PPED - Privacy preserving dispatch.pdf": "%PDF-1.4 dispatch",
+    "相关论文/notes.pdf": "%PDF-1.4 unnamed",
+    "01_稿件/引言草稿.md": "已有综述 [Jiang25-Survey]，隐私调度见 [Mao21-PPED]，另有 [Unknown99-ZZ]。",
+    "02_规划与记录/讨论记录.md": "沿用 Jiang25-Survey 的分类。",
+  } })
+  const project = await f.get("/pilot").then((response) => response.json())
+  assert.deepEqual(project.references, [])
+  assert.deepEqual(project.sources, {
+    "Jiang25-Survey": { citation: "Jiang X, Li Y. A survey of distributed optimization. Sci China Inf Sci, 2025", listed: true, pdfs: ["相关论文/1_基础工作/[01] Jiang25-Survey - A survey of distributed optimization.pdf"] },
+    "Mao21-PPED": { citation: null, listed: false, pdfs: ["相关论文/[02] Mao21-PPED - Privacy preserving dispatch.pdf"] },
+  })
+  assert.deepEqual(project.mentions, {
+    "Jiang25-Survey": ["01_稿件/引言草稿.md", "02_规划与记录/讨论记录.md"],
+    "Mao21-PPED": ["01_稿件/引言草稿.md"],
+  })
+  assert.deepEqual(project.drafts, [{ path: "01_稿件/引言草稿.md", codes: ["Jiang25-Survey", "Mao21-PPED"] }])
+})
+
+test("project PDFs are served read-only from 相关论文 only", async (t) => {
+  const f = await fixture(t, { files: {
+    "相关论文/[01] Jiang25-Survey - A survey.pdf": "%PDF-1.4 survey",
+    "相关论文/fake.pdf": "not a pdf",
+    "01_稿件/draft.pdf": "%PDF-1.4 draft",
+    "相关论文/notes.md": "notes",
+  } })
+  await writeFile(join(f.repoRoot, "outside.pdf"), "%PDF-1.4 outside")
+  await symlink(join(f.repoRoot, "outside.pdf"), join(f.projectRoot, "相关论文", "link.pdf"))
+  const pdf = (path) => f.get(`/pilot/pdf/${encodeURIComponent(path)}`)
+  const ok = await pdf("相关论文/[01] Jiang25-Survey - A survey.pdf")
+  assert.equal(ok.status, 200)
+  assert.equal(ok.headers.get("content-type"), "application/pdf")
+  assert.equal(ok.headers.get("cache-control"), "no-store")
+  assert.equal(await ok.text(), "%PDF-1.4 survey")
+  for (const path of ["01_稿件/draft.pdf", "相关论文/notes.md", "相关论文/../outside.pdf", "相关论文/link.pdf", "/etc/hosts.pdf"]) {
+    assert.equal((await pdf(path)).status, 404, path)
+  }
+  const fake = await pdf("相关论文/fake.pdf")
+  assert.equal(fake.status, 422)
+})
+
+test("the section guide comes only from explicit outline columns, section-named notes and “本文 X.Y” lines", async (t) => {
+  const f = await fixture(t, { files: {
+    "02_规划与记录/正文框架_v3.md": `# 正文框架
+
+| 节 | 小节与内容 | 写法参照 | 占比 |
+| --- | --- | --- | --- |
+| 2 问题描述 | 2.1 系统模型<br>2.2 通信模型 | DePsFL；WIoT | 15% |
+| 文内附录 | 证明 | — | 不计 |
+`,
+    "03_范文对照/应用类范文对照.md": `# 应用类论文对照
+
+### 1. Zhao25-DePsFL（车联网）
+
+- **可借鉴**：本文 2.2 的场景段可以照它的逐项对应写。
+- 它的实验第 5 节有 8 个小节。
+- 本文 3 个数据集都比它多；准确率提高了本文 0.069 个百分点。
+`,
+    "03_范文对照/隐私分析范文对照.md": "# 隐私性分析：范文怎么写（第 4.2 节用）\n\n## 一、逐篇\n",
+  } })
+  const guide = (await f.get("/pilot").then((response) => response.json())).section_guide
+  assert.equal(guide.outline_path, "02_规划与记录/正文框架_v3.md")
+  assert.deepEqual(guide.sections, [
+    { id: "2", label: "2 问题描述", contents: "2.1 系统模型\n2.2 通信模型", references: "DePsFL；WIoT" },
+    { id: null, label: "文内附录", contents: "证明", references: "—" },
+  ])
+  const application = guide.notes.find((note) => note.path === "03_范文对照/应用类范文对照.md")
+  assert.deepEqual(application.sections, [])
+  assert.deepEqual(application.headings, ["1. Zhao25-DePsFL（车联网）"])
+  assert.deepEqual(application.passages, [{ heading: "1. Zhao25-DePsFL（车联网）", sections: ["2.2"], text: "**可借鉴**：本文 2.2 的场景段可以照它的逐项对应写。" }])
+  assert.deepEqual(guide.notes.find((note) => note.path === "03_范文对照/隐私分析范文对照.md").sections, ["4.2"])
+})

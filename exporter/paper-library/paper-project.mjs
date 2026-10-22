@@ -10,6 +10,8 @@ import { redactPrivateLocators, renderControlledMarkdown } from "./note-preview.
 
 const CONFIG_MAX_BYTES = 64 * 1024
 const FILE_MAX_BYTES = 2 * 1024 * 1024
+const PDF_MAX_BYTES = 60 * 1024 * 1024
+const REFERENCE_LIST_PATH = "相关论文/文献清单.md"
 const MAX_ENTRIES = 2000
 const MAX_DEPTH = 6
 const LAYOUT = "paper-writing-workflow"
@@ -24,6 +26,10 @@ const SHORT_CODE = "[A-Z][A-Za-z]*\\d{2}(?:-[A-Za-z0-9]+)+"
 const LOCATION = "§[A-Za-z0-9][A-Za-z0-9.\\-]*|p\\.\\s?\\d+(?:[-–]\\d+)?|(?:定理|引理|命题|推论|定义|假设|式|表|图|算法)\\s?\\(?[A-Za-z0-9.]+\\)?"
 const REFERENCE = new RegExp(`(?<![A-Za-z0-9])(${SHORT_CODE})(?![A-Za-z0-9])(?:[·・](${LOCATION}))?`, "gu")
 const BRACKETED_LOCATION = new RegExp(`〔(${LOCATION})〕`, "gu")
+// Projects written before the fixed headers still name PDFs "[编号] 短码 - 题名.pdf"
+// and keep reference rows whose first cell is the short code.
+const PROJECT_PDF = new RegExp(`^相关论文/(?:[^/]+/)*\\[\\d+\\] (${SHORT_CODE}) - [^/]+\\.pdf$`, "u")
+const LEGACY_REFERENCE_ROW = new RegExp(`^\\|\\s*(${SHORT_CODE})\\s*\\|\\s*([^|]+?)\\s*\\|`, "u")
 
 // Fixed headers from docs/superpowers/specs/2026-10-23-paper-project-table-contract.md.
 // `references` lists the columns whose short codes are sources by definition,
@@ -61,6 +67,25 @@ function failure(code) {
 
 function plain(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
+}
+
+async function readBoundedBytes(path, maximum, { missing, oversized, unreadable }) {
+  let handle
+  try {
+    const before = await lstat(path)
+    if (!before.isFile() || before.isSymbolicLink()) throw failure(unreadable)
+    if (before.size > maximum) throw failure(oversized)
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = await handle.stat()
+    if (before.ino !== opened.ino || before.dev !== opened.dev || opened.size > maximum) throw failure(unreadable)
+    return await handle.readFile()
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") throw failure(missing)
+    if (error?.code === oversized) throw error
+    throw failure(unreadable)
+  } finally {
+    if (handle) await handle.close().catch(() => {})
+  }
 }
 
 async function readBoundedText(path, maximum, { missing, oversized, unreadable }) {
@@ -290,7 +315,8 @@ export async function readPaperProject({ repoRoot, projectId }) {
     ? referenceTable.rows.map((row) => Object.fromEntries(referenceTable.headers.map((header, index) => [header, cellText(row[index])])))
       .filter((row) => new RegExp(`^${SHORT_CODE}$`, "u").test(row["短码"]))
     : []
-  const knownCodes = new Set(references.map((row) => row["短码"]))
+  const sources = await collectSources(project.root, listing.files, references)
+  const knownCodes = new Set(Object.keys(sources))
 
   const tables = [await parseTableFile(project.root, TABLE_FILES[0], TABLE_FILES[0].tables, knownCodes)]
   for (const file of TABLE_FILES.slice(1)) tables.push(await parseTableFile(project.root, file, file.tables, knownCodes))
@@ -308,15 +334,119 @@ export async function readPaperProject({ repoRoot, projectId }) {
     const codes = [...new Set([...text.matchAll(REFERENCE)].map((match) => match[1]).filter((code) => knownCodes.has(code)))]
     drafts.push({ path: file.path, codes })
   }
-  return { ...base, tables, reviews, drafts, references }
+  const mentions = {}
+  for (const file of listing.files.filter((candidate) => candidate.path.endsWith(".md") && candidate.path !== REFERENCE_LIST_PATH)) {
+    let text = ""
+    try { text = await readProjectText(project.root, file.path) } catch { continue }
+    for (const code of new Set([...text.matchAll(REFERENCE)].map((match) => match[1]).filter((candidate) => knownCodes.has(candidate)))) {
+      (mentions[code] ??= []).push(file.path)
+    }
+  }
+  const section_guide = await collectSectionGuide(project.root, listing.files)
+  return { ...base, tables, reviews, drafts, references, sources, mentions, section_guide }
 }
 
-export async function readPaperProjectFile({ repoRoot, projectId, encodedPath }) {
+// Which exemplar material each section of the paper draws on, taken only from
+// explicit records: the outline's 写法参照 column, note files whose title or name
+// names a section, and note lines that say “本文 X.Y”.
+const OUTLINE_PATH = /^02_规划与记录\/正文框架[^/]*\.md$/u
+const NOTE_PATH = /^03_范文对照\/[^/]+\.md$/u
+// Section numbers only: “本文 0.069” or “本文 3 个数据集” are quantities, not sections.
+const OWN_SECTION = /本文\s*(?:第\s*)?([1-9](?:\.\d{1,2})?)(?![\d.%])(?!\s*[个篇次项种组条倍字页张段])/gu
+const TITLE_SECTION = /第\s*(\d+(?:\.\d+)?)\s*节|(\d+\.\d+)\s*节/gu
+const NOTE_LINE_MAX = 400
+
+function plainCell(value) {
+  return redactPrivateLocators(value.replaceAll(/<br\s*\/?>/giu, "\n")).trim()
+}
+
+async function collectSectionGuide(root, files) {
+  const outlinePath = files.map((file) => file.path).filter((path) => OUTLINE_PATH.test(path)).sort().at(-1) ?? null
+  const sections = []
+  if (outlinePath) {
+    let text = ""
+    try { text = await readProjectText(root, outlinePath) } catch { text = "" }
+    const lines = text.replaceAll("\r\n", "\n").split("\n")
+    const headerIndex = lines.findIndex((line) => line.trim().startsWith("|") && splitRow(line).includes("写法参照"))
+    if (headerIndex !== -1) {
+      const headers = splitRow(lines[headerIndex])
+      const column = (name) => headers.findIndex((header) => header === name)
+      for (const line of lines.slice(headerIndex + 2)) {
+        if (!line.trim().startsWith("|")) break
+        const cells = splitRow(line)
+        const label = plainCell(cells[column("节")] ?? cells[0] ?? "")
+        if (!label) continue
+        sections.push({
+          id: /^(\d+)/u.exec(label)?.[1] ?? null,
+          label,
+          contents: column("小节与内容") === -1 ? "" : plainCell(cells[column("小节与内容")] ?? ""),
+          references: plainCell(cells[column("写法参照")] ?? ""),
+        })
+      }
+    }
+  }
+  const notes = []
+  for (const file of files.filter((candidate) => NOTE_PATH.test(candidate.path))) {
+    let text = ""
+    try { text = await readProjectText(root, file.path) } catch { continue }
+    const lines = text.replaceAll("\r\n", "\n").split("\n")
+    const title = lines.find((line) => /^#\s/u.test(line))?.replace(/^#\s+/u, "").trim() ?? file.path.split("/").pop()
+    const fileSections = [...new Set([...`${title} ${file.path.split("/").pop()}`.matchAll(TITLE_SECTION)].map((match) => match[1] ?? match[2]))]
+    const headings = []
+    const passages = []
+    let heading = title
+    let fence = false
+    for (const line of lines) {
+      if (/^\s*(?:```|~~~)/u.test(line)) { fence = !fence; continue }
+      if (fence) continue
+      const headingMatch = /^(#{2,4})\s+(.+)$/u.exec(line)
+      if (headingMatch) {
+        heading = headingMatch[2].trim()
+        headings.push(heading)
+        continue
+      }
+      const ids = [...new Set([...line.matchAll(OWN_SECTION)].map((match) => match[1]))]
+      if (ids.length === 0) continue
+      const textLine = redactPrivateLocators(line.replace(/^\s*(?:[-*]|\d+\.)\s+/u, "").trim())
+      passages.push({ heading, sections: ids, text: textLine.length > NOTE_LINE_MAX ? `${textLine.slice(0, NOTE_LINE_MAX)}…` : textLine })
+    }
+    notes.push({ path: file.path, title, sections: fileSections, headings, passages })
+  }
+  return { outline_path: outlinePath, sections, notes }
+}
+
+// Every short code the project can resolve: fixed-header reference rows,
+// legacy reference rows (first cell is the code) and "[编号] 短码 - 题名.pdf" files.
+async function collectSources(root, files, references) {
+  const sources = {}
+  const entry = (code) => (sources[code] ??= { citation: null, listed: false, pdfs: [] })
+  for (const row of references) {
+    const source = entry(row["短码"])
+    source.listed = true
+    source.citation = [row["作者"], row["年份"], row["题名"], row["期刊或会议"]].filter(Boolean).join(". ") || null
+  }
+  let list = ""
+  try { list = await readProjectText(root, REFERENCE_LIST_PATH) } catch { list = "" }
+  for (const line of list.replaceAll("\r\n", "\n").split("\n")) {
+    const match = LEGACY_REFERENCE_ROW.exec(line)
+    if (!match || sources[match[1]]?.listed) continue
+    const source = entry(match[1])
+    source.listed = true
+    source.citation = redactPrivateLocators(match[2])
+  }
+  for (const file of files) {
+    const match = PROJECT_PDF.exec(file.path)
+    if (match) entry(match[1]).pdfs.push(file.path)
+  }
+  return sources
+}
+
+async function resolveProjectPath({ repoRoot, projectId, encodedPath, extension }) {
   let path
   try { path = decodeURIComponent(encodedPath) } catch { throw failure("PAPER_PROJECT_FILE_NOT_FOUND") }
   if (
     path.length === 0 || path.length > 1024 || path.startsWith("/") || path.includes("\\") || path.includes("\0")
-    || !path.endsWith(".md") || path.split("/").some((part) => part === "" || part === "." || part === ".." || part.startsWith("."))
+    || !path.endsWith(extension) || path.split("/").some((part) => part === "" || part === "." || part === ".." || part.startsWith("."))
   ) throw failure("PAPER_PROJECT_FILE_NOT_FOUND")
   const project = await findProject(repoRoot, projectId)
   const absolute = join(project.root, ...path.split("/"))
@@ -324,6 +454,24 @@ export async function readPaperProjectFile({ repoRoot, projectId, encodedPath })
   try { resolved = await realpath(absolute) } catch { throw failure("PAPER_PROJECT_FILE_NOT_FOUND") }
   const inside = relative(project.root, resolved)
   if (inside.startsWith("..") || isAbsolute(inside) || inside.split(sep).join("/") !== path) throw failure("PAPER_PROJECT_FILE_NOT_FOUND")
+  return { project, path }
+}
+
+export async function readPaperProjectFile({ repoRoot, projectId, encodedPath }) {
+  const { project, path } = await resolveProjectPath({ repoRoot, projectId, encodedPath, extension: ".md" })
   const markdown = await readProjectText(project.root, path)
   return { path, html: renderControlledMarkdown(markdown, { resolveImage: () => null }) }
+}
+
+// Only reference PDFs under 相关论文/ are served; they open in the browser's viewer.
+export async function readPaperProjectPdf({ repoRoot, projectId, encodedPath }) {
+  const { project, path } = await resolveProjectPath({ repoRoot, projectId, encodedPath, extension: ".pdf" })
+  if (!path.startsWith("相关论文/")) throw failure("PAPER_PROJECT_FILE_NOT_FOUND")
+  const body = await readBoundedBytes(join(project.root, ...path.split("/")), PDF_MAX_BYTES, {
+    missing: "PAPER_PROJECT_FILE_NOT_FOUND",
+    oversized: "PAPER_PROJECT_FILE_TOO_LARGE",
+    unreadable: "PAPER_PROJECT_FILE_UNREADABLE",
+  })
+  if (body.subarray(0, 5).toString("latin1") !== "%PDF-") throw failure("PAPER_PROJECT_FILE_UNREADABLE")
+  return { path, body }
 }

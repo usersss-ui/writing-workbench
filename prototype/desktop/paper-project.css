@@ -64,6 +64,7 @@ button.pp-chip:hover { border-color: rgba(22,119,255,.4); }
 .pp-ref--broken { background: #fdecec; color: #b42318; cursor: help; }
 
 .pp-muted { color: var(--muted); font-size: 12px; }
+.pp-citation { margin: 8px 0 4px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .pp-warning { margin: 12px 0 0; padding: 8px 12px; border-radius: 9px; background: var(--amber-soft); color: var(--amber-deep); font-size: 12px; line-height: 1.6; }
 
 .pp-markdown { margin-top: 6px; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
@@ -90,3 +91,15 @@ button.pp-chip:hover { border-color: rgba(22,119,255,.4); }
 .pp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pp-use-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.7; }
 .pp-config-example { padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font-size: 12px; overflow-x: auto; }
+
+.pp-tree-pinned { margin-bottom: 6px; padding: 6px 8px; background: var(--surface-subtle); color: var(--ink); font-weight: 700; }
+.pp-guide-basis { margin: 10px 0 4px; }
+.pp-guide-section { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; }
+.pp-guide-section h3 { margin: 0 0 6px; font-size: 15px; }
+.pp-guide-section h4 { margin: 12px 0 6px; color: var(--ink-soft); font-size: 12px; }
+.pp-guide-contents { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.7; white-space: pre-line; }
+.pp-guide-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.8; }
+.pp-guide-passage { margin-top: 8px; padding: 8px 12px; border-left: 3px solid rgba(22,119,255,.35); background: var(--surface-subtle); border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.7; }
+.pp-guide-passage p { margin: 0; }
+.pp-guide-passage p + p { margin-top: 4px; }
+.pp-heading-target { scroll-margin-top: 16px; background: var(--amber-soft); border-radius: 6px; }

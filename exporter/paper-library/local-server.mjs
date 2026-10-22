@@ -26,7 +26,7 @@ import {
   saveSubmissionProjectState,
 } from "./submission-project.mjs"
 import { WORKBENCH_STATE_REQUEST_MAX_BYTES, createWorkbenchStateStore } from "./workbench-state.mjs"
-import { listPaperProjects, readPaperProject, readPaperProjectFile } from "./paper-project.mjs"
+import { listPaperProjects, readPaperProject, readPaperProjectFile, readPaperProjectPdf } from "./paper-project.mjs"
 
 export const SOURCE_PATH_REQUEST_MAX_BYTES = 16 * 1024
 export const ARCHIVE_REQUEST_MAX_BYTES = 65_536
@@ -785,6 +785,18 @@ export function createPrivateLibraryRequestHandler({
         }
         if (request.method === "GET" && target === "/api/v1/paper-projects") {
           sendJson(response, 200, await listPaperProjects({ repoRoot }))
+          return
+        }
+        const projectPdf = /^\/api\/v1\/paper-projects\/([a-z0-9]+(?:-[a-z0-9]+)*)\/pdf\/([^/]+)$/u.exec(target)
+        if (request.method === "GET" && projectPdf) {
+          const pdf = await readPaperProjectPdf({ repoRoot, projectId: projectPdf[1], encodedPath: projectPdf[2] })
+          response.writeHead(200, {
+            ...baseHeaders("application/pdf"),
+            "Cache-Control": "no-store",
+            "Content-Length": pdf.body.length,
+            "Content-Disposition": "inline",
+          })
+          response.end(pdf.body)
           return
         }
         const paperProject = /^\/api\/v1\/paper-projects\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\/files\/([^/]+))?$/u.exec(target)

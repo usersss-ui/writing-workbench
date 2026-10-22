@@ -17,12 +17,14 @@ function firstUrl(documents) {
   return Array.isArray(documents) ? documents.find((document) => typeof document?.url === "string" && document.url)?.url ?? null : null
 }
 
-function libraryEntry(row, papers) {
-  const code = row["短码"]
-  const year = Number.parseInt(row["年份"], 10)
+const DOI_IN_TEXT = /10\.\d{4,9}\/[^\s,，;；)）|]+/u
+
+// `work` comes from a fixed-header row, or only a code and citation text for
+// projects written before the fixed headers.
+function libraryEntry({ code, doi, title, authors, year }, papers) {
   let result
   try {
-    result = matchLocalPaper({ doi: row.DOI || null, paperId: null, title: row["题名"], authors: splitValues(row["作者"]), year: Number.isInteger(year) ? year : null }, papers)
+    result = matchLocalPaper({ doi: doi || null, paperId: null, title: title ?? null, authors: authors ?? [], year: Number.isInteger(year) ? year : null }, papers)
   } catch {
     result = { status: "unknown", matches: [], reason: "本地论文索引不可用，无法对照。" }
   }
@@ -81,26 +83,55 @@ function collectTableUses(uses, file) {
   }
 }
 
+function workFor(code, row, citation) {
+  if (row) {
+    const year = Number.parseInt(row["年份"], 10)
+    return { code, doi: row.DOI, title: row["题名"], authors: splitValues(row["作者"]), year }
+  }
+  return { code, doi: DOI_IN_TEXT.exec(citation ?? "")?.[0]?.replace(/[.。]$/u, "") ?? null, title: null, authors: [], year: null }
+}
+
 export function buildProjectModel(project, papers) {
+  const rows = new Map((project.references ?? []).map((row) => [row["短码"], row]))
+  const sources = project.sources ?? Object.fromEntries([...rows.keys()].map((code) => [code, { citation: null, listed: true, pdfs: [] }]))
   const references = new Map()
-  for (const row of project.references ?? []) {
-    references.set(row["短码"], { code: row["短码"], row, library: libraryEntry(row, papers) })
+  for (const [code, source] of Object.entries(sources)) {
+    const row = rows.get(code) ?? null
+    references.set(code, {
+      code,
+      row,
+      citation: row ? null : source.citation,
+      listed: source.listed,
+      pdfs: source.pdfs ?? [],
+      library: libraryEntry(workFor(code, row, source.citation), papers),
+    })
   }
   const uses = new Map()
   for (const file of [...(project.tables ?? []), ...(project.reviews ?? [])]) collectTableUses(uses, file)
-  for (const draft of project.drafts ?? []) {
-    for (const code of draft.codes) addUse(uses, code, { path: draft.path, title: "稿件", heading: null, row: draft.path, column: null, location: null })
+  if (project.mentions) {
+    for (const [code, paths] of Object.entries(project.mentions)) {
+      for (const path of paths) addUse(uses, code, { path, title: "文件", heading: null, row: path, column: null, location: null })
+    }
+  } else {
+    for (const draft of project.drafts ?? []) {
+      for (const code of draft.codes) addUse(uses, code, { path: draft.path, title: "稿件", heading: null, row: draft.path, column: null, location: null })
+    }
   }
   return { references, uses }
 }
 
-export function sourceLinks(reference, entry) {
-  const library = entry?.library
-  if (!library?.paperId || !["confirmed", "code_hint"].includes(library.status)) return { pdfPage: null, library: null }
+export function sourceLinks(reference, entry, { projectId = null } = {}) {
   const page = /^p\.\s?(\d+)/u.exec(reference?.location ?? "")?.[1]
+  const anchor = page ? `#page=${page}` : ""
+  const projectPdfs = projectId
+    ? (entry?.pdfs ?? []).map((path) => ({ path, url: `/api/v1/paper-projects/${encodeURIComponent(projectId)}/pdf/${encodeURIComponent(path)}${anchor}` }))
+    : []
+  const library = entry?.library
+  if (!library?.paperId || !["confirmed", "code_hint"].includes(library.status)) return { pdfPage: null, library: null, projectPdfs }
   return {
-    pdfPage: library.status === "confirmed" && library.pdfUrl && page ? `${library.pdfUrl}#page=${page}` : null,
+    pdfPage: library.status === "confirmed" && library.pdfUrl && page ? `${library.pdfUrl}${anchor}` : null,
     library: `${paperLibraryDetailHref(library.paperId)}&tab=source`,
+    projectPdfs,
   }
 }
 
@@ -118,6 +149,8 @@ export function sectionModels(project) {
     tolerance: segmentsText(row[column("本刊容忍度要点")]),
     length: segmentsText(row[column("目标篇幅")]),
     mode: segmentsText(row[column("起草方式")]),
+    // Optional column after the fixed ones: what was borrowed from the exemplars.
+    borrowed: column("借鉴内容") === -1 ? "" : segmentsText(row[column("借鉴内容")]),
   }))
 }
 
@@ -172,4 +205,58 @@ export function resolveProjectLink(fromPath, target) {
     }
   }
   return parts.length ? parts.join("/") : null
+}
+
+// A note record about section `noteId` applies to section `sectionId` when it
+// names that section or the whole chapter it belongs to.
+function appliesTo(noteId, sectionId) {
+  if (!noteId || !sectionId) return false
+  return noteId === sectionId || noteId === sectionId.split(".")[0] || noteId.startsWith(`${sectionId}.`)
+}
+
+// Exemplar names as written in the outline, e.g. “李天成 2025、DePsFL（框内公式）”.
+function exemplarNames(text) {
+  return String(text ?? "").split(/[、；;，,\n]/u).map((part) => part.trim()).filter((part) => part && part !== "—")
+    .map((part) => ({ text: part, name: part.split(/[（(]/u)[0].trim().split(/\s+/u)[0] }))
+}
+
+export function buildSectionGuide(project) {
+  const guide = project.section_guide ?? { sections: [], notes: [] }
+  const notes = guide.notes ?? []
+  const headingLinks = (name) => notes.flatMap((note) => note.headings.filter((heading) => name && heading.includes(name)).map((heading) => ({ path: note.path, title: note.title, heading })))
+  const mapping = sectionModels(project)
+  const base = mapping.length
+    ? mapping.map((section) => ({ key: `m${section.index}`, id: section.id, label: `${section.id} ${section.title}`.trim(), contents: "", exemplars: [], mapping: section }))
+    : (guide.sections ?? []).map((section, index) => ({
+      key: `o${index}`,
+      id: section.id,
+      label: section.label,
+      contents: section.contents,
+      exemplars: exemplarNames(section.references).map((exemplar) => ({ ...exemplar, links: headingLinks(exemplar.name) })),
+      mapping: null,
+    }))
+  const sections = base.map((section) => ({
+    ...section,
+    files: notes.filter((note) => note.sections.some((id) => appliesTo(id, section.id))).map((note) => ({ path: note.path, title: note.title })),
+    passages: notes.flatMap((note) => note.passages
+      .filter((passage) => passage.sections.some((id) => appliesTo(id, section.id)))
+      .map((passage) => ({ path: note.path, title: note.title, heading: passage.heading, text: passage.text, sections: passage.sections }))),
+  }))
+  const byExemplar = new Map()
+  const addExemplar = (link, sectionLabel) => {
+    const key = `${link.path}#${link.heading}`
+    const entry = byExemplar.get(key) ?? { path: link.path, title: link.title, heading: link.heading, sections: [] }
+    if (!entry.sections.includes(sectionLabel)) entry.sections.push(sectionLabel)
+    byExemplar.set(key, entry)
+  }
+  for (const section of sections) {
+    for (const exemplar of section.exemplars) for (const link of exemplar.links) addExemplar(link, section.label)
+    for (const passage of section.passages) addExemplar(passage, section.label)
+  }
+  return {
+    source: mapping.length ? "mapping" : sections.length ? "outline" : null,
+    outlinePath: guide.outline_path ?? null,
+    sections,
+    byExemplar: [...byExemplar.values()],
+  }
 }

@@ -1,7 +1,8 @@
 import { renderPreviewMath } from "./paper-math-renderer.mjs"
-import { ROOT_GROUP, buildProjectModel, defaultProjectPath, groupProjectFiles, resolveProjectLink, sectionModels, segmentsText, sourceLinks, tableFilesByPath } from "./paper-project-model.mjs"
+import { ROOT_GROUP, buildProjectModel, buildSectionGuide, defaultProjectPath, groupProjectFiles, resolveProjectLink, sectionModels, segmentsText, sourceLinks, tableFilesByPath } from "./paper-project-model.mjs"
 
 const PROJECTS_ENDPOINT = "/api/v1/paper-projects"
+const GUIDE_PATH = "@小节范文"
 // Panel layout is a per-browser convenience, so it stays in localStorage.
 const LAYOUT_KEY = "research-console.paper-project-layout.v1"
 const INDEX_URL = "../../local_library_data/paper-index.json"
@@ -10,6 +11,7 @@ const TABLE_STATUS = Object.freeze({ missing: "缺少这张表", unparseable: "�
 // The controlled renderer leaves Markdown links as text; the reader turns them
 // into in-project navigation, external links, or plain labels.
 const MARKDOWN_LINK = /\[([^\]\n]{1,200})\]\(([^)\s]{1,500})\)/gu
+const CODE_REFERENCE = /(?<![A-Za-z0-9])([A-Z][A-Za-z]*\d{2}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])(?:[·・](§[A-Za-z0-9][A-Za-z0-9.\-]*|p\.\s?\d+(?:[-–]\d+)?|(?:定理|引理|命题|推论|定义|假设|式|表|图|算法)\s?\(?[A-Za-z0-9.]+\)?))?/gu
 const LIBRARY_STATUS = Object.freeze({
   confirmed: "论文库已有（DOI 一致）",
   code_hint: "论文库有同编号论文，未经 DOI 核验",
@@ -56,6 +58,7 @@ export function initializePaperProject({ document: documentRef, window: windowRe
   }
   let current = null
   let model = null
+  let guide = { source: null, sections: [], byExemplar: [] }
   let layout = { navCollapsed: false, inspectorCollapsed: true }
   try { layout = { ...layout, ...JSON.parse(windowRef.localStorage.getItem(LAYOUT_KEY) ?? "{}") } } catch { /* Defaults stay in effect. */ }
 
@@ -182,6 +185,14 @@ export function initializePaperProject({ document: documentRef, window: windowRe
 
   function renderTree() {
     ui.tree.replaceChildren()
+    if (guide.source) {
+      const pinned = element(documentRef, "button", "pp-tree-item pp-tree-pinned", "小节—范文")
+      pinned.type = "button"
+      pinned.dataset.path = GUIDE_PATH
+      pinned.title = "本文每一节参照了哪些范文的哪些内容"
+      pinned.addEventListener("click", () => openPath(GUIDE_PATH))
+      ui.tree.append(pinned)
+    }
     const tableFiles = tableFilesByPath(current)
     for (const group of groupProjectFiles(current)) {
       const details = element(documentRef, "details", "pp-tree-group")
@@ -293,7 +304,33 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     }
   }
 
-  async function showMarkdown(path, { title = path.split("/").pop(), tableFile = null, notice = null } = {}) {
+  // Known short codes in prose become provenance buttons; unknown ones stay text.
+  function linkifyCodes(root) {
+    const walker = documentRef.createTreeWalker(root, windowRef.NodeFilter?.SHOW_TEXT ?? 4)
+    const nodes = []
+    while (walker.nextNode()) {
+      if (!walker.currentNode.parentElement?.closest("code, pre, .math-inline, .math-display, button, a")) nodes.push(walker.currentNode)
+    }
+    for (const node of nodes) {
+      const text = node.nodeValue
+      const matches = [...text.matchAll(CODE_REFERENCE)].filter((match) => model.references.has(match[1]))
+      if (matches.length === 0) continue
+      const fragment = documentRef.createDocumentFragment()
+      let cursor = 0
+      for (const match of matches) {
+        fragment.append(text.slice(cursor, match.index))
+        const button = element(documentRef, "button", "pp-ref", match[0])
+        button.type = "button"
+        button.addEventListener("click", () => showReference({ code: match[1], location: match[2] ?? null }))
+        fragment.append(button)
+        cursor = match.index + match[0].length
+      }
+      fragment.append(text.slice(cursor))
+      node.replaceWith(fragment)
+    }
+  }
+
+  async function showMarkdown(path, { title = path.split("/").pop(), tableFile = null, notice = null, heading = null } = {}) {
     setReader(path, title)
     if (tableFile?.tables.some((table) => table.status === "ok")) readerButton("按表格显示", () => showTables(tableFile))
     if (notice) ui.readerBody.append(element(documentRef, "p", "pp-warning", notice))
@@ -308,13 +345,116 @@ export function initializePaperProject({ document: documentRef, window: windowRe
       template.innerHTML = file.html
       body.replaceChildren(template.content)
       linkifyMarkdown(body, path)
+      linkifyCodes(body)
       renderPreviewMath(body)
+      if (heading) {
+        const target = [...body.querySelectorAll("h1, h2, h3, h4")].find((node) => node.textContent.trim() === heading)
+        if (target) {
+          target.classList.add("pp-heading-target")
+          target.scrollIntoView({ block: "start" })
+        }
+      }
     } catch (error) {
       body.replaceChildren(element(documentRef, "p", "pp-warning", error.message))
     }
   }
 
+  function noteButton(link) {
+    const button = element(documentRef, "button", "pp-inline-link", `${link.title} › ${link.heading}`)
+    button.type = "button"
+    button.addEventListener("click", () => showMarkdown(link.path, { heading: link.heading }))
+    return button
+  }
+
+  function segmentNodes(segments) {
+    return (segments ?? []).map((segment) => segment.reference ? referenceNode(segment) : documentRef.createTextNode(segment.text))
+  }
+
+  function showSectionGuide() {
+    setReader(GUIDE_PATH, "小节—范文")
+    ui.readerPath.textContent = guide.source === "mapping" ? "03_范文对照/小节范文映射表.md" : guide.outlinePath ?? ""
+    ui.readerBody.append(element(documentRef, "p", "pp-muted pp-guide-basis", guide.source === "mapping"
+      ? "依据：小节范文映射表，以及范文对照笔记中写明“本文 X.Y”的段落。只列出明确写下的对应，不做推断。"
+      : `依据：${guide.outlinePath} 的“写法参照”列、标题写明节号的范文对照笔记，以及笔记中写明“本文 X.Y”的段落。只列出明确写下的对应，不做推断。`))
+    for (const section of guide.sections) {
+      const card = element(documentRef, "section", "pp-guide-section")
+      card.append(element(documentRef, "h3", null, section.label))
+      if (section.contents) card.append(element(documentRef, "p", "pp-guide-contents", section.contents))
+      let recorded = false
+      if (section.mapping) {
+        const facts = element(documentRef, "dl", "pp-facts")
+        const add = (term, nodes) => { facts.append(element(documentRef, "dt", null, term)); const value = element(documentRef, "dd"); value.append(...(nodes.length ? nodes : [documentRef.createTextNode("—")])); facts.append(value) }
+        add("本刊范文", segmentNodes(section.mapping.journalExamples))
+        add("非本刊范文", segmentNodes(section.mapping.otherExamples))
+        if (section.mapping.borrowed) add("借鉴内容", [documentRef.createTextNode(section.mapping.borrowed)])
+        add("本刊容忍度要点", [documentRef.createTextNode(section.mapping.tolerance || "—")])
+        card.append(facts)
+        recorded = segmentsText(section.mapping.journalExamples).trim() !== "" || segmentsText(section.mapping.otherExamples).trim() !== ""
+      }
+      if (section.exemplars.length) {
+        recorded = true
+        card.append(element(documentRef, "h4", null, "写法参照"))
+        const list = element(documentRef, "ul", "pp-guide-list")
+        for (const exemplar of section.exemplars) {
+          const item = element(documentRef, "li", null, exemplar.text)
+          if (exemplar.links.length) {
+            item.append(documentRef.createTextNode("：  "))
+            exemplar.links.forEach((link, index) => {
+              if (index) item.append(documentRef.createTextNode("；"))
+              item.append(noteButton(link))
+            })
+          } else {
+            item.append(element(documentRef, "span", "pp-muted", "（范文对照笔记中没有同名条目）"))
+          }
+          list.append(item)
+        }
+        card.append(list)
+      }
+      if (section.files.length) {
+        recorded = true
+        card.append(element(documentRef, "h4", null, "专门的范文对照"))
+        const list = element(documentRef, "ul", "pp-guide-list")
+        for (const file of section.files) {
+          const item = element(documentRef, "li")
+          const button = element(documentRef, "button", "pp-inline-link", file.title)
+          button.type = "button"
+          button.addEventListener("click", () => showMarkdown(file.path))
+          item.append(button)
+          list.append(item)
+        }
+        card.append(list)
+      }
+      if (section.passages.length) {
+        recorded = true
+        card.append(element(documentRef, "h4", null, "笔记里写明借鉴到本节的内容"))
+        for (const passage of section.passages) {
+          const quote = element(documentRef, "div", "pp-guide-passage")
+          quote.append(element(documentRef, "p", null, passage.text.replaceAll("**", "")))
+          const source = element(documentRef, "p", "pp-muted")
+          source.append(documentRef.createTextNode(`本文 ${passage.sections.join("、")} · `), noteButton(passage))
+          quote.append(source)
+          card.append(quote)
+        }
+      }
+      if (!recorded) card.append(element(documentRef, "p", "pp-muted", "没有找到明确写到这一节的范文记录。"))
+      ui.readerBody.append(card)
+    }
+    if (guide.byExemplar.length) {
+      const reverse = element(documentRef, "section", "pp-guide-section")
+      reverse.append(element(documentRef, "h3", null, "按范文看"))
+      const list = element(documentRef, "ul", "pp-guide-list")
+      for (const exemplar of guide.byExemplar) {
+        const item = element(documentRef, "li")
+        item.append(noteButton(exemplar), documentRef.createTextNode(` → ${exemplar.sections.join("；")}`))
+        list.append(item)
+      }
+      reverse.append(list)
+      ui.readerBody.append(reverse)
+    }
+  }
+
   function openPath(path) {
+    if (path === GUIDE_PATH) { showSectionGuide(); return }
     const file = tableFilesByPath(current).get(path)
     if (!file) { showMarkdown(path); return }
     if (file.tables.some((table) => table.status === "ok")) { showTables(file); return }
@@ -337,27 +477,35 @@ export function initializePaperProject({ document: documentRef, window: windowRe
       ui.inspectorBody.append(info)
       return
     }
-    const facts = element(documentRef, "dl", "pp-facts")
-    for (const field of ["题名", "作者", "年份", "期刊或会议", "DOI", "角色", "核实"]) {
-      facts.append(element(documentRef, "dt", null, field), element(documentRef, "dd", null, entry.row[field] || "—"))
+    info.append(element(documentRef, "h3", null, "题录"))
+    if (entry.row) {
+      const facts = element(documentRef, "dl", "pp-facts")
+      for (const field of ["题名", "作者", "年份", "期刊或会议", "DOI", "角色", "核实"]) {
+        facts.append(element(documentRef, "dt", null, field), element(documentRef, "dd", null, entry.row[field] || "—"))
+      }
+      info.append(facts)
+    } else if (entry.citation) {
+      info.append(element(documentRef, "p", "pp-citation", entry.citation), element(documentRef, "p", "pp-muted", "摘自相关论文/文献清单.md"))
+    } else {
+      info.append(element(documentRef, "p", "pp-muted", "文献清单里没有这一条，只在相关论文/中找到了 PDF。"))
     }
-    info.append(element(documentRef, "h3", null, "文献清单"), facts)
     ui.inspectorBody.append(info)
 
     const library = element(documentRef, "section", "inspector-section")
     library.append(element(documentRef, "h3", null, "原文"))
-    library.append(element(documentRef, "p", entry.library.status === "confirmed" ? null : "pp-muted", LIBRARY_STATUS[entry.library.status] ?? entry.library.status))
-    if (entry.library.status === "confirmed") {
-      const parts = [entry.library.pdfUrl ? "有 PDF" : "无 PDF", entry.library.hasOcr ? "有 OCR" : "无 OCR", entry.library.hasNote ? "有笔记" : "无笔记"]
-      library.append(element(documentRef, "p", "pp-muted", parts.join(" · ")))
-    } else if (entry.library.reason) {
-      library.append(element(documentRef, "p", "pp-muted", entry.library.reason))
-    }
-    for (const candidate of entry.library.candidates) library.append(element(documentRef, "p", "pp-muted", `候选：${candidate.paperId} ${candidate.title}`))
-    const links = sourceLinks({ code, location }, entry)
+    const links = sourceLinks({ code, location }, entry, { projectId: current.project_id })
+    const page = /^p\.\s?(\d+)/u.exec(location ?? "")?.[1]
     const actions = element(documentRef, "div", "pp-actions")
-    if (links.pdfPage) {
-      const pdf = element(documentRef, "a", "button button--primary button--small", `打开 PDF 第 ${/\d+/u.exec(location)[0]} 页`)
+    for (const pdf of links.projectPdfs) {
+      const label = page ? `打开 PDF 第 ${page} 页` : "打开 PDF"
+      const open = element(documentRef, "a", "button button--primary button--small", links.projectPdfs.length > 1 ? `${label}：${pdf.path.split("/").pop()}` : label)
+      open.href = pdf.url
+      open.target = "_blank"
+      open.rel = "noopener"
+      actions.append(open)
+    }
+    if (links.pdfPage && links.projectPdfs.length === 0) {
+      const pdf = element(documentRef, "a", "button button--primary button--small", `打开 PDF 第 ${page} 页`)
       pdf.href = links.pdfPage
       pdf.target = "_blank"
       pdf.rel = "noopener"
@@ -369,8 +517,15 @@ export function initializePaperProject({ document: documentRef, window: windowRe
       actions.append(open)
     }
     if (actions.childElementCount) library.append(actions)
-    if (location && !links.pdfPage && links.library) library.append(element(documentRef, "p", "pp-muted", `打开后请在原文中找到“${location}”；平台不对小节标题做模糊匹配。`))
-    if (!links.library && entry.row.PDF) library.append(element(documentRef, "p", "pp-muted", `项目内 PDF：相关论文/${entry.row.PDF}`))
+    if (links.projectPdfs.length === 1) library.append(element(documentRef, "p", "pp-muted", links.projectPdfs[0].path))
+    if (location && !page && (links.projectPdfs.length || links.library)) library.append(element(documentRef, "p", "pp-muted", `打开后请在原文中找到“${location}”；平台不对小节标题做模糊匹配。`))
+    library.append(element(documentRef, "p", entry.library.status === "confirmed" ? null : "pp-muted", LIBRARY_STATUS[entry.library.status] ?? entry.library.status))
+    if (entry.library.status === "confirmed") {
+      const parts = [entry.library.pdfUrl ? "有 PDF" : "无 PDF", entry.library.hasOcr ? "有 OCR" : "无 OCR", entry.library.hasNote ? "有笔记" : "无笔记"]
+      library.append(element(documentRef, "p", "pp-muted", parts.join(" · ")))
+    } else if (entry.library.reason && entry.library.status !== "not_found") {
+      library.append(element(documentRef, "p", "pp-muted", entry.library.reason))
+    }
     ui.inspectorBody.append(library)
 
     const uses = model.uses.get(code) ?? []
@@ -390,10 +545,12 @@ export function initializePaperProject({ document: documentRef, window: windowRe
 
   function render() {
     ui.title.textContent = current.project_id
-    const verified = current.references.filter((row) => row["核实"]?.startsWith("已核实")).length
-    const local = [...model.references.values()].filter((entry) => entry.library.status === "confirmed").length
+    const entries = [...model.references.values()]
+    const listed = entries.filter((entry) => entry.listed).length
+    const withPdf = entries.filter((entry) => entry.pdfs.length).length
+    const local = entries.filter((entry) => entry.library.status === "confirmed").length
     ui.summary.textContent = current.layout
-      ? `文献 ${current.references.length} 篇（已核实 ${verified}，论文库已有 ${local}）· 稿件 ${current.drafts.length} 个文件 · 目录共 ${current.files.length} 个文件`
+      ? `可识别文献 ${entries.length} 篇（文献清单中 ${listed}，项目内有 PDF ${withPdf}，论文库已确认 ${local}）· 稿件 ${current.drafts.length} 个文件 · 目录共 ${current.files.length} 个文件`
       : "这个目录未声明 paper-writing-workflow 布局，只列出文件，不解析表格。"
     ui.tableStatus.replaceChildren()
     for (const file of current.layout ? [...current.tables, ...current.reviews] : []) ui.tableStatus.append(statusChip(file))
@@ -402,7 +559,9 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     ui.browser.hidden = false
     const requested = new URLSearchParams(windowRef.location?.search ?? "").get("file")
     const available = new Set(current.files.map((file) => file.path))
-    const initial = requested?.endsWith(".md") && available.has(requested) ? requested : defaultProjectPath(current)
+    const initial = requested === GUIDE_PATH && guide.source ? requested
+      : requested?.endsWith(".md") && available.has(requested) ? requested
+        : guide.source ? GUIDE_PATH : defaultProjectPath(current)
     if (initial) openPath(initial)
     else {
       ui.readerTitle.textContent = "没有可阅读的 Markdown 文件"
@@ -419,6 +578,7 @@ export function initializePaperProject({ document: documentRef, window: windowRe
       ])
       current = project
       model = buildProjectModel(project, Array.isArray(index?.papers) ? index.papers : null)
+      guide = buildSectionGuide(project)
       render()
     } catch (error) {
       current = null

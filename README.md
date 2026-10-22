@@ -13,7 +13,7 @@
 
 写作草稿保存到当前浏览器中的既有 P02 研究记录（workflow），可与研究记录页继续编辑。更换浏览器、电脑或端口前，先通过“更多工具 → 备份与恢复”导出浏览器状态，包含 P02 写作草稿；Markdown 导出用于保留正文，不代替浏览器状态备份。P02 高级研究记录、研究任务输入和备份工具都收在“更多工具”，无需完成全部高级阶段才能开始写作。
 
-[论文项目](http://127.0.0.1:4176/prototype/desktop/paper-project.html)只读查看按 `paper-writing-workflow` 组织的论文项目目录：渲染文献清单、期刊基准表、小节范文映射表、处理表、本刊写法清单和潜在审稿人这六个固定表头文件中的表，并把每个 `短码·位置` 变成出处链接。点击出处可查看文献信息、它在项目中被用在哪里，以及论文库中的原文：`p.页码` 直接打开 PDF 对应页，其他位置打开论文库的“原文材料”并显示位置文字。只有 DOI 唯一一致才算论文库已有。项目在 `local_library_config/paper-projects.local.json` 中登记（`version: 1`，`projects` 中每项含 `project_id`、绝对路径 `path` 和 `layout: "paper-writing-workflow"`），页面每次打开都直接读取目录，不保存副本，也不修改任何文件。表头约定见 `docs/superpowers/specs/2026-10-23-paper-project-table-contract.md`。
+[论文项目](http://127.0.0.1:4176/prototype/desktop/paper-project.html)只读查看按 `paper-writing-workflow` 组织的论文项目目录：渲染文献清单、期刊基准表、小节范文映射表、处理表、本刊写法清单和潜在审稿人这六个固定表头文件中的表，并把每个 `短码·位置` 变成出处链接。页面默认打开“小节—范文”视图：本文每一节参照了哪些范文、借鉴了什么，点开直达范文对照笔记中的对应条目，也可按范文反查。写于固定表头之前的项目也可用：正文里的 `[短码]` 只要在相关论文/中有 `[编号] 短码 - 题名.pdf`，或在文献清单中有对应行，就能点开，直接打开项目内 PDF。点击出处可查看文献信息、它在项目中被用在哪里，以及论文库中的原文：`p.页码` 直接打开 PDF 对应页，其他位置打开论文库的“原文材料”并显示位置文字。只有 DOI 唯一一致才算论文库已有。项目在 `local_library_config/paper-projects.local.json` 中登记（`version: 1`，`projects` 中每项含 `project_id`、绝对路径 `path` 和 `layout: "paper-writing-workflow"`），页面每次打开都直接读取目录，不保存副本，也不修改任何文件。表头约定见 `docs/superpowers/specs/2026-10-23-paper-project-table-contract.md`。
 
 [应用投稿项目](http://127.0.0.1:4176/prototype/desktop/submission-project.html)将应用场景、数据集、算法适用条件、实验清单、候选期刊和写作材料放在同一项目中。项目使用本机 Node 服务，将选择、实验状态、自填证据和独立正文保存到仓库根目录下的 `local_library_config/submission-project-state.json`，不覆盖 P02 草稿。项目内的完整 JSON 导出包含正文、证据与研究材料快照；浏览器状态备份不包含这个磁盘项目，迁移电脑前需另行导出项目 JSON。项目中的实验状态与优势判断需要实际证据支持，页面不会自动运行实验。
 
