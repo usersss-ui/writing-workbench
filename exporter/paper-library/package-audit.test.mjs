@@ -10,8 +10,9 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises"
-import { join, posix } from "node:path"
+import { dirname, join, posix, resolve } from "node:path"
 import { tmpdir } from "node:os"
+import { fileURLToPath } from "node:url"
 import {
   EXPECTED_PACKAGE_FILES,
   PACKAGE_SIZE_LIMIT_BYTES,
@@ -1042,7 +1043,7 @@ test("the CLI uses fixed paths and prints a deterministic success message", asyn
     stderr: () => assert.fail("unexpected stderr"),
   })
   assert.equal(code, 0)
-  assert.match(received.repoRoot, /html$/u)
+  assert.equal(received.repoRoot, resolve(dirname(fileURLToPath(import.meta.url)), "../.."))
   assert.equal(received.manifestPath, join(received.repoRoot, manifestRelativePath))
   assert.deepEqual(output, ["GitHub 打包审计：通过（1 个候选文件）"])
 })

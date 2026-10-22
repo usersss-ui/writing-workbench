@@ -1287,7 +1287,7 @@ test("local configuration declares the real catalog and only stable manual decis
   const zhao24Dfl = "main_papers::06_分布式学习与应用/联邦学习基础与去中心化方法/Zhao (2024) Decentralized online bandit federated learning"
   const zhao25Depsfl = "main_papers::06_分布式学习与应用/联邦学习基础与去中心化方法/Zhao (2025) Differential privacy federated learning IoV"
   const zhaoResearchLine = "main_papers::赵中原"
-  const papersRoot = ["", "Users", "yangfan", "Desktop", "papers"].join("/")
+  const papersRoot = ["", "Users", "yangfan", "Desktop", "论文工作台", "papers"].join("/")
 
   assert.deepEqual(config.sources, [{
     source_id: "main_papers",
