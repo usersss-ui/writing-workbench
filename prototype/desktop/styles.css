@@ -2084,3 +2084,6 @@ code { padding: 3px 6px; border-radius: 6px; background: #edf1f5; color: #34465a
 .home-project-unavailable { color: var(--amber-deep); font-size: 12px; }
 .home-project-empty { color: var(--muted); font-size: 13px; }
 .home-library-links { display: flex; gap: 16px; }
+
+.state-transfer-back { display: inline-block; margin-bottom: 14px; color: var(--blue-deep); font-size: 13px; font-weight: 600; }
+.state-transfer-back:hover { text-decoration: underline; }

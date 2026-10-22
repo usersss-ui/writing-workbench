@@ -208,8 +208,9 @@ function readCurrentStates(storage) {
     } catch {
       throw new Error("浏览器状态无法导出")
     }
-    const allowedStatuses = key === "p02_workflow" ? ["valid"] : ["valid", "missing"]
-    if (!isPlainObject(result) || !allowedStatuses.includes(result.status)) {
+    // A missing document reads as its empty state; P02 is no longer in the
+    // navigation, so most browsers never create one.
+    if (!isPlainObject(result) || !["valid", "missing"].includes(result.status)) {
       throw new Error("浏览器状态无法导出")
     }
     state[key] = result.state

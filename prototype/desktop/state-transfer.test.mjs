@@ -568,11 +568,13 @@ test("exportStateBundle emits v3 and recomputes all nine counts including accept
   })
 })
 
-test("exportStateBundle fails closed when P02 is missing, invalid, or storage is unavailable", async () => {
-  await assert.rejects(
-    () => exportStateBundle({ storage: new MemoryStorage(), originLabel: ORIGINS[0], exportedAt: EXPORTED_AT }),
-    /状态无法导出/u,
-  )
+test("exportStateBundle exports a never-used P02 record as its empty state", async () => {
+  const bundle = await exportStateBundle({ storage: new MemoryStorage(), originLabel: ORIGINS[0], exportedAt: EXPORTED_AT })
+  assert.deepEqual(bundle.state.p02_workflow, createEmptyP02WorkflowState())
+  assert.equal(bundle.counts.p02_accepted_stages, 0)
+})
+
+test("exportStateBundle fails closed when P02 is invalid or storage is unavailable", async () => {
 
   for (const malformed of [
     new MemoryStorage({
@@ -1085,8 +1087,8 @@ test("applyStateMerge detects P02 staleness before writes and includes P02 in pr
   )
 })
 
-test("applyStateMerge fails closed without writes when the live P02 document becomes missing or invalid", async () => {
-  for (const replacement of [null, "{invalid-json"]) {
+test("applyStateMerge fails closed without writes when the live P02 document becomes invalid", async () => {
+  for (const replacement of ["{invalid-json"]) {
     const state = emptyState()
     const storage = stateStorage(state)
     const current = await exportStateBundle({ storage, originLabel: ORIGINS[0], exportedAt: EXPORTED_AT })
