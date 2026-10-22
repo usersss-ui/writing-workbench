@@ -33,8 +33,8 @@
           <kbd aria-hidden="true">⌘ K</kbd>
         </label>
         <div class="window-actions">
-          <button class="icon-button" type="button" aria-label="通知">○</button>
-          <button class="avatar-button" type="button" aria-label="用户菜单">杨</button>
+          <span class="icon-button" aria-hidden="true">○</span>
+          <span class="avatar-button" aria-label="当前用户：杨">杨</span>
         </div>
       </header>
 
@@ -48,21 +48,22 @@
             </span>
           </a>
 
-          <nav class="primary-nav" aria-label="主导航">
-            <p class="nav-caption">研究流程</p>
+<nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">从方向到写作</p>
             <a class="nav-item" href="./index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
-            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
-            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>论文发现</span></a>
-            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
-            <a class="nav-item" href="./agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务</span></a>
-            <a class="nav-item nav-item--active" href="./p02.html" aria-current="page">
-              <span aria-hidden="true">□</span><span>我的论文</span>
-            </a>
-            <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
-
-            <p class="nav-caption nav-caption--spaced">P02 工作区</p>
-            <a class="nav-item" href="#materials"><span aria-hidden="true">⌘</span><span>写作材料</span></a>
-            <a class="nav-item" href="#writing-entry"><span aria-hidden="true">✓</span><span>写作入口</span></a>
+            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>确定方向</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>搜索论文</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>分析与笔记</span></a>
+            <a class="nav-item" href="./p02-writing.html"><span aria-hidden="true">✎</span><span>期刊与写作</span></a>
+            <details class="nav-more" open>
+              <summary>更多工具</summary>
+              <a class="nav-item nav-item--active" href="./p02.html" aria-current="page"><span aria-hidden="true">□</span><span>P02 研究记录</span></a>
+              <a class="nav-item" href="./agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务输入</span></a>
+              <a class="nav-item" href="../../local_library_output/desktop/state-transfer.html"><span aria-hidden="true">↺</span><span>备份与恢复</span></a>
+              <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
+              <a class="nav-item" href="#workflow-loop"><span aria-hidden="true">↻</span><span>五阶段研究记录</span></a>
+              <a class="nav-item" href="#materials"><span aria-hidden="true">⌘</span><span>算法与理论材料</span></a>
+            </details>
           </nav>
 
           <section class="sidebar-plan" aria-labelledby="p02-focus-title">
@@ -83,7 +84,7 @@
             </div>
             <div class="heading-actions">
               <a class="button button--secondary" href="./directions.html">查看方向依据</a>
-              <button class="button button--primary" id="search-new-paper" type="button">补充理论文献</button>
+              <a class="button button--primary" id="search-new-paper" href="../../local_library_output/desktop/discovery.html?q=%E6%97%B6%E5%8F%98%E6%9C%89%E5%90%91%E7%BD%91%E7%BB%9C%20%E4%BD%8E%E9%80%9A%E4%BF%A1%20%E8%80%A6%E5%90%88%E7%BA%A6%E6%9D%9F%20%E6%94%B6%E6%95%9B%E6%80%A7">补充理论文献</a>
             </div>
           </div>
 
@@ -101,7 +102,7 @@
                 <li class="project-stage"><span>2</span><strong>理论目标</strong><small>确定要证明什么</small></li>
                 <li class="project-stage"><span>3</span><strong>理论分析</strong><small>引理与证明链</small></li>
                 <li class="project-stage"><span>4</span><strong>仿真验证</strong><small>指标与对照</small></li>
-                <li class="project-stage"><span>5</span><strong>写作材料</strong><small>进入章节</small></li>
+                <li class="project-stage"><span>5</span><strong><a href="./p02-writing.html">写作材料</a></strong><small>进入章节</small></li>
               </ol>
             </div>
             <div class="project-contract-note">
@@ -110,6 +111,102 @@
                 <strong>这里不计算虚假的完成百分比</strong>
                 <p>页面只记录“材料处于什么状态”。笔记没整理理论结果，不代表原论文没有报告。</p>
               </div>
+            </div>
+          </section>
+
+          <section class="panel workflow-loop" id="workflow-loop" aria-labelledby="workflow-loop-title">
+            <div class="section-heading workflow-loop-heading">
+              <div>
+                <p class="eyebrow">最小研究闭环</p>
+                <h2 id="workflow-loop-title">让同一个 P02 方案逐步向前</h2>
+                <p>每一步都保存草稿；只有你明确确认后才进入下一步。修改上游不会删除后续内容，但会要求重新核验。</p>
+              </div>
+              <div class="workflow-stage-summary" id="workflow-stage-summary" aria-live="polite">
+                <span>当前环节</span><strong>算法规划</strong><small>草稿自动保存在当前浏览器</small>
+              </div>
+            </div>
+
+            <div class="workflow-source-strip" aria-label="论文用途架材料">
+              <a href="../../local_library_output/desktop/library.html#p02-shelf" data-workflow-role="algorithm_mechanism"><span>算法机制来源</span><strong data-role-count>0 篇</strong><small data-role-papers>从论文库加入</small></a>
+              <a href="../../local_library_output/desktop/library.html#p02-shelf" data-workflow-role="theory_evidence"><span>理论分析来源</span><strong data-role-count>0 篇</strong><small data-role-papers>从论文库加入</small></a>
+              <a href="../../local_library_output/desktop/library.html#p02-shelf" data-workflow-role="simulation_baseline"><span>仿真比较基线</span><strong data-role-count>0 篇</strong><small data-role-papers>从论文库加入</small></a>
+              <a href="../../local_library_output/desktop/library.html#p02-shelf" data-workflow-role="related_work"><span>写作与期刊参考</span><strong data-role-count>0 篇</strong><small data-role-papers>从论文库加入</small></a>
+            </div>
+
+            <div class="theory-boundary" id="workflow-invalid-state" role="alert" hidden>
+              <span aria-hidden="true">!</span>
+              <div>
+                <strong>闭环记录暂时锁定</strong>
+                <p data-invalid-state-message>检测到无法安全读取的旧闭环状态。为避免覆盖原记录，当前编辑已锁定；请显式重置后重新开始。</p>
+                <button class="button button--secondary" id="workflow-reset-invalid-state" type="button">重置无法读取的闭环记录</button>
+              </div>
+            </div>
+
+            <div class="workflow-stage-stack">
+              <details class="workflow-stage-panel" id="workflow-stage-algorithm" data-workflow-stage="algorithm" open>
+                <summary><span class="workflow-stage-number">01</span><div><p>算法规划</p><h3>把机制组合成一个可讨论的方案</h3></div><span class="workflow-state-badge" data-stage-status>正在填写</span></summary>
+                <form class="workflow-form" id="workflow-form-algorithm" data-stage-form="algorithm">
+                  <fieldset data-stage-fields>
+                    <div class="workflow-form-grid">
+                      <label>问题类型<select name="problem_type"><option value="">先明确离线还是在线</option><option value="offline">离线：目标函数固定</option><option value="online">在线：目标函数或数据随时间变化</option></select></label>
+                      <label>研究目标<input name="research_objective" placeholder="例如：在时变非平衡有向网络下减少通信并保持可行性" /></label>
+                    </div>
+                    <fieldset class="workflow-choice-group"><legend>准备采用的基础机制</legend><label><input type="checkbox" name="mechanisms" value="M01" /> M01 非平衡网络校正</label><label><input type="checkbox" name="mechanisms" value="M02" /> M02 梯度/状态跟踪</label><label><input type="checkbox" name="mechanisms" value="M03" /> M03 低通信触发</label><label><input type="checkbox" name="mechanisms" value="M04" /> M04 耦合约束协调</label></fieldset>
+                    <label>一轮更新怎样发生<textarea name="update_plan" rows="3" placeholder="按通信、局部计算、约束处理的顺序描述，不要求先写完整公式"></textarea></label>
+                    <label>与参考方法相比准备改变什么<textarea name="contribution_boundary" rows="3" placeholder="只写待验证的差异，不提前声称新颖性或收敛结论"></textarea></label>
+                  </fieldset>
+                  <div class="workflow-form-actions"><p data-stage-message>填写问题类型、目标、至少一个机制、更新顺序和差异边界。</p><button class="button button--primary" type="button" data-action="accept-stage" data-stage="algorithm">确认方案，进入理论目标 →</button></div>
+                </form>
+              </details>
+
+              <details class="workflow-stage-panel" id="workflow-stage-theory-target" data-workflow-stage="theory_target">
+                <summary><span class="workflow-stage-number">02</span><div><p>理论目标</p><h3>先决定要证明什么</h3></div><span class="workflow-state-badge" data-stage-status>尚未进入</span></summary>
+                <form class="workflow-form" id="workflow-form-theory-target" data-stage-form="theory_target">
+                  <fieldset data-stage-fields disabled>
+                    <fieldset class="workflow-choice-group"><legend>本轮准备回答的理论结果</legend><label><input type="checkbox" name="outcomes" value="convergence" /> 收敛性</label><label><input type="checkbox" name="outcomes" value="rate" /> 收敛率</label><label><input type="checkbox" name="outcomes" value="tracking" /> 共识/跟踪误差</label><label><input type="checkbox" name="outcomes" value="constraint" /> 约束违背</label><label><input type="checkbox" name="outcomes" value="communication" /> 通信复杂度</label><label><input type="checkbox" name="outcomes" value="regret" /> 遗憾界（仅在线问题）</label></fieldset>
+                    <label>主定理目标<textarea name="theorem_target" rows="3" placeholder="写成‘希望证明……’，不要写成已经成立"></textarea></label>
+                  </fieldset>
+                  <div class="workflow-form-actions"><p data-stage-message>算法方案确认后解锁。</p><button class="button button--primary" type="button" data-action="accept-stage" data-stage="theory_target" disabled>确认目标，进入证明链 →</button></div>
+                </form>
+              </details>
+
+              <details class="workflow-stage-panel" id="workflow-stage-theory-analysis" data-workflow-stage="theory_analysis">
+                <summary><span class="workflow-stage-number">03</span><div><p>理论分析</p><h3>把假设、引理和缺口连成证明链</h3></div><span class="workflow-state-badge" data-stage-status>尚未进入</span></summary>
+                <form class="workflow-form" id="workflow-form-theory-analysis" data-stage-form="theory_analysis">
+                  <fieldset data-stage-fields disabled>
+                    <label>必要条件与假设<textarea name="assumptions" rows="3" placeholder="网络、目标函数、约束正则性、步长和触发条件；注明哪些仍待原文核验"></textarea></label>
+                    <label>引理与主定理依赖链<textarea name="lemma_chain" rows="4" placeholder="例如：混合误差 → 跟踪误差 → 可行性 → 主定理"></textarea></label>
+                    <label>当前证明缺口<textarea name="proof_gaps" rows="3" placeholder="允许填写‘尚未解决’，但必须具体说明卡在哪一步"></textarea></label>
+                  </fieldset>
+                  <div class="workflow-form-actions"><p data-stage-message>理论目标确认后解锁。</p><button class="button button--primary" type="button" data-action="accept-stage" data-stage="theory_analysis" disabled>确认证明结构，进入仿真 →</button></div>
+                </form>
+              </details>
+
+              <details class="workflow-stage-panel" id="workflow-stage-simulation" data-workflow-stage="simulation">
+                <summary><span class="workflow-stage-number">04</span><div><p>仿真验证</p><h3>只记录能够支撑理论目标的实验</h3></div><span class="workflow-state-badge" data-stage-status>尚未进入</span></summary>
+                <form class="workflow-form" id="workflow-form-simulation" data-stage-form="simulation">
+                  <fieldset data-stage-fields disabled>
+                    <div class="workflow-form-grid"><label>指标<textarea name="metrics" rows="3" placeholder="例如：最优性误差、约束违背、通信次数"></textarea></label><label>比较基线<textarea name="baselines" rows="3" placeholder="写清算法与选择理由，不要求 Codex 自动重跑"></textarea></label></div>
+                    <label>统一比较预算<textarea name="communication_budget" rows="2" placeholder="通信轮数、消息量、停止条件或迭代预算"></textarea></label>
+                    <div class="workflow-form-grid"><label>运行状态<select name="result_status"><option value="not_run">尚未运行，仅确认实验设计</option><option value="recorded_unverified">已有结果，尚未核验一致性</option><option value="verified">结果与实现已经核验</option></select></label><label>结果或待办摘要<textarea name="result_summary" rows="3" placeholder="未运行时写下一次需要执行的最小实验；有结果时记录文件与观察"></textarea></label></div>
+                  </fieldset>
+                  <div class="workflow-form-actions"><p data-stage-message>证明结构确认后解锁；可以只确认实验设计，不会伪装成已运行。</p><button class="button button--primary" type="button" data-action="accept-stage" data-stage="simulation" disabled>确认实验记录，进入写作 →</button></div>
+                </form>
+              </details>
+
+              <details class="workflow-stage-panel" id="workflow-stage-writing" data-workflow-stage="writing">
+                <summary><span class="workflow-stage-number">05</span><div><p>写作与期刊</p><h3>把已确认状态翻译成可继续写的材料</h3></div><span class="workflow-state-badge" data-stage-status>尚未进入</span></summary>
+                <form class="workflow-form" id="workflow-form-writing" data-stage-form="writing">
+                  <fieldset data-stage-fields disabled>
+                    <div class="workflow-form-grid"><label>目标期刊<input name="target_venue" placeholder="先填候选期刊，后续可调整" /></label><label>同刊或相近高质量论文<textarea name="venue_references" rows="3" placeholder="论文 ID、标题或链接；用于学习结构与表达，不直接拼接文字"></textarea></label></div>
+                    <div class="workflow-writing-toolbar"><button class="button button--secondary" id="workflow-generate-writing" type="button">补充空白章节材料</button><span>已有正文会保留；补充内容标明“希望证明、尚未运行、待核验”。</span></div>
+                    <label class="workflow-material-field"><span class="workflow-material-heading">问题模型与算法材料 <span class="workflow-material-readiness" data-material-readiness="problem_algorithm">草稿</span></span><textarea name="problem_algorithm" rows="4"></textarea></label>
+                    <label class="workflow-material-field"><span class="workflow-material-heading">理论分析材料 <span class="workflow-material-readiness" data-material-readiness="theory_section">草稿</span></span><textarea name="theory_section" rows="4"></textarea></label>
+                    <label class="workflow-material-field"><span class="workflow-material-heading">仿真与结果材料 <span class="workflow-material-readiness" data-material-readiness="experiment_section">草稿</span></span><textarea name="experiment_section" rows="4"></textarea></label>
+                  </fieldset>
+                  <div class="workflow-form-actions"><p data-stage-message>仿真记录确认后解锁。这里完成的是“首轮材料闭环”，不是论文完成。</p><a id="workflow-open-writing-page" class="button button--secondary" href="./p02-writing.html">查看投稿与写作材料</a><button class="button button--primary" type="button" data-action="accept-stage" data-stage="writing" disabled>确认首轮材料闭环</button></div>
+                </form>
+              </details>
             </div>
           </section>
 
@@ -215,12 +312,12 @@
                 <p class="eyebrow">写作入口</p>
                 <h2 id="writing-entry-title">材料先进入对应章节，不直接拼接原笔记</h2>
               </div>
-              <span class="status">第一版仅整理材料</span>
+              <a class="button button--secondary" href="./p02-writing.html">打开投稿与写作材料 →</a>
             </div>
             <div class="writing-entry-grid">
-              <article><span class="writing-order">01</span><div><strong>问题模型与算法</strong><p>从机制卡生成章节提纲，保留候选来源和修改理由。</p></div><span class="writing-readiness writing-readiness--ready">可开始整理</span></article>
-              <article><span class="writing-order">02</span><div><strong>理论分析</strong><p>先确定目标结果，再建立假设、引理和主定理依赖链。</p></div><span class="writing-readiness">等待核验</span></article>
-              <article><span class="writing-order">03</span><div><strong>仿真与结果</strong><p>指标必须对应理论目标，基线比较需统一通信与停止预算。</p></div><span class="writing-readiness">等待设计</span></article>
+              <article><span class="writing-order">01</span><div><strong>问题模型与算法</strong><p>从机制卡生成章节提纲，保留候选来源和修改理由。</p></div><span class="writing-readiness" data-writing-entry-status="algorithm">等待算法规划</span></article>
+              <article><span class="writing-order">02</span><div><strong>理论分析</strong><p>先确定目标结果，再建立假设、引理和主定理依赖链。</p></div><span class="writing-readiness" data-writing-entry-status="theory">等待理论目标</span></article>
+              <article><span class="writing-order">03</span><div><strong>仿真与结果</strong><p>指标必须对应理论目标，基线比较需统一通信与停止预算。</p></div><span class="writing-readiness" data-writing-entry-status="simulation">等待实验设计</span></article>
             </div>
           </section>
         </section>
@@ -231,31 +328,31 @@
               <p class="eyebrow">当前课题</p>
               <h2 id="current-project-title">P02 项目状态</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="课题设置">•••</button>
           </div>
 
           <section class="current-project-card">
-            <div class="project-card-top"><code>P02</code><span class="status status--active">算法规划中</span></div>
-            <h3>旧笔记可用，但理论结果尚未系统核验</h3>
-            <p>当前阶段的目标不是写完证明，而是让每个算法机制都有明确的理论出口。</p>
+            <div class="project-card-top"><code>P02</code><span class="status status--active" data-project-current-status>算法规划中</span></div>
+            <h3 data-project-current-title>旧笔记可用，但理论结果尚未系统核验</h3>
+            <p data-project-current-description>当前阶段的目标不是写完证明，而是让每个算法机制都有明确的理论出口。</p>
           </section>
 
           <section class="inspector-section">
             <h3>阶段状态</h3>
             <dl class="project-status-list">
-              <div><dt>算法材料</dt><dd class="stage-value stage-value--active">正在整理</dd></div>
-              <div><dt>理论目标</dt><dd class="stage-value stage-value--waiting">待确定</dd></div>
-              <div><dt>理论证据</dt><dd class="stage-value stage-value--waiting">待核验</dd></div>
-              <div><dt>写作章节</dt><dd class="stage-value">尚未进入</dd></div>
+              <div><dt>算法规划</dt><dd class="stage-value stage-value--active" data-inspector-stage="algorithm">正在填写</dd></div>
+              <div><dt>理论目标</dt><dd class="stage-value stage-value--waiting" data-inspector-stage="theory_target">尚未进入</dd></div>
+              <div><dt>理论分析</dt><dd class="stage-value stage-value--waiting" data-inspector-stage="theory_analysis">尚未进入</dd></div>
+              <div><dt>仿真验证</dt><dd class="stage-value stage-value--waiting" data-inspector-stage="simulation">尚未进入</dd></div>
+              <div><dt>写作材料</dt><dd class="stage-value" data-inspector-stage="writing">尚未进入</dd></div>
             </dl>
           </section>
 
           <section class="inspector-section">
             <div class="inspector-title-row"><h3>下一步只做三件事</h3><span class="count-badge">3</span></div>
             <ol class="next-action-list">
-              <li><span>1</span><p>确认 P02 的目标函数是否随时间变化。</p></li>
-              <li><span>2</span><p>为四类算法机制选择核心来源论文。</p></li>
-              <li><span>3</span><p>先写主定理目标，再展开引理与证明。</p></li>
+              <li><span>1</span><p data-next-action>先在论文库加入算法机制来源。</p></li>
+              <li><span>2</span><p data-next-action>明确离线或在线问题，并写清研究目标。</p></li>
+              <li><span>3</span><p data-next-action>记录机制组合、更新顺序与待验证的差异边界。</p></li>
             </ol>
           </section>
 
@@ -276,27 +373,7 @@
       </div>
     </main>
 
-    <dialog class="search-dialog" id="search-dialog" aria-labelledby="search-dialog-title">
-      <form method="dialog">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">理论证据补充</p><h2 id="search-dialog-title">搜索 P02 所需的理论论文</h2></div>
-          <button class="icon-button" value="cancel" aria-label="关闭">×</button>
-        </div>
-        <p>这里只保存检索条件。找到论文后先进入阅读队列，不自动把摘要升级为可引用理论结论。</p>
-        <label>研究主题<input name="topic" id="search-topic" value="时变有向网络 低通信 耦合约束 收敛性" /></label>
-        <div class="dialog-grid">
-          <label>优先结果<select><option>收敛性与收敛率</option><option>约束违背</option><option>通信复杂度</option><option>遗憾界</option></select></label>
-          <label>核验阶段<select><option>先找候选论文</option><option>定位主定理</option><option>核验条件与结论</option></select></label>
-        </div>
-        <div class="dialog-note"><strong>证据路径</strong><span>候选论文 → 回到原文 → 定位定理 → 核验条件 → 进入 P02</span></div>
-        <div class="dialog-actions">
-          <button class="button button--secondary" value="cancel">取消</button>
-          <button class="button button--primary" id="save-search" value="default">保存检索任务</button>
-        </div>
-      </form>
-    </dialog>
-
-    <div class="toast" id="toast" role="status" aria-live="polite">理论检索任务已保存</div>
     <script type="module" src="./app.mjs?v=3"></script>
+    <script type="module" src="./p02-workflow-ui.mjs"></script>
   </body>
 </html>

@@ -65,6 +65,8 @@ const EXPECTED_FILES = [
   "exporter/paper-library/scanner.test.mjs",
   "exporter/paper-library/status.mjs",
   "exporter/paper-library/status.test.mjs",
+  "exporter/paper-library/submission-project-server.test.mjs",
+  "exporter/paper-library/submission-project.mjs",
   "exporter/paper-library/tag-catalog.mjs",
   "exporter/paper-library/tag-catalog.test.mjs",
   "exporter/paper-library/unified-local-server.e2e.test.mjs",
@@ -89,6 +91,9 @@ const EXPECTED_FILES = [
   "prototype/desktop/agent-tasks.mjs",
   "prototype/desktop/agent-tasks.test.mjs",
   "prototype/desktop/app.mjs",
+  "prototype/desktop/bibliography-import.mjs",
+  "prototype/desktop/bibliography-import.test.mjs",
+  "prototype/desktop/bibliography-normalization.mjs",
   "prototype/desktop/candidate-storage.mjs",
   "prototype/desktop/candidate-storage.test.mjs",
   "prototype/desktop/desktop-pages.test.mjs",
@@ -96,16 +101,50 @@ const EXPECTED_FILES = [
   "prototype/desktop/direction-snapshot.test.mjs",
   "prototype/desktop/directions.html",
   "prototype/desktop/directions.mjs",
+  "prototype/desktop/discovery-batch.mjs",
+  "prototype/desktop/discovery-batch.test.mjs",
+  "prototype/desktop/discovery-candidate-bridge.mjs",
+  "prototype/desktop/discovery-candidate-bridge.test.mjs",
   "prototype/desktop/discovery-dom.test.mjs",
+  "prototype/desktop/discovery-identity.mjs",
+  "prototype/desktop/discovery-identity.test.mjs",
+  "prototype/desktop/discovery-query-plan.mjs",
+  "prototype/desktop/discovery-query-plan.test.mjs",
+  "prototype/desktop/discovery-recommendation.mjs",
+  "prototype/desktop/discovery-recommendation.test.mjs",
+  "prototype/desktop/discovery-record.mjs",
+  "prototype/desktop/discovery-record.test.mjs",
+  "prototype/desktop/discovery-results-ui.mjs",
+  "prototype/desktop/discovery-results-ui.test.mjs",
+  "prototype/desktop/discovery-review-ui.mjs",
+  "prototype/desktop/discovery-review-ui.test.mjs",
+  "prototype/desktop/discovery-session-ui.mjs",
+  "prototype/desktop/discovery-session-ui.test.mjs",
+  "prototype/desktop/discovery-test-fixtures.mjs",
+  "prototype/desktop/discovery-workspace.mjs",
+  "prototype/desktop/discovery-workspace.test.mjs",
   "prototype/desktop/discovery.mjs",
   "prototype/desktop/discovery.template.html",
   "prototype/desktop/index.html",
   "prototype/desktop/institution-access.mjs",
   "prototype/desktop/institution-access.test.mjs",
+  "prototype/desktop/journal-review.mjs",
+  "prototype/desktop/journal-review.test.mjs",
   "prototype/desktop/library.mjs",
   "prototype/desktop/library.template.html",
+  "prototype/desktop/local-discovery.mjs",
+  "prototype/desktop/local-discovery.test.mjs",
+  "prototype/desktop/local-paper-match.mjs",
+  "prototype/desktop/local-paper-match.test.mjs",
   "prototype/desktop/openalex-search.mjs",
   "prototype/desktop/openalex-search.test.mjs",
+  "prototype/desktop/p02-workflow-ui.mjs",
+  "prototype/desktop/p02-workflow-ui.test.mjs",
+  "prototype/desktop/p02-workflow.mjs",
+  "prototype/desktop/p02-workflow.test.mjs",
+  "prototype/desktop/p02-writing-data.mjs",
+  "prototype/desktop/p02-writing.html",
+  "prototype/desktop/p02-writing.mjs",
   "prototype/desktop/p02.html",
   "prototype/desktop/paper-filter.mjs",
   "prototype/desktop/paper-inspector.mjs",
@@ -116,14 +155,23 @@ const EXPECTED_FILES = [
   "prototype/desktop/paper-library-storage.test.mjs",
   "prototype/desktop/paper-math-renderer.mjs",
   "prototype/desktop/paper-math-renderer.test.mjs",
+  "prototype/desktop/paper-note-draft.test.mjs",
   "prototype/desktop/paper-user-tags.mjs",
   "prototype/desktop/paper-user-tags.test.mjs",
   "prototype/desktop/papers-data.mjs",
+  "prototype/desktop/research-home.mjs",
+  "prototype/desktop/research-home.test.mjs",
   "prototype/desktop/state-transfer-dom.test.mjs",
   "prototype/desktop/state-transfer.html",
   "prototype/desktop/state-transfer.mjs",
   "prototype/desktop/state-transfer.test.mjs",
   "prototype/desktop/styles.css",
+  "prototype/desktop/submission-project-model.mjs",
+  "prototype/desktop/submission-project-model.test.mjs",
+  "prototype/desktop/submission-project-ui.mjs",
+  "prototype/desktop/submission-project.css",
+  "prototype/desktop/submission-project.html",
+  "prototype/desktop/submission-project.mjs",
   "prototype/desktop/vendor/katex/LICENSE",
   "prototype/desktop/vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
   "prototype/desktop/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2",
@@ -214,12 +262,28 @@ const TASK_13_PRIVATE_SENTINEL_TEST_FILES = Object.freeze([
 
 const REGULAR_DESKTOP_ASSET_SOURCES = Object.freeze([
   "prototype/desktop/agent-task-input.mjs",
+  "prototype/desktop/bibliography-import.mjs",
+  "prototype/desktop/bibliography-normalization.mjs",
   "prototype/desktop/candidate-storage.mjs",
   "prototype/desktop/direction-snapshot.mjs",
+  "prototype/desktop/discovery-batch.mjs",
+  "prototype/desktop/discovery-candidate-bridge.mjs",
+  "prototype/desktop/discovery-identity.mjs",
+  "prototype/desktop/discovery-query-plan.mjs",
+  "prototype/desktop/discovery-recommendation.mjs",
+  "prototype/desktop/discovery-record.mjs",
+  "prototype/desktop/discovery-results-ui.mjs",
+  "prototype/desktop/discovery-review-ui.mjs",
+  "prototype/desktop/discovery-session-ui.mjs",
+  "prototype/desktop/discovery-workspace.mjs",
   "prototype/desktop/discovery.mjs",
   "prototype/desktop/institution-access.mjs",
+  "prototype/desktop/journal-review.mjs",
   "prototype/desktop/library.mjs",
+  "prototype/desktop/local-discovery.mjs",
+  "prototype/desktop/local-paper-match.mjs",
   "prototype/desktop/openalex-search.mjs",
+  "prototype/desktop/p02-workflow.mjs",
   "prototype/desktop/paper-inspector.mjs",
   "prototype/desktop/paper-library-model.mjs",
   "prototype/desktop/paper-library-storage.mjs",
@@ -252,18 +316,34 @@ const GENERATED_PAGE_CLOSURES = Object.freeze([
     name: "discovery",
     template: "prototype/desktop/discovery.template.html",
     regular: Object.freeze([
-      "prototype/desktop/candidate-storage.mjs",
-      "prototype/desktop/discovery.mjs",
-      "prototype/desktop/institution-access.mjs",
-      "prototype/desktop/library.mjs",
-      "prototype/desktop/openalex-search.mjs",
-      "prototype/desktop/paper-inspector.mjs",
-      "prototype/desktop/paper-library-model.mjs",
-      "prototype/desktop/paper-library-storage.mjs",
-      "prototype/desktop/paper-math-renderer.mjs",
-      "prototype/desktop/paper-user-tags.mjs",
-      "prototype/desktop/styles.css",
-    ]),
+  "prototype/desktop/bibliography-import.mjs",
+  "prototype/desktop/bibliography-normalization.mjs",
+  "prototype/desktop/candidate-storage.mjs",
+  "prototype/desktop/direction-snapshot.mjs",
+  "prototype/desktop/discovery-batch.mjs",
+  "prototype/desktop/discovery-candidate-bridge.mjs",
+  "prototype/desktop/discovery-identity.mjs",
+  "prototype/desktop/discovery-query-plan.mjs",
+  "prototype/desktop/discovery-recommendation.mjs",
+  "prototype/desktop/discovery-record.mjs",
+  "prototype/desktop/discovery-results-ui.mjs",
+  "prototype/desktop/discovery-review-ui.mjs",
+  "prototype/desktop/discovery-session-ui.mjs",
+  "prototype/desktop/discovery-workspace.mjs",
+  "prototype/desktop/discovery.mjs",
+  "prototype/desktop/institution-access.mjs",
+  "prototype/desktop/journal-review.mjs",
+  "prototype/desktop/library.mjs",
+  "prototype/desktop/local-discovery.mjs",
+  "prototype/desktop/local-paper-match.mjs",
+  "prototype/desktop/openalex-search.mjs",
+  "prototype/desktop/paper-inspector.mjs",
+  "prototype/desktop/paper-library-model.mjs",
+  "prototype/desktop/paper-library-storage.mjs",
+  "prototype/desktop/paper-math-renderer.mjs",
+  "prototype/desktop/paper-user-tags.mjs",
+  "prototype/desktop/styles.css",
+]),
     vendor: Object.freeze([
       "prototype/desktop/vendor/katex/katex.mjs",
     ]),
@@ -273,8 +353,16 @@ const GENERATED_PAGE_CLOSURES = Object.freeze([
     template: "prototype/desktop/state-transfer.html",
     regular: Object.freeze([
       "prototype/desktop/agent-task-input.mjs",
+      "prototype/desktop/bibliography-normalization.mjs",
       "prototype/desktop/candidate-storage.mjs",
       "prototype/desktop/direction-snapshot.mjs",
+      "prototype/desktop/discovery-batch.mjs",
+      "prototype/desktop/discovery-identity.mjs",
+      "prototype/desktop/discovery-record.mjs",
+      "prototype/desktop/discovery-workspace.mjs",
+      "prototype/desktop/journal-review.mjs",
+      "prototype/desktop/openalex-search.mjs",
+      "prototype/desktop/p02-workflow.mjs",
       "prototype/desktop/paper-library-model.mjs",
       "prototype/desktop/paper-library-storage.mjs",
       "prototype/desktop/paper-user-tags.mjs",
@@ -383,9 +471,9 @@ async function collectGeneratedPageSourceClosure(templatePath) {
   }
 }
 
-test("keeps the manifest and both independent policies at the exact lexical 124-file Task 14 union", async () => {
+test("keeps the manifest and both independent policies at the exact lexical 172-file workbench union", async () => {
   const manifest = JSON.parse(await readFile(new URL("../config/github-package-files.json", import.meta.url), "utf8"))
-  assert.equal(EXPECTED_FILES.length, 124)
+  assert.equal(EXPECTED_FILES.length, 172)
   assert.equal(TASK_13_NET_NEW_FILES.length, 43)
   assert.deepEqual(TASK_13_NET_NEW_FILES, [...TASK_13_NET_NEW_FILES].sort())
   assert.deepEqual(
@@ -401,7 +489,7 @@ test("keeps the manifest and both independent policies at the exact lexical 124-
   assert.deepEqual(manifest.files, EXPECTED_FILES)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, EXPECTED_FILES)
   for (const files of [EXPECTED_FILES, manifest.files, EXPECTED_PACKAGE_FILES]) {
-    assert.equal(new Set(files).size, 124)
+    assert.equal(new Set(files).size, 172)
   }
   assert.equal(Object.isFrozen(EXPECTED_PACKAGE_FILES), true)
   assert.deepEqual(EXPECTED_PACKAGE_FILES, [...EXPECTED_FILES].sort())
@@ -409,7 +497,7 @@ test("keeps the manifest and both independent policies at the exact lexical 124-
   assert.equal(EXPECTED_PACKAGE_FILES.includes("local_library_config/paper-tags.json"), false)
 })
 
-test("keeps private, generated, donor, legacy, and artifact files outside the 124-file policy", () => {
+test("keeps private, generated, donor, legacy, and artifact files outside the 138-file policy", () => {
   const excluded = [
     "local_library_config/library.local.json",
     "local_library_data/paper-index.json",
@@ -449,12 +537,12 @@ for (const closure of GENERATED_PAGE_CLOSURES) {
   })
 }
 
-test("the three generated pages use exactly the 14 regular desktop assets", () => {
+test("the three generated pages use exactly the 30 regular desktop assets", () => {
   const union = [...new Set(GENERATED_PAGE_CLOSURES.flatMap((closure) => closure.regular))].sort()
   assert.deepEqual(union, REGULAR_DESKTOP_ASSET_SOURCES)
 })
 
-test("dynamic generated resources stay outside the 124-file and regular-asset maps", () => {
+test("dynamic generated resources stay outside the 138-file and regular-asset maps", () => {
   assert.equal(EXPECTED_FILES.includes("exporter/config/institutions/nuist.json"), true)
   for (const generatedPath of [
     "local_library_output/desktop/assets/nuist.institution.json",
@@ -495,11 +583,14 @@ test("all six Task 14 E2E sources pass the unchanged package content-privacy aud
   })
 })
 
-test("the exact policy includes all three back-navigation pages and their runtime dependencies", () => {
+test("the exact policy includes all four back-navigation pages and their runtime dependencies", () => {
   for (const requiredPath of [
     "prototype/desktop/index.html",
     "prototype/desktop/directions.html",
     "prototype/desktop/p02.html",
+    "prototype/desktop/p02-writing-data.mjs",
+    "prototype/desktop/p02-writing.html",
+    "prototype/desktop/p02-writing.mjs",
     "prototype/desktop/app.mjs",
     "prototype/desktop/directions.mjs",
     "prototype/desktop/paper-filter.mjs",
@@ -544,6 +635,15 @@ test("allows only named program, template, test, and sanitized-example candidate
   ])
   assert.deepEqual(result.blocking, [])
   assert.equal(result.checkedCount, 3)
+})
+
+test('only the two exact discovery results UI source paths bypass result-name classification', () => {
+  for (const path of ['prototype/desktop/discovery-results-ui.mjs', 'prototype/desktop/discovery-results-ui.test.mjs']) {
+    assert.deepEqual(auditPackageCandidates([{ path, content: 'export {}\n' }]).blocking, [])
+  }
+  for (const path of ['prototype/desktop/discovery-results-ui.backup.mjs', 'notes/discovery-results-ui.mjs', 'prototype/desktop/paper-result.mjs']) {
+    assert.equal(auditPackageCandidates([{ path, content: 'export {}\n' }]).blocking[0].code, 'candidate_private_artifact')
+  }
 })
 
 test("blocks private directories and paper-result artifact filenames", () => {

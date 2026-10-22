@@ -1,6 +1,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { buildOpenAlexSearchUrl, searchOpenAlexWorks } from "./openalex-search.mjs"
+import * as openAlex from "./openalex-search.mjs"
+import { isValidDiscoveryRecord } from "./discovery-record.mjs"
 
 const SENSITIVE_MARKER = ["sensitive", "marker"].join("-")
 const BLOCKED_QUERY_KEY = ["api", "key"].join("_")
@@ -52,21 +54,21 @@ async function rejectsWithCode(operation, code) {
   })
 }
 
-test("buildOpenAlexSearchUrl fixes the endpoint and requests at most ten recent English works", () => {
+test("buildOpenAlexSearchUrl defaults to 25 works with no hidden year or language limits", () => {
   const url = new URL(buildOpenAlexSearchUrl({
     query: '"distributed optimization" AND privacy',
-    currentYear: 2026,
-    perPage: 50,
   }))
 
   assert.equal(url.origin + url.pathname, "https://api.openalex.org/works")
   assert.equal(url.searchParams.get("search"), '"distributed optimization" AND privacy')
   assert.equal(
     url.searchParams.get("filter"),
-    "from_publication_date:2022-01-01,to_publication_date:2026-12-31,language:en,is_retracted:false",
+    "is_retracted:false",
   )
   assert.equal(url.searchParams.get("sort"), "relevance_score:desc")
-  assert.equal(url.searchParams.get("per_page"), "10")
+  assert.equal(url.searchParams.get("per_page"), "25")
+  assert.equal(url.searchParams.get("cursor"), "*")
+  assert.equal(url.searchParams.has("page"), false)
   assert.equal(
     url.searchParams.get("select"),
     [
@@ -81,6 +83,9 @@ test("buildOpenAlexSearchUrl fixes the endpoint and requests at most ten recent 
       "best_oa_location",
       "topics",
       "abstract_inverted_index",
+      "language",
+      "type",
+      "is_retracted",
     ].join(","),
   )
   assert.equal(url.searchParams.has(BLOCKED_QUERY_KEY), false)
@@ -88,7 +93,135 @@ test("buildOpenAlexSearchUrl fixes the endpoint and requests at most ten recent 
   assert.equal(url.password, "")
 })
 
-test("uses the final validated English expression exactly and supports only three visible sorts", () => {
+const DISCOVERY_NOW = "2026-09-05T08:00:00.000Z"
+function richWork(overrides = {}) {
+  return {
+    id: "https://openalex.org/W123", doi: "https://doi.org/10.1234/example",
+    title: "Distributed optimization", publication_year: 2025,
+    authorships: [{ author: { display_name: " Alice " } }, { author: { display_name: "Alice" } }],
+    primary_location: { landing_page_url: "https://publisher.example/paper", source: {
+      id: "https://openalex.org/S123", display_name: "Control Journal", type: "journal",
+      issn: ["1234-567X"], issn_l: "2345-6789",
+    } }, language: "en", type: "article", is_retracted: false,
+    ...overrides,
+  }
+}
+
+test("discovery page produces rich records and compatible works from one bounded request", async () => {
+  assert.equal(typeof openAlex.searchOpenAlexDiscoveryPage, "function")
+  let requests = 0
+  const page = await openAlex.searchOpenAlexDiscoveryPage({
+    query: "optimization", batch_id: "batch-1", query_id: "query-1", now: () => DISCOVERY_NOW,
+    idFactory: () => "record-1", fetchImpl: async () => {
+      requests += 1
+      return jsonResponse({ meta: { count: 1, next_cursor: null }, results: [richWork()] })
+    },
+  })
+  assert.equal(requests, 1)
+  assert.deepEqual(Object.keys(page).sort(), ["nextCursor", "records", "total", "works"])
+  assert.equal(page.total, 1)
+  assert.equal(page.nextCursor, null)
+  assert.equal(isValidDiscoveryRecord(page.records[0]), true)
+  assert.deepEqual(page.records[0], {
+    record_id: "record-1", provider_id: "W123",
+    bibliography: { title: "Distributed optimization", authors: ["Alice", "Alice"], year: 2025,
+      doi: "10.1234/example", url: "https://publisher.example/paper", abstract: null,
+      language: "en", work_type: "article", journal: { title: "Control Journal",
+        source_id: "https://openalex.org/S123", issns: ["1234-567X", "2345-6789"], source_type: "journal" }, citations: null },
+    provenance: { provider: "openalex", method: "api", batch_id: "batch-1", query_id: "query-1",
+      import_id: null, retrieved_at: DISCOVERY_NOW, public_url: "https://openalex.org/W123", verification: "api" },
+    retraction: { state: "screened_clear", source_url: "https://openalex.org/W123", checked_at: DISCOVERY_NOW },
+  })
+  assert.deepEqual(page.works[0].authors, ["Alice"])
+  assert.equal(page.works[0].citations, 0)
+  assert.deepEqual(Object.keys(page.works[0]).sort(), ["abstract", "authors", "citations", "doi", "isOpenAccess", "landingPageUrl", "openAccessUrl", "paperId", "source", "title", "topics", "year"])
+})
+
+test("rich records preserve unknown source, scope and retraction and known zero citations", async () => {
+  assert.equal(typeof openAlex.searchOpenAlexDiscoveryPage, "function")
+  const page = await openAlex.searchOpenAlexDiscoveryPage({ query: "x", batch_id: "b", query_id: "q",
+    now: () => DISCOVERY_NOW, idFactory: () => "r",
+    fetchImpl: async () => jsonResponse({ meta: { count: 1, next_cursor: null }, results: [richWork({
+      primary_location: null, language: null, type: null, is_retracted: null, cited_by_count: 0,
+    })] }),
+  })
+  assert.deepEqual(page.records[0].bibliography.journal, { title: null, source_id: null, issns: [], source_type: null })
+  assert.equal(page.records[0].bibliography.language, null)
+  assert.equal(page.records[0].bibliography.work_type, null)
+  assert.deepEqual(page.records[0].bibliography.citations, { count: 0, provider: "openalex", retrieved_at: DISCOVERY_NOW })
+  assert.deepEqual(page.records[0].retraction, { state: "unknown", source_url: null, checked_at: null })
+})
+
+test("verified DOI lookup uses official endpoint and uncopyable defensive capability", async () => {
+  assert.equal(typeof openAlex.fetchOpenAlexWorkByDoi, "function")
+  assert.equal(typeof openAlex.readVerifiedOpenAlexWork, "function")
+  const signal = new AbortController().signal
+  const token = await openAlex.fetchOpenAlexWorkByDoi({ doi: "https://doi.org/10.1234/EXAMPLE", signal,
+    fetchImpl: async (url, options) => {
+      const parsed = new URL(url)
+      assert.equal(parsed.origin + decodeURIComponent(parsed.pathname), "https://api.openalex.org/works/doi:10.1234/example")
+      assert.equal(options.redirect, "error")
+      assert.equal(options.credentials, "omit")
+      assert.equal(options.referrerPolicy, "no-referrer")
+      assert.equal(options.signal, signal)
+      return jsonResponse(richWork({ open_access: { is_oa: true, oa_url: "https://127.0.0.1/file" } }))
+    },
+  })
+  assert.equal(Object.isFrozen(token), true)
+  const data = openAlex.readVerifiedOpenAlexWork(token)
+  assert.equal(data.work.paperId, "W123")
+  assert.equal(data.work.openAccessUrl, null)
+  assert.deepEqual(data.bibliography.authors, ["Alice", "Alice"])
+  data.work.title = "forged"
+  data.bibliography.authors.push("forged")
+  assert.equal(openAlex.readVerifiedOpenAlexWork(token).work.title, "Distributed optimization")
+  assert.deepEqual(openAlex.readVerifiedOpenAlexWork(token).bibliography.authors, ["Alice", "Alice"])
+  for (const forged of [{}, { paperId: "W123", verified: true }, { verification: "api" }, { ...token }, JSON.parse(JSON.stringify(token)), structuredClone(token), null]) {
+    assert.throws(() => openAlex.readVerifiedOpenAlexWork(forged), TypeError)
+  }
+})
+
+test("DOI lookup rejects invalid identity, mismatching DOI and bounded nested payloads", async () => {
+  assert.equal(typeof openAlex.fetchOpenAlexWorkByDoi, "function")
+  let requests = 0
+  await rejectsWithCode(() => openAlex.fetchOpenAlexWorkByDoi({ doi: "https://attacker.example/W123", fetchImpl: async () => { requests += 1 } }), "request_failed")
+  assert.equal(requests, 0)
+  for (const [body, code] of [
+    [richWork({ doi: null }), "doi_mismatch"], [richWork({ doi: "10.1234/other" }), "doi_mismatch"],
+    [richWork({ id: "W123" }), "invalid_response"], [richWork({ id: "https://attacker.example/W123" }), "invalid_response"],
+    [richWork({ title: "x".repeat(1001) }), "invalid_response"],
+    [richWork({ authorships: Array(51).fill({}) }), "invalid_response"],
+    [richWork({ abstract_inverted_index: { x: Array(5001).fill(1) } }), "invalid_response"],
+    [richWork({ primary_location: { source: { issn: Array(11).fill("1234-567X") } } }), "invalid_response"],
+    [richWork({ language: "x".repeat(101) }), "invalid_response"],
+    [richWork({ unexpected: "x".repeat(2 * 1024 * 1024) }), "invalid_response"],
+    [richWork({ unexpected: "汉".repeat(750_000) }), "invalid_response"],
+    [richWork({ primary_location: { source: { issn_l: "x".repeat(1000) } } }), "invalid_response"],
+  ]) await rejectsWithCode(() => openAlex.fetchOpenAlexWorkByDoi({ doi: "10.1234/example", fetchImpl: async () => jsonResponse(body) }), code)
+})
+
+test("DOI lookup preserves aborts and marks only recoverable transport failures retryable", async () => {
+  assert.equal(typeof openAlex.fetchOpenAlexWorkByDoi, "function")
+  for (const [status, code, retryable] of [[301, "request_failed", false], [404, "unverified", false], [429, "rate_limited", true]]) {
+    await assert.rejects(() => openAlex.fetchOpenAlexWorkByDoi({ doi: "10.1234/example", fetchImpl: async () => jsonResponse(null, status) }), error => error.code === code && error.retryable === retryable)
+  }
+  await assert.rejects(() => openAlex.fetchOpenAlexWorkByDoi({ doi: "10.1234/example", fetchImpl: async () => { throw new Error("offline") } }), error => error.code === "network" && error.retryable === true)
+  for (const stage of ["fetch", "json"]) {
+    const abort = new DOMException("cancelled", "AbortError")
+    await assert.rejects(() => openAlex.fetchOpenAlexWorkByDoi({ doi: "10.1234/example", fetchImpl: async () => {
+      if (stage === "fetch") throw abort
+      return { ok: true, status: 200, json: async () => { throw abort } }
+    } }), error => error === abort)
+  }
+})
+
+test("DOI lookup refuses a redirect response even when it reports success", async () => {
+  await rejectsWithCode(() => openAlex.fetchOpenAlexWorkByDoi({ doi: "10.1234/example",
+    fetchImpl: async () => ({ ...jsonResponse(richWork()), redirected: true }),
+  }), "request_failed")
+})
+
+test("uses the validated expression exactly and supports only three visible sorts", () => {
   const query = "privacy  AND  distributed optimization"
   const expected = new Map([
     ["relevance", "relevance_score:desc"],
@@ -108,19 +241,57 @@ test("uses the final validated English expression exactly and supports only thre
   }
 })
 
+test("buildOpenAlexSearchUrl applies only explicitly selected year and language filters", () => {
+  for (const [options, filter] of [
+    [{ startYear: 2001, endYear: 2026, language: "en" }, "from_publication_date:2001-01-01,to_publication_date:2026-12-31,language:en,is_retracted:false"],
+    [{ startYear: 2020, language: "zh" }, "from_publication_date:2020-01-01,language:zh,is_retracted:false"],
+    [{ endYear: 2010 }, "to_publication_date:2010-12-31,is_retracted:false"],
+    [{ startYear: 2000, endYear: 2000 }, "from_publication_date:2000-01-01,to_publication_date:2000-12-31,is_retracted:false"],
+    [{ startYear: null, endYear: null, language: "all" }, "is_retracted:false"],
+  ]) {
+    const url = new URL(buildOpenAlexSearchUrl({ query: "分布式优化", ...options }))
+    assert.equal(url.searchParams.get("search"), "分布式优化")
+    assert.equal(url.searchParams.get("filter"), filter)
+  }
+})
+
+test("buildOpenAlexSearchUrl preserves the opaque cursor and explicit page sizes up to 50", () => {
+  const cursor = "Ils+/=_opaque-cursor"
+  for (const perPage of [1, 10, 25, 50]) {
+    const url = new URL(buildOpenAlexSearchUrl({ query: "privacy", cursor, perPage }))
+    assert.equal(url.searchParams.get("per_page"), String(perPage))
+    assert.equal(url.searchParams.get("cursor"), cursor)
+  }
+})
+
+test("buildOpenAlexSearchUrl encodes the cursor as one value without accepting parameter injection", () => {
+  const cursor = `next&filter=language:en#fragment?${BLOCKED_QUERY_KEY}=${SENSITIVE_MARKER}`
+  const url = new URL(buildOpenAlexSearchUrl({ query: "privacy", language: "zh", cursor }))
+  assert.equal(url.searchParams.get("cursor"), cursor)
+  assert.deepEqual(url.searchParams.getAll("filter"), ["language:zh,is_retracted:false"])
+  assert.equal(url.searchParams.has(BLOCKED_QUERY_KEY), false)
+  assert.equal(url.hash, "")
+  assert.equal(url.origin + url.pathname, "https://api.openalex.org/works")
+})
+
 test("rejects blank or malformed request values without accepting endpoint or key overrides", () => {
   for (const options of [
     { query: "  " },
     { query: "line\nbreak" },
     { query: "x".repeat(1_001) },
-    { query: "x", currentYear: 999 },
-    { query: "x", currentYear: "2026" },
+    ...["startYear", "endYear"].flatMap((key) => [999, 10_000, "2026", 2020.5, "", Number.NaN, Number.POSITIVE_INFINITY]
+      .map((value) => ({ query: "x", [key]: value }))),
+    { query: "x", startYear: 2026, endYear: 2020 },
+    ...["", "english", "EN", "fr", null, 1].map((language) => ({ query: "x", language })),
+    ...["", " ", "a b", "a\nb", "a\u007fb", "a\u2028b", "x".repeat(2_049), null, 1, {}]
+      .map((cursor) => ({ query: "x", cursor })),
     { query: "x", perPage: 0 },
     { query: "x", perPage: -1 },
     { query: "x", perPage: 1.5 },
     { query: "x", perPage: "10" },
     { query: "x", perPage: Number.NaN },
     { query: "x", perPage: Number.POSITIVE_INFINITY },
+    { query: "x", perPage: 51 },
   ]) {
     assert.throws(
       () => buildOpenAlexSearchUrl(options),
@@ -143,7 +314,7 @@ test("searchOpenAlexWorks sends a privacy-limited GET and normalizes a real work
   const fetchImpl = async (url, options) => {
     request = { url, options }
     return jsonResponse({
-      meta: { count: 127, cost_usd: 0.0001 },
+      meta: { count: 127, cost_usd: 0.0001, next_cursor: "next-page" },
       results: [{
         id: "https://openalex.org/W1234567890",
         doi: "https://doi.org/10.1109/5.771073",
@@ -184,10 +355,16 @@ test("searchOpenAlexWorks sends a privacy-limited GET and normalizes a real work
     query: "distributed optimization",
     fetchImpl,
     signal: abortController.signal,
-    currentYear: 2026,
+    startYear: 2010,
+    endYear: 2025,
+    language: "en",
+    perPage: 50,
+    cursor: "previous-page",
   })
 
-  assert.equal(request.url, buildOpenAlexSearchUrl({ query: "distributed optimization", currentYear: 2026 }))
+  assert.equal(request.url, buildOpenAlexSearchUrl({
+    query: "distributed optimization", startYear: 2010, endYear: 2025, language: "en", perPage: 50, cursor: "previous-page",
+  }))
   assert.deepEqual(request.options, {
     method: "GET",
     signal: abortController.signal,
@@ -198,6 +375,7 @@ test("searchOpenAlexWorks sends a privacy-limited GET and normalizes a real work
   })
   assert.deepEqual(result, {
     total: 127,
+    nextCursor: "next-page",
     costUsd: 0.0001,
     query: "distributed optimization",
     sort: "relevance",
@@ -231,7 +409,7 @@ test("searchOpenAlexWorks exposes the active newest and cited-count bases", asyn
       sort,
       fetchImpl: async (url) => {
         requestedUrl = new URL(url)
-        return jsonResponse({ meta: { count: 0 }, results: [] })
+        return jsonResponse({ meta: { count: 0, next_cursor: null }, results: [] })
       },
     })
     assert.equal(requestedUrl.searchParams.get("sort"), parameter)
@@ -244,7 +422,7 @@ test("searchOpenAlexWorks represents missing or unsafe optional metadata conserv
   const result = await searchOpenAlexWorks({
     query: "constrained optimization",
     fetchImpl: async () => jsonResponse({
-      meta: { count: 1 },
+      meta: { count: 1, next_cursor: null },
       results: [{
         id: "https://openalex.org/W9",
         doi: "javascript:alert(1)",
@@ -289,7 +467,7 @@ test("searchOpenAlexWorks never accepts traversal or double-separator DOI identi
     const result = await searchOpenAlexWorks({
       query: "privacy",
       fetchImpl: async () => jsonResponse({
-        meta: { count: 1 },
+        meta: { count: 1, next_cursor: null },
         results: [{
           id: "https://openalex.org/W9",
           doi,
@@ -341,7 +519,7 @@ test("searchOpenAlexWorks never exposes private, credential-like, or token-beari
     const result = await searchOpenAlexWorks({
       query: "privacy",
       fetchImpl: async () => jsonResponse({
-        meta: { count: 1 },
+        meta: { count: 1, next_cursor: null },
         results: [{
           id: "https://openalex.org/W9",
           doi: null,
@@ -373,7 +551,7 @@ test("searchOpenAlexWorks removes links with repeatedly encoded credential keys"
     const result = await searchOpenAlexWorks({
       query: "privacy",
       fetchImpl: async () => jsonResponse({
-        meta: { count: 1 },
+        meta: { count: 1, next_cursor: null },
         results: [{
           id: "https://openalex.org/W9",
           doi: null,
@@ -458,7 +636,7 @@ test("searchOpenAlexWorks rejects abusive nested work fields instead of truncati
   for (const work of invalidWorks) {
     await rejectsWithCode(searchOpenAlexWorks({
       query: "privacy",
-      fetchImpl: async () => jsonResponse({ meta: { count: 1 }, results: [work] }),
+      fetchImpl: async () => jsonResponse({ meta: { count: 1, next_cursor: null }, results: [work] }),
     }), "invalid_response")
   }
 })
@@ -467,18 +645,110 @@ test("searchOpenAlexWorks returns a bounded empty result without claiming the di
   const query = "no matching paper"
   const result = await searchOpenAlexWorks({
     query,
-    fetchImpl: async () => jsonResponse({ meta: { count: 0, cost_usd: 0 }, results: [] }),
+    fetchImpl: async () => jsonResponse({ meta: { count: 0, cost_usd: 0, next_cursor: null }, results: [] }),
   })
   assert.deepEqual(result, {
     total: 0,
+    nextCursor: null,
     works: [],
     costUsd: 0,
     query,
     sort: "relevance",
     sortBasis: "OpenAlex 综合相关度",
-    emptyMessage: "当前英文检索式未返回结果。",
+    emptyMessage: "当前检索条件未返回结果。",
   })
   assert.doesNotMatch(result.emptyMessage, /方向不存在|论文不存在|没有该方向/u)
+})
+
+test("searchOpenAlexWorks fetches one requested page and preserves scope through cursor paging", async () => {
+  const scope = { query: "分布式优化", startYear: 2000, endYear: 2026, language: "zh", sort: "citations", perPage: 25 }
+  const cursors = ["*", "cursor+/page-two=", "cursor_last"]
+  const pages = [
+    { meta: { count: 27, next_cursor: cursors[1] }, results: Array.from({ length: 25 }, (_, i) => ({ id: `https://openalex.org/W${i + 1}` })) },
+    { meta: { count: 27, next_cursor: cursors[2] }, results: [{ id: "https://openalex.org/W26" }, { id: "https://openalex.org/W27" }] },
+    { meta: { count: 27, next_cursor: null }, results: [] },
+  ]
+  let calls = 0
+  const fetchImpl = async (request) => {
+    const url = new URL(request)
+    assert.equal(url.searchParams.get("cursor"), cursors[calls])
+    assert.equal(url.searchParams.get("search"), scope.query)
+    assert.equal(url.searchParams.get("filter"), "from_publication_date:2000-01-01,to_publication_date:2026-12-31,language:zh,is_retracted:false")
+    assert.equal(url.searchParams.get("per_page"), "25")
+    assert.equal(url.searchParams.get("sort"), "cited_by_count:desc")
+    return jsonResponse(pages[calls++])
+  }
+  let cursor = "*"
+  const collected = []
+  for (let page = 0; page < 3; page += 1) {
+    const result = await searchOpenAlexWorks({ ...scope, cursor, fetchImpl })
+    assert.equal(calls, page + 1)
+    assert.equal(result.total, 27)
+    assert.equal(result.nextCursor, pages[page].meta.next_cursor)
+    if (page === 2) assert.equal(result.emptyMessage, "已加载完当前检索条件的结果。")
+    collected.push(...result.works)
+    cursor = result.nextCursor
+  }
+  assert.equal(collected.length, 27)
+  assert.equal(new Set(collected.map((work) => work.paperId)).size, 27)
+  assert.equal(cursor, null)
+})
+
+test("searchOpenAlexWorks bounds each response by the requested page size, not ten", async () => {
+  for (const perPage of [1, 25, 50]) {
+    const results = Array.from({ length: perPage }, (_, i) => ({ id: `https://openalex.org/W${i + 1}` }))
+    const result = await searchOpenAlexWorks({
+      query: "privacy", perPage,
+      fetchImpl: async () => jsonResponse({ meta: { count: perPage, next_cursor: null }, results }),
+    })
+    assert.equal(result.works.length, perPage)
+    await rejectsWithCode(searchOpenAlexWorks({
+      query: "privacy", perPage,
+      fetchImpl: async () => jsonResponse({
+        meta: { count: perPage + 1, next_cursor: "next" },
+        results: [...results, { id: `https://openalex.org/W${perPage + 1}` }],
+      }),
+    }), "invalid_response")
+  }
+})
+
+test("searchOpenAlexWorks accepts a nonempty final page after earlier results", async () => {
+  const result = await searchOpenAlexWorks({
+    query: "privacy", cursor: "previous-page",
+    fetchImpl: async () => jsonResponse({
+      meta: { count: 27, next_cursor: null },
+      results: [{ id: "https://openalex.org/W26" }, { id: "https://openalex.org/W27" }],
+    }),
+  })
+  assert.equal(result.total, 27)
+  assert.equal(result.works.length, 2)
+  assert.equal(result.nextCursor, null)
+  assert.equal(result.emptyMessage, null)
+})
+
+test("searchOpenAlexWorks rejects missing, malformed, or non-advancing response cursors", async () => {
+  for (const nextCursor of [undefined, "", " ", "a b", "a\nb", "a\u007fb", "a\u2028b", "x".repeat(2_049), "*", "previous-page", 1, {}]) {
+    await rejectsWithCode(searchOpenAlexWorks({
+      query: "privacy", cursor: "previous-page",
+      fetchImpl: async () => jsonResponse({
+        meta: { count: 2, next_cursor: nextCursor }, results: [{ id: "https://openalex.org/W1" }],
+      }),
+    }), "invalid_response")
+  }
+})
+
+test("searchOpenAlexWorks rejects incomplete initial or intermediate pages instead of reporting exhaustion", async () => {
+  for (const [cursor, meta, results] of [
+    ["*", { count: 5, next_cursor: null }, []],
+    ["*", { count: 5, next_cursor: null }, [{ id: "https://openalex.org/W1" }]],
+    ["*", { count: 5, next_cursor: "next" }, []],
+    ["previous-page", { count: 5, next_cursor: "next" }, []],
+    ["*", { count: 0, next_cursor: "next" }, []],
+  ]) {
+    await rejectsWithCode(searchOpenAlexWorks({
+      query: "privacy", cursor, fetchImpl: async () => jsonResponse({ meta, results }),
+    }), "invalid_response")
+  }
 })
 
 test("searchOpenAlexWorks exposes rate limits and other HTTP failures with stable codes", async () => {
@@ -505,12 +775,12 @@ test("searchOpenAlexWorks distinguishes network errors from invalid JSON envelop
     "invalid_response",
   )
   for (const payload of [
-    { meta: { count: 1 }, results: "not-an-array" },
-    { meta: { count: -1 }, results: [] },
-    { meta: {}, results: [] },
-    { meta: { count: 9_007_199_254_740_991 }, results: [] },
-    { meta: { count: 5 }, results: [] },
-    { meta: { count: 1 }, results: [{ id: "malformed" }] },
+    { meta: { count: 1, next_cursor: null }, results: "not-an-array" },
+    { meta: { count: -1, next_cursor: null }, results: [] },
+    { meta: { next_cursor: null }, results: [] },
+    { meta: { count: 9_007_199_254_740_991, next_cursor: null }, results: [] },
+    { meta: { count: 5, next_cursor: null }, results: [] },
+    { meta: { count: 1, next_cursor: null }, results: [{ id: "malformed" }] },
   ]) {
     await rejectsWithCode(
       searchOpenAlexWorks({ query: "test", fetchImpl: async () => jsonResponse(payload) }),

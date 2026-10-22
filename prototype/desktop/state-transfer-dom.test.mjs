@@ -2,6 +2,10 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
+import { createEmptyP02WorkflowState } from "./p02-workflow.mjs"
+import { createEmptyDiscoveryWorkspaceState, DISCOVERY_WORKSPACE_STORAGE_KEY } from "./discovery-workspace.mjs"
+import { createHash } from "node:crypto"
+
 const pageUrl = new URL("./state-transfer.html", import.meta.url)
 const moduleUrl = new URL("./state-transfer.mjs", import.meta.url)
 const html = await readFile(pageUrl, "utf8")
@@ -30,10 +34,11 @@ const EXPECTED_IDS = Object.freeze([
   "state-transfer-status",
 ])
 
-test("operator page is an unlinked Chinese desktop-only surface with only the two approved network references", async () => {
+test("operator page is a Chinese desktop-only surface linked only from secondary navigation", async () => {
   assert.match(html, /<html lang="zh-CN">/u)
   assert.match(html, /一次性本地工具/u)
-  assert.match(html, /不读取论文正文、笔记、原始路径、凭据/u)
+  assert.match(html, /P02 研究闭环/u)
+  assert.match(html, /不读取论文源文件、笔记文件、原始路径、凭据/u)
   assert.match(html, /<body class="state-transfer-page">/u)
   assert.doesNotMatch(html, /<nav\b|class="[^"]*(?:sidebar|primary-nav|nav-item)/u)
   assert.doesNotMatch(html, /<iframe|<embed|<object|\son[a-z]+\s*=/iu)
@@ -48,18 +53,28 @@ test("operator page is an unlinked Chinese desktop-only surface with only the tw
   assert.deepEqual(assetReferences, ["./assets/state-transfer.mjs", "./assets/styles.css"])
 
   for (const name of [
-    "index.html", "directions.html", "p02.html", "agent-tasks.html", "library.template.html", "discovery.template.html",
+    "index.html", "directions.html", "p02.html", "agent-tasks.html", "library.template.html", "discovery.template.html", "p02-writing.html",
   ]) {
     const normalPage = await readFile(new URL(`./${name}`, import.meta.url), "utf8")
-    assert.doesNotMatch(normalPage, /state-transfer\.html/u, name)
+    const secondaryNavigation = normalPage.match(/<details\b[^>]*class="nav-more"[^>]*>[\s\S]*?<\/details>/u)?.[0]
+    assert.match(secondaryNavigation ?? "", /state-transfer\.html/u, name)
+    assert.doesNotMatch(normalPage.replace(secondaryNavigation, ""), /state-transfer\.html/u, name)
   }
 })
 
-test("the recursive runtime import graph is exactly the seven approved modules and has no dynamic or escaping import", async () => {
+test("the recursive runtime import graph is exactly fifteen approved modules and has no dynamic or escaping import", async () => {
   const expected = [
     "agent-task-input.mjs",
+    "bibliography-normalization.mjs",
     "candidate-storage.mjs",
     "direction-snapshot.mjs",
+    "discovery-batch.mjs",
+    "discovery-identity.mjs",
+    "discovery-record.mjs",
+    "discovery-workspace.mjs",
+    "journal-review.mjs",
+    "openalex-search.mjs",
+    "p02-workflow.mjs",
     "paper-library-model.mjs",
     "paper-library-storage.mjs",
     "paper-user-tags.mjs",
@@ -256,6 +271,8 @@ function emptyState() {
     personal_tags: { version: 1, papers: {} },
     discovery_candidates: { version: 1, candidates: [] },
     agent_task_input: { version: 1, current_snapshot_id: null, snapshots: [] },
+    p02_workflow: createEmptyP02WorkflowState(),
+    discovery_workspace: createEmptyDiscoveryWorkspaceState(),
   }
 }
 
@@ -265,6 +282,8 @@ function storageFor(state) {
     "research-console.paper-user-tags.v1": JSON.stringify(state.personal_tags),
     "research-console.discovery-candidates.v1": JSON.stringify(state.discovery_candidates),
     "research-console.agent-task-input.v1": JSON.stringify(state.agent_task_input),
+    "research-console.p02-workflow.v1": JSON.stringify(state.p02_workflow),
+    [DISCOVERY_WORKSPACE_STORAGE_KEY]: JSON.stringify(state.discovery_workspace),
     ...(state.direction_snapshot
       ? { "research-console.direction-snapshot.v1": JSON.stringify(state.direction_snapshot) }
       : {}),
@@ -369,6 +388,42 @@ test("changing selected files after preview invalidates the old plan and blocks 
   await confirm.dispatch("change")
   await apply.dispatch("click")
   assert.equal(storage.writes, writesBeforeChange)
+})
+
+test('discovery preview summarizes v3, defaults to keeping current, and cancellation writes nothing', async context => {
+  let calls = 0
+  const { transfer, ui, storage } = await bootOperator(context, 'discovery-preview', { fetchImpl: async () => {
+    calls++; return { ok: true, json: async () => ({ papers: [] }) }
+  } })
+  assert.equal(calls, 0, 'loading the module must not initiate API calls')
+  const state = emptyState(); state.discovery_workspace.revision = 4
+  const incoming = await transfer.exportStateBundle({ storage: storageFor(state), originLabel: 'http://127.0.0.1:4177', exportedAt: '2026-09-01T00:00:00.000Z' })
+  const files = ui.documentRef.elements.get('state-transfer-files')
+  files.files = [bundleFile(incoming, 'v3.json')]
+  await files.dispatch('change')
+  await ui.documentRef.elements.get('state-transfer-preview').dispatch('click')
+  assert.match(ui.documentRef.elements.get('state-transfer-bundles').textContent, /检索结果 0；外部候选 0/u)
+  assert.match(ui.documentRef.elements.get('state-transfer-conflicts').textContent, /检索工作区/u)
+  assert.equal(ui.documentRef.elements.get('state-transfer-conflicts').querySelector('select').value, 'skip')
+  files.files = []; await files.dispatch('change')
+  assert.equal(ui.documentRef.elements.get('state-transfer-apply').disabled, true)
+  assert.equal(storage.writes, 0)
+  assert.equal(JSON.parse(storage.getItem(DISCOVERY_WORKSPACE_STORAGE_KEY)).revision, 0)
+})
+
+test('legacy v2 preview explains that the current discovery workspace is preserved', async context => {
+  const { transfer, ui } = await bootOperator(context, 'discovery-legacy-summary')
+  const exported = await transfer.exportStateBundle({ storage: storageFor(emptyState()), originLabel: 'http://127.0.0.1:4177', exportedAt: '2026-09-01T00:00:00.000Z' })
+  const { sha256, ...body } = structuredClone(exported)
+  body.version = 2; delete body.state.discovery_workspace
+  delete body.counts.discovery_results; delete body.counts.discovery_external_candidates
+  const canonical = value => value && typeof value === 'object'
+    ? Array.isArray(value) ? `[${value.map(canonical).join(',')}]` : `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
+    : JSON.stringify(value)
+  const legacy = { ...body, sha256: createHash('sha256').update(canonical(body)).digest('hex') }
+  ui.documentRef.elements.get('state-transfer-files').files = [bundleFile(legacy, 'v2.json')]
+  await ui.documentRef.elements.get('state-transfer-preview').dispatch('click')
+  assert.match(ui.documentRef.elements.get('state-transfer-bundles').textContent, /检索工作区旧版未包含，保留当前状态/u)
 })
 
 test("a failed preview resets checked and enabled confirmation state", async (context) => {
@@ -508,6 +563,7 @@ test("operator behavior blocks unsupported origins, sanitizes failures and bodie
   assert.deepEqual(ui.requests, ["http://127.0.0.1:4176/local_library_data/paper-index.json"])
   assert.doesNotMatch(ui.root.textContent, /<img|<svg|privateFailure/u)
   assert.match(ui.root.textContent, /http:\/\/127\.0\.0\.1:4177/u)
+  assert.match(ui.root.textContent, /P02 已确认阶段 0/u)
   assert.match(ui.documentRef.elements.get("state-transfer-exclusions").textContent, /Paper-Imported/u)
   const conflictSelects = ui.documentRef.elements.get("state-transfer-conflicts").querySelectorAll("select")
   assert.equal(conflictSelects.length, 2)

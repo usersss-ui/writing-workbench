@@ -1185,6 +1185,49 @@ test("keeps formal states conservative and records unreadable Markdown", async (
   assert.equal(result.audit.warnings.unreadable_markdown.length, 1)
 })
 
+test("keeps frontmatter when the 8192-byte read boundary splits a valid UTF-8 character", async (t) => {
+  const header = Buffer.from("---\npaper_id: Utf8-01\ntitle: Preserved metadata\n---\n")
+  for (const [character, prefixBytes] of [["é", 1], ["中", 1], ["中", 2], ["🧪", 1], ["🧪", 2], ["🧪", 3]]) {
+    await t.test(`${Buffer.byteLength(character)}-byte character after ${prefixBytes} bytes`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "paper-markdown-utf8-boundary-"))
+      await put(root, "Paper/paper.pdf")
+      await put(root, "Paper/note.md", Buffer.concat([
+        header,
+        Buffer.alloc(8192 - header.length - prefixBytes, 0x61),
+        Buffer.from(character),
+        Buffer.from("\nRemaining valid content"),
+      ]))
+      const result = await scan(root)
+      assert.deepEqual(result.audit.warnings.unreadable_markdown, [])
+      assert.equal(result.papers[0].paper_id, "Utf8-01")
+      assert.equal(result.papers[0].identity_source, "frontmatter")
+      assert.equal(result.papers[0].title_original, "Preserved metadata")
+    })
+  }
+})
+
+test("UTF-8 prefix handling still rejects invalid bytes, literal replacements and unfinished EOF sequences", async (t) => {
+  const header = Buffer.from("---\npaper_id: Utf8-01\n---\n")
+  const cases = [
+    ["invalid byte inside the prefix", Buffer.concat([header, Buffer.from([0xff]), Buffer.alloc(8300, 0x61)])],
+    ["literal replacement inside the prefix", Buffer.concat([header, Buffer.from("正文\uFFFD"), Buffer.alloc(8300, 0x61)])],
+    ["unfinished character at EOF", Buffer.concat([header, Buffer.alloc(8192 - header.length - 1, 0x61), Buffer.from([0xe4])])],
+    ["invalid continuation across the read boundary", Buffer.concat([header, Buffer.alloc(8192 - header.length - 1, 0x61), Buffer.from([0xe4, 0x41]), Buffer.alloc(20, 0x61)])],
+    ["literal replacement across the read boundary", Buffer.concat([header, Buffer.alloc(8192 - header.length - 1, 0x61), Buffer.from("\uFFFD"), Buffer.alloc(20, 0x61)])],
+  ]
+  for (const [name, bytes] of cases) {
+    await t.test(name, async () => {
+      const root = await mkdtemp(join(tmpdir(), "paper-markdown-utf8-invalid-"))
+      await put(root, "Paper/paper.pdf")
+      await put(root, "Paper/note.md", bytes)
+      const result = await scan(root)
+      assert.deepEqual(result.audit.warnings.unreadable_markdown, ["Paper/note.md"])
+      assert.equal(result.papers[0].identity_source, "path_hash")
+      assert.notEqual(result.papers[0].paper_id, "Utf8-01")
+    })
+  }
+})
+
 test("rejects an invalid frontmatter paper_id instead of letting it replace the record identity", async () => {
   const root = await mkdtemp(join(tmpdir(), "paper-scan-"))
   await put(root, "Paper/paper.pdf")

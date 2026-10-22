@@ -47,6 +47,221 @@ const SAFE_CALLOUT_CLASSES = new Set([
   "note-callout--note", "note-callout--info", "note-callout--tip", "note-callout--warning",
   "note-callout--caution", "note-callout--important", "note-callout--quote", "note-callout--algorithm",
 ])
+const NOTE_DRAFT_SESSIONS = new WeakMap()
+const NOTE_DRAFT_MAX_BYTES = 1024 * 1024
+
+function noteMetadataText(value) {
+  return String(value ?? "").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").trim()
+    .replace(/([\\`*_{}\[\]<>()#!|$])/gu, "\\$1")
+}
+
+export function buildManualNoteDraft(paper) {
+  const paperId = paper?.paper_id
+  if (typeof paperId !== "string" || !/^[A-Za-z][A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/u.test(paperId)) {
+    throw new TypeError("请先选择一篇有效的本地论文")
+  }
+  const title = noteMetadataText(displayPaperTitle(paper))
+  const originalTitle = noteMetadataText(paper.title_original || paper.title_en)
+  const authors = stringList(paper.authors).map(noteMetadataText).join("；") || "待补充"
+  const year = noteMetadataText(paper.publication_year ?? paper.year) || "待补充"
+  const source = safeHttpUrl(paper.doi_or_url)
+  return {
+    paperId,
+    originalFileName: `${paperId}_论文精读.md`,
+    markdown: [
+      "---", `paper_id: ${paperId}`, "---", "", `# ${title} · 论文精读草稿`, "",
+      "> 手工分析草稿：系统只填入书目信息和待回答的问题；自动全文分析尚未接通。请根据原文填写，所有结论均待核验。", "",
+      "## 书目信息", "", `- 论文编号：${paperId}`, `- 标题：${title}`,
+      ...(originalTitle && originalTitle !== title ? [`- 原文标题：${originalTitle}`] : []),
+      `- 作者：${authors}`, `- 年份：${year}`,
+      ...(source && !source.username && !source.password ? [`- 来源：${source.href}`] : []), "",
+      "## 1. 研究问题", "", "TODO：这篇论文解决什么研究问题？适用场景与已有工作的不足是什么？", "",
+      "## 2. 问题设定与假设", "", "TODO：记录变量、目标函数、约束、数据或网络假设，并注明页码或公式编号。", "",
+      "## 3. 方法与关键步骤", "", "TODO：用自己的话解释方法、算法步骤和关键公式；区分作者陈述与个人理解。", "",
+      "## 4. 结果与证据", "", "TODO：记录主要结果、成立条件、实验设置与比较基线；为每项结论填写页码、图表或定理编号。", "",
+      "## 5. 局限与待核验问题", "", "TODO：哪些条件限制了结论？哪些步骤尚未理解或需要复现？", "",
+      "## 6. 对我的研究有什么用", "", "TODO：说明可借鉴的方法、可比较的结果和不能直接沿用的条件。", "",
+      "## 来源核验清单", "", "- [ ] 已核对原文书目信息", "- [ ] 已为关键结论填写来源位置",
+      "- [ ] 已区分论文原文、个人理解与待核验推断", "- [ ] 已复核公式、图表和引用", "",
+    ].join("\n"),
+  }
+}
+
+function noteDraftSession(document) {
+  let session = NOTE_DRAFT_SESSIONS.get(document)
+  if (session) return session
+  session = { drafts: new Map(), onImport: null, canImport: () => false, editor: null }
+  NOTE_DRAFT_SESSIONS.set(document, session)
+  document.defaultView?.addEventListener?.("beforeunload", (event) => {
+    if (![...session.drafts.values()].some((draft) => draft.edited)) return
+    event.preventDefault()
+    event.returnValue = ""
+  })
+  return session
+}
+
+export function installNoteDraftEditor({ document, onImport, canImport = () => true }) {
+  const session = noteDraftSession(document)
+  session.onImport = typeof onImport === "function" ? onImport : null
+  session.canImport = typeof canImport === "function" ? canImport : () => false
+}
+
+function createNoteDraftEditor(document, session) {
+  const dialog = document.createElement("dialog")
+  dialog.className = "library-note-import-dialog library-note-draft-dialog"
+  dialog.setAttribute("aria-labelledby", "library-note-draft-title")
+  const shell = document.createElement("div")
+  shell.className = "library-note-import-shell"
+  const header = document.createElement("header")
+  header.className = "library-note-import-heading"
+  const heading = appendTextElement(document, header, "h2", "手工分析 / 笔记草稿")
+  heading.id = "library-note-draft-title"
+  const body = document.createElement("div")
+  body.className = "library-note-import-body"
+  const paperLabel = appendTextElement(document, body, "p", "")
+  appendTextElement(document, body, "p", "按原文填写问题、方法与结果。自动全文分析尚未接通；模板中的 TODO 需要你完成。")
+  appendTextElement(document, body, "p", "草稿仅保留在当前页面，关闭对话框后可继续编辑；刷新或离开前请下载 Markdown。导入时还会检查并由你确认保存。")
+  const label = appendTextElement(document, body, "label", "Markdown 笔记正文")
+  const textarea = document.createElement("textarea")
+  textarea.className = "library-note-draft-text"
+  textarea.rows = 18
+  textarea.spellcheck = false
+  textarea.setAttribute("aria-label", "Markdown 笔记正文")
+  label.append(textarea)
+  const status = appendTextElement(document, body, "p", "")
+  status.setAttribute("role", "status")
+  status.setAttribute("aria-live", "polite")
+  const footer = document.createElement("footer")
+  footer.className = "library-note-import-actions library-note-draft-actions"
+  const button = (parent, action, text, className = "button button--secondary") => {
+    const node = appendTextElement(document, parent, "button", text, className)
+    node.type = "button"
+    node.dataset.noteDraftAction = action
+    return node
+  }
+  const close = button(header, "close", "关闭", "text-button")
+  const copy = button(footer, "copy", "复制 Markdown")
+  const download = button(footer, "download", "下载 Markdown")
+  const importButton = button(footer, "import", "检查并导入笔记", "button button--primary")
+  shell.append(header, body, footer)
+  dialog.append(shell)
+  document.body.append(dialog)
+  let current = null
+  let trigger = null
+  let busy = false
+
+  const validText = () => textarea.value.trim().length > 0
+    && new TextEncoder().encode(textarea.value).byteLength <= NOTE_DRAFT_MAX_BYTES
+  const importAvailable = () => {
+    try { return typeof session.onImport === "function" && session.canImport() === true } catch { return false }
+  }
+  const sync = () => {
+    close.disabled = busy
+    textarea.disabled = busy
+    copy.disabled = busy || !validText()
+    download.disabled = busy || !validText()
+    importButton.disabled = busy || !validText() || !importAvailable()
+  }
+  const remember = () => { if (current) current.markdown = textarea.value }
+  textarea.addEventListener("input", () => {
+    remember()
+    if (current) current.edited = true
+    status.textContent = validText() ? "草稿已暂存在当前页面；请下载或检查后导入。" : "请填写正文，并将笔记控制在 1 MiB 以内。"
+    sync()
+  })
+  close.addEventListener("click", () => { if (!busy) dialog.close() })
+  dialog.addEventListener("close", () => { remember(); trigger?.focus?.() })
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") event.stopPropagation?.()
+  })
+  dialog.addEventListener("cancel", (event) => { if (busy) event.preventDefault() })
+  copy.addEventListener("click", async () => {
+    if (busy || !current || !validText()) return
+    remember()
+    try {
+      const clipboard = document.defaultView?.navigator?.clipboard
+      if (typeof clipboard?.writeText !== "function") throw new Error("clipboard unavailable")
+      await clipboard.writeText(current.markdown)
+      status.textContent = "Markdown 已复制；原始笔记尚未改动。"
+    } catch {
+      status.textContent = "复制失败，请选择正文复制，或下载 Markdown。"
+      textarea.focus()
+    }
+  })
+  download.addEventListener("click", () => {
+    if (busy || !current || !validText()) return
+    remember()
+    const browser = document.defaultView
+    const urlApi = browser?.URL
+    let url = null
+    let link = null
+    try {
+      url = urlApi.createObjectURL(new browser.Blob([current.markdown], { type: "text/markdown;charset=utf-8" }))
+      link = document.createElement("a")
+      link.href = url
+      link.download = current.originalFileName
+      document.body.append(link)
+      link.click()
+      status.textContent = "Markdown 下载已发起，离开前请确认文件已保存。"
+    } catch {
+      status.textContent = "下载失败，请复制 Markdown 后自行保存。"
+    } finally {
+      link?.remove?.()
+      if (url) (browser?.setTimeout ?? globalThis.setTimeout)(() => urlApi.revokeObjectURL(url), 1000)
+    }
+  })
+  importButton.addEventListener("click", async () => {
+    if (busy || !current || !validText() || !importAvailable()) return
+    remember()
+    const payload = { paperId: current.paperId, markdown: current.markdown, originalFileName: current.originalFileName }
+    busy = true
+    sync()
+    dialog.close()
+    let opened = false
+    try { opened = await session.onImport(payload) === true } catch { opened = false }
+    busy = false
+    if (!opened) {
+      dialog.showModal()
+      status.textContent = "未能打开笔记检查；草稿已保留，请重试或下载 Markdown。"
+      textarea.focus()
+    }
+    sync()
+  })
+  return {
+    open(paper, opener) {
+      if (busy) return
+      trigger = opener
+      let draft = session.drafts.get(paper.paper_id)
+      if (!draft) {
+        draft = { ...buildManualNoteDraft(paper), edited: false }
+        session.drafts.set(paper.paper_id, draft)
+      }
+      current = draft
+      textarea.value = draft.markdown
+      paperLabel.textContent = `${paper.paper_id} · ${displayPaperTitle(paper)}`
+      status.textContent = importAvailable() ? "填写后可下载，或检查并导入本地论文库。" : "当前无法连接笔记导入服务；可编辑、复制与下载 Markdown。"
+      sync()
+      if (!dialog.open) dialog.showModal()
+      textarea.focus()
+    },
+  }
+}
+
+export function renderManualAnalysisEntry({ document, paper }) {
+  const section = document.createElement("section")
+  section.className = "library-reader-summary-card"
+  appendTextElement(document, section, "h3", "手工分析 / 笔记草稿")
+  appendTextElement(document, section, "p", "根据原文填写研究问题、方法和结果，再保存为 Markdown 笔记。自动全文分析尚未接通。")
+  const button = appendTextElement(document, section, "button", "打开笔记草稿", "button button--primary")
+  button.type = "button"
+  button.dataset.noteDraftAction = "open"
+  button.addEventListener("click", () => {
+    const session = noteDraftSession(document)
+    session.editor ??= createNoteDraftEditor(document, session)
+    session.editor.open(paper, button)
+  })
+  return section
+}
 
 function readablePreviewImageLabel(value) {
   const label = typeof value === "string" ? value.trim() : ""
@@ -328,6 +543,7 @@ export function renderInspector({
   const englishTitle = typeof paper?.title_en === "string" ? paper.title_en.trim() : ""
   if (englishTitle && englishTitle !== displayPaperTitle(paper)) appendTextElement(document, heading, "p", englishTitle)
   root.append(heading)
+  root.append(renderManualAnalysisEntry({ document, paper }))
   appendIdentityContext(document, root, paper)
   appendStatusBadges(document, root, paper)
   root.append(renderUserTagEditor({ document, paper, userTags, userTagNotice }))
@@ -363,6 +579,7 @@ export function renderReaderOverview({
     "这里汇总已记录的书目、材料与研究画像；未记录的结论不会从文件名或正文自动推断。",
   )
   root.append(introduction)
+  root.append(renderManualAnalysisEntry({ document, paper }))
   appendBibliography(document, root, paper)
   appendArtifactCounts(document, root, paper)
   root.append(renderUserTagEditor({ document, paper, userTags, userTagNotice }))

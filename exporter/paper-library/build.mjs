@@ -86,6 +86,18 @@ const DESKTOP_TEMPLATE_MESSAGES = new Map([
 const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "styles.css",
   "state-transfer.mjs",
+  "bibliography-import.mjs",
+  "discovery-candidate-bridge.mjs",
+  "discovery-recommendation.mjs",
+  "discovery-results-ui.mjs",
+  "discovery-review-ui.mjs",
+  "discovery-session-ui.mjs",
+  "local-discovery.mjs",
+  "discovery-workspace.mjs",
+  "discovery-batch.mjs",
+  "discovery-identity.mjs",
+  "journal-review.mjs",
+  "p02-workflow.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -96,8 +108,12 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "agent-task-input.mjs",
   "candidate-storage.mjs",
   "discovery.mjs",
+  "discovery-query-plan.mjs",
   "institution-access.mjs",
   "openalex-search.mjs",
+  "bibliography-normalization.mjs",
+  "discovery-record.mjs",
+  "local-paper-match.mjs",
 ])
 const KATEX_VENDOR_ROOT = "vendor/katex"
 const KATEX_REQUIRED_FILES = Object.freeze(["katex.mjs", "katex.min.css", "LICENSE"])

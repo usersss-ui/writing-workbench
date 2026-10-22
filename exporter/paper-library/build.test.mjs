@@ -32,6 +32,18 @@ import { createEmptyFacets } from "./facet-schema.mjs"
 const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "styles.css",
   "state-transfer.mjs",
+  "bibliography-import.mjs",
+  "discovery-candidate-bridge.mjs",
+  "discovery-recommendation.mjs",
+  "discovery-results-ui.mjs",
+  "discovery-review-ui.mjs",
+  "discovery-session-ui.mjs",
+  "local-discovery.mjs",
+  "discovery-workspace.mjs",
+  "discovery-batch.mjs",
+  "discovery-identity.mjs",
+  "journal-review.mjs",
+  "p02-workflow.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -40,8 +52,12 @@ const REQUIRED_DESKTOP_ASSETS = Object.freeze([
   "paper-user-tags.mjs",
   "candidate-storage.mjs",
   "discovery.mjs",
+  "discovery-query-plan.mjs",
   "institution-access.mjs",
   "openalex-search.mjs",
+  "bibliography-normalization.mjs",
+  "discovery-record.mjs",
+  "local-paper-match.mjs",
   "direction-snapshot.mjs",
   "agent-task-input.mjs",
 ])
@@ -1266,6 +1282,7 @@ test("local configuration declares the real catalog and only stable manual decis
   const linearGraphReport = "main_papers::01_基础与网络机制/有向_时变网络与偏斜修正/Liu (2024) Linear convergence time-varying unbalanced graphs"
   const proximalTracking = "main_papers::02_约束分布式优化/局部与非一致约束/Li (2025) 有向图分布式Proximal-Tracking"
   const primalDualSplitting = "main_papers::02_约束分布式优化/耦合约束与原始对偶/Tang (2026) 原始对偶分裂"
+  const chen25Dpgt = "main_papers::05_隐私安全与鲁棒/差分隐私/Chen (2025) DP gradient tracking stochastic directed graphs"
   const zhao24Dfl = "main_papers::06_分布式学习与应用/联邦学习基础与去中心化方法/Zhao (2024) Decentralized online bandit federated learning"
   const zhao25Depsfl = "main_papers::06_分布式学习与应用/联邦学习基础与去中心化方法/Zhao (2025) Differential privacy federated learning IoV"
   const zhaoResearchLine = "main_papers::赵中原"
@@ -1286,6 +1303,7 @@ test("local configuration declares the real catalog and only stable manual decis
     thesisRoot,
     chapter03,
     chapter05,
+    chen25Dpgt,
     retainedPreview,
     zhao24Dfl,
     zhao25Depsfl,
@@ -1302,6 +1320,10 @@ test("local configuration declares the real catalog and only stable manual decis
   assert.equal(overrides.papers[chapter05].paper_id, "Li25-TSGF-C05")
   assert.equal(overrides.papers[chapter05].unit_type, "chapter")
   assert.equal(overrides.papers[chapter05].parent_paper_id, "Li25-TSGF")
+  assert.equal(
+    overrides.papers[chen25Dpgt].title_original,
+    "Differentially Private Gradient-Tracking-Based Distributed Stochastic Optimization over Directed Graphs",
+  )
   assert.deepEqual(overrides.papers[excluded], {
     include: false,
     exclude_reason: "continuous_time_out_of_scope",

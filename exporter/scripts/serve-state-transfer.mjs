@@ -6,6 +6,14 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 
 export const STATE_TRANSFER_ASSET_FILES = Object.freeze([
   "state-transfer.mjs",
+  "p02-workflow.mjs",
+  "discovery-workspace.mjs",
+  "discovery-batch.mjs",
+  "discovery-identity.mjs",
+  "discovery-record.mjs",
+  "openalex-search.mjs",
+  "bibliography-normalization.mjs",
+  "journal-review.mjs",
   "direction-snapshot.mjs",
   "agent-task-input.mjs",
   "paper-library-storage.mjs",

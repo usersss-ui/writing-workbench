@@ -3,6 +3,8 @@ import * as taskInputModule from "./agent-task-input.mjs"
 import * as workspaceModule from "./paper-library-storage.mjs"
 import * as userTagModule from "./paper-user-tags.mjs"
 import * as candidateModule from "./candidate-storage.mjs"
+import * as p02Module from "./p02-workflow.mjs"
+import * as discoveryWorkspaceModule from "./discovery-workspace.mjs"
 
 const BUNDLE_SCHEMA = "research-console.state-transfer"
 const PLAN_SCHEMA = "research-console.state-transfer-plan"
@@ -20,13 +22,19 @@ const ALLOWED_ORIGINS = Object.freeze([
 const BUNDLE_KEYS = Object.freeze([
   "schema", "version", "origin", "exported_at", "counts", "conflict_report", "state", "sha256",
 ])
-const COUNT_KEYS = Object.freeze([
+const V1_COUNT_KEYS = Object.freeze([
   "direction_snapshots", "workspace_shelf_entries", "workspace_reading_entries",
   "user_tag_assignments", "candidates", "agent_snapshots",
 ])
-const STATE_KEYS = Object.freeze([
+const V2_COUNT_KEYS = Object.freeze([...V1_COUNT_KEYS, "p02_accepted_stages"])
+const V3_COUNT_KEYS = Object.freeze([...V2_COUNT_KEYS, "discovery_results", "discovery_external_candidates"])
+const V1_STATE_KEYS = Object.freeze([
   "direction_snapshot", "paper_workspace", "personal_tags", "discovery_candidates", "agent_task_input",
 ])
+const V2_STATE_KEYS = Object.freeze([...V1_STATE_KEYS, "p02_workflow"])
+const V3_STATE_KEYS = Object.freeze([...V2_STATE_KEYS, "discovery_workspace"])
+const STATE_KEYS_BY_VERSION = Object.freeze({ 1: V1_STATE_KEYS, 2: V2_STATE_KEYS, 3: V3_STATE_KEYS })
+const COUNT_KEYS_BY_VERSION = Object.freeze({ 1: V1_COUNT_KEYS, 2: V2_COUNT_KEYS, 3: V3_COUNT_KEYS })
 const CONFLICT_KEYS = Object.freeze(["id", "group", "kind", "identity", "sources", "allowed_actions"])
 const SOURCE_KEYS = Object.freeze(["origin", "sha256"])
 const PLAN_KEYS = Object.freeze([
@@ -108,17 +116,21 @@ function isCanonicalIsoDate(value) {
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value
 }
 
-function stateIsValid(state) {
-  return hasExactKeys(state, STATE_KEYS)
+function stateIsValid(state, version = 3) {
+  const keys = STATE_KEYS_BY_VERSION[version]
+  if (!Array.isArray(keys)) return false
+  return hasExactKeys(state, keys)
     && (state.direction_snapshot === null || directionModule.isValidDirectionSnapshot?.(state.direction_snapshot) === true)
     && workspaceModule.isValidWorkspaceState?.(state.paper_workspace) === true
     && userTagModule.isValidUserTagState?.(state.personal_tags) === true
     && candidateModule.isValidCandidateState?.(state.discovery_candidates) === true
     && taskInputModule.isValidTaskInputStoreState?.(state.agent_task_input) === true
+    && (version === 1 || p02Module.isValidP02WorkflowState?.(state.p02_workflow) === true)
+    && (version !== 3 || discoveryWorkspaceModule.isValidDiscoveryWorkspaceState?.(state.discovery_workspace) === true)
 }
 
-function countsFor(state) {
-  return {
+function countsFor(state, version = 3) {
+  const counts = {
     direction_snapshots: state.direction_snapshot === null ? 0 : 1,
     workspace_shelf_entries: Object.keys(state.paper_workspace.shelf).length,
     workspace_reading_entries: Object.keys(state.paper_workspace.personalReading).length,
@@ -126,12 +138,19 @@ function countsFor(state) {
     candidates: state.discovery_candidates.candidates.length,
     agent_snapshots: state.agent_task_input.snapshots.length,
   }
+  if (version >= 2) counts.p02_accepted_stages = state.p02_workflow.accepted_stages.length
+  if (version === 3) {
+    counts.discovery_results = state.discovery_workspace.results.length
+    counts.discovery_external_candidates = state.discovery_workspace.external_candidates.length
+  }
+  return counts
 }
 
-function countsAreValid(value, state) {
-  if (!hasExactKeys(value, COUNT_KEYS)) return false
-  const expected = countsFor(state)
-  return COUNT_KEYS.every((key) => Number.isSafeInteger(value[key]) && value[key] >= 0 && value[key] === expected[key])
+function countsAreValid(value, state, version) {
+  const keys = COUNT_KEYS_BY_VERSION[version]
+  if (!Array.isArray(keys) || !hasExactKeys(value, keys)) return false
+  const expected = countsFor(state, version)
+  return keys.every((key) => Number.isSafeInteger(value[key]) && value[key] >= 0 && value[key] === expected[key])
 }
 
 function sourceRef(bundle) {
@@ -168,6 +187,8 @@ function buildStores(storage) {
     paper_workspace: workspaceModule.createWorkspaceStore?.(storage),
     personal_tags: userTagModule.createUserTagStore?.(storage),
     discovery_candidates: candidateModule.createCandidateStore?.(storage),
+    p02_workflow: p02Module.createP02WorkflowStore?.(storage),
+    discovery_workspace: discoveryWorkspaceModule.createDiscoveryWorkspaceStore?.(storage),
   }
   if (Object.values(stores).some((store) => !store || typeof store.readValidatedState !== "function")) {
     throw new Error("浏览器状态无法导出")
@@ -175,30 +196,33 @@ function buildStores(storage) {
   return stores
 }
 
-function readFiveStates(storage) {
+function readCurrentStates(storage) {
   const stores = buildStores(storage)
   const state = {}
-  for (const key of ["agent_task_input", "direction_snapshot", "paper_workspace", "personal_tags", "discovery_candidates"]) {
+  let discoveryWorkspaceMissing = false
+  for (const key of ["agent_task_input", "direction_snapshot", "paper_workspace", "personal_tags", "discovery_candidates", "p02_workflow", "discovery_workspace"]) {
     let result
     try {
       result = stores[key].readValidatedState()
     } catch {
       throw new Error("浏览器状态无法导出")
     }
-    if (!isPlainObject(result) || !["valid", "missing"].includes(result.status)) {
+    const allowedStatuses = key === "p02_workflow" ? ["valid"] : ["valid", "missing"]
+    if (!isPlainObject(result) || !allowedStatuses.includes(result.status)) {
       throw new Error("浏览器状态无法导出")
     }
     state[key] = result.state
+    if (key === "discovery_workspace") discoveryWorkspaceMissing = result.status === "missing"
   }
   if (!stateIsValid(state)) throw new Error("浏览器状态无法导出")
-  const orderedState = Object.fromEntries(STATE_KEYS.map((key) => [key, state[key]]))
-  return { stores, state: clone(orderedState) }
+  const orderedState = Object.fromEntries(V3_STATE_KEYS.map((key) => [key, state[key]]))
+  return { stores, state: clone(orderedState), discoveryWorkspaceMissing }
 }
 
 function bundleBody({ origin, exportedAt, state }) {
   return {
     schema: BUNDLE_SCHEMA,
-    version: 1,
+    version: 3,
     origin,
     exported_at: exportedAt,
     counts: countsFor(state),
@@ -217,7 +241,7 @@ export async function exportStateBundle({ storage, originLabel, exportedAt } = {
   if (!ALLOWED_ORIGINS.includes(originLabel) || !isCanonicalIsoDate(exportedAt)) {
     throw new TypeError("状态迁移导出参数无效")
   }
-  const { state } = readFiveStates(storage)
+  const { state } = readCurrentStates(storage)
   const body = bundleBody({ origin: originLabel, exportedAt, state })
   const bundle = { ...body, sha256: await sha256Text(canonicalJson(body)) }
   const byteLength = new TextEncoder().encode(JSON.stringify(bundle)).byteLength
@@ -235,15 +259,15 @@ function rawBytes(raw) {
 function bundleShapeIsValid(value) {
   if (!hasExactKeys(value, BUNDLE_KEYS)
     || value.schema !== BUNDLE_SCHEMA
-    || value.version !== 1
+    || ![1, 2, 3].includes(value.version)
     || !ALLOWED_ORIGINS.includes(value.origin)
     || !isCanonicalIsoDate(value.exported_at)
     || !hasExactKeys(value.conflict_report, ["status", "conflicts"])
     || value.conflict_report.status !== "not_evaluated"
     || !Array.isArray(value.conflict_report.conflicts)
     || value.conflict_report.conflicts.length !== 0
-    || !stateIsValid(value.state)
-    || !countsAreValid(value.counts, value.state)
+    || !stateIsValid(value.state, value.version)
+    || !countsAreValid(value.counts, value.state, value.version)
     || typeof value.sha256 !== "string"
     || !/^[a-f0-9]{64}$/u.test(value.sha256)) return false
   return true
@@ -568,6 +592,9 @@ function planIsStructurallyValid(plan) {
 
 export async function previewStateMerge({ current, bundles, knownPaperIds } = {}) {
   const currentBundle = await ensureValidatedBundle(current)
+  if (currentBundle.version !== 3) {
+    throw new TypeError("当前状态必须是包含有效 P02 与检索工作区的 v3 状态")
+  }
   if (!Array.isArray(bundles) || bundles.length < 1 || bundles.length > 3) {
     throw new RangeError("请选择一至三个状态迁移文件")
   }
@@ -591,6 +618,14 @@ export async function previewStateMerge({ current, bundles, knownPaperIds } = {}
   wholeDocumentConflict({
     key: "paper_workspace", group: "paper_workspace", identity: "paper_workspace",
     current: currentBundle, bundles: sorted, conflicts, alternatives,
+  })
+  wholeDocumentConflict({
+    key: "p02_workflow", group: "p02_workflow", identity: "P02 workflow",
+    current: currentBundle, bundles: sorted.filter(({ version }) => version >= 2), conflicts, alternatives,
+  })
+  wholeDocumentConflict({
+    key: "discovery_workspace", group: "discovery_workspace", identity: "discovery_workspace",
+    current: currentBundle, bundles: sorted.filter(({ version }) => version === 3), conflicts, alternatives,
   })
   const proposedState = clone(currentBundle.state)
   proposedState.personal_tags = mergeTags(currentBundle, sorted, knownPaperIds, exclusions)
@@ -633,6 +668,8 @@ function decisionsFor(plan, decisions, alternatives) {
     if (replacement === undefined) throw new TypeError("冲突替换来源无效")
     if (conflict.group === "direction_snapshot") target.direction_snapshot = clone(replacement)
     else if (conflict.group === "paper_workspace") target.paper_workspace = clone(replacement)
+    else if (conflict.group === "p02_workflow") target.p02_workflow = clone(replacement)
+    else if (conflict.group === "discovery_workspace") target.discovery_workspace = clone(replacement)
     else if (conflict.id === "agent-current-pointer") target.agent_task_input.current_snapshot_id = replacement
     else throw new TypeError("冲突替换决定无效")
   }
@@ -644,6 +681,8 @@ function replacementOperations(stores, state) {
   return [
     ["direction_snapshot", () => stores.direction_snapshot.replaceValidated(state.direction_snapshot)],
     ["paper_workspace", () => stores.paper_workspace.replaceValidated(state.paper_workspace)],
+    ["p02_workflow", () => stores.p02_workflow.replaceValidated(state.p02_workflow)],
+    ["discovery_workspace", () => stores.discovery_workspace.replaceValidated(state.discovery_workspace)],
     ["personal_tags", () => stores.personal_tags.replaceValidated(state.personal_tags)],
     ["discovery_candidates", () => stores.discovery_candidates.replaceValidated(state.discovery_candidates)],
     ["agent_task_input", () => stores.agent_task_input.replaceAllValidated(state.agent_task_input)],
@@ -665,7 +704,7 @@ export async function applyStateMerge({ storage, plan, decisions } = {}) {
     throw new TypeError("状态迁移合并计划无效或已使用")
   }
   const target = decisionsFor(plan, decisions, metadata.alternatives)
-  const captured = readFiveStates(storage)
+  const captured = readCurrentStates(storage)
   if (await hashState(captured.state) !== plan.current_state_sha256) {
     const error = new Error("浏览器状态已变化，请重新预览")
     error.code = "stale_plan"
@@ -673,8 +712,10 @@ export async function applyStateMerge({ storage, plan, decisions } = {}) {
   }
   metadata.applied = true
   let applyFailed = false
+  let discoveryWorkspaceAttempted = false
   for (const [key, operation] of replacementOperations(captured.stores, target)) {
     if (exactJsonEqual(captured.state[key], target[key])) continue
+    if (key === "discovery_workspace") discoveryWorkspaceAttempted = true
     if (!await replacementSucceeded(operation)) {
       applyFailed = true
       break
@@ -682,7 +723,7 @@ export async function applyStateMerge({ storage, plan, decisions } = {}) {
   }
   if (!applyFailed) {
     let verified
-    try { verified = readFiveStates(storage).state } catch { verified = null }
+    try { verified = readCurrentStates(storage).state } catch { verified = null }
     if (verified && exactJsonEqual(verified, target)) {
       return frozenClone({ status: "success", state: target })
     }
@@ -690,12 +731,23 @@ export async function applyStateMerge({ storage, plan, decisions } = {}) {
 
   let rollbackProven = true
   const rollback = replacementOperations(captured.stores, captured.state).reverse()
-  for (const [, operation] of rollback) {
-    if (!await replacementSucceeded(operation)) rollbackProven = false
+  for (const [key, operation] of rollback) {
+    let restoreOperation = operation
+    if (key === "discovery_workspace") {
+      if (!discoveryWorkspaceAttempted) continue
+      // Inspect independently: refreshing the captured store would discard its CAS baseline.
+      // A failed owner write may already have proven its local rollback to a missing key.
+      const live = discoveryWorkspaceModule.createDiscoveryWorkspaceStore(storage).readValidatedState()
+      const samePresence = (live.status === "missing") === captured.discoveryWorkspaceMissing
+      if (["valid", "missing"].includes(live.status) && samePresence && exactJsonEqual(live.state, captured.state[key])) continue
+      if (captured.discoveryWorkspaceMissing) restoreOperation = () => captured.stores.discovery_workspace.restoreMissingValidated()
+    }
+    if (!await replacementSucceeded(restoreOperation)) rollbackProven = false
   }
   try {
-    const restored = readFiveStates(storage).state
-    if (!exactJsonEqual(restored, captured.state)) rollbackProven = false
+    const restored = readCurrentStates(storage)
+    if (!exactJsonEqual(restored.state, captured.state)
+      || restored.discoveryWorkspaceMissing !== captured.discoveryWorkspaceMissing) rollbackProven = false
   } catch {
     rollbackProven = false
   }
@@ -727,7 +779,13 @@ function createTextElement(documentRef, tag, text, className = "") {
 }
 
 function countSummary(counts) {
-  return `方向 ${counts.direction_snapshots}；书架 ${counts.workspace_shelf_entries}；阅读标记 ${counts.workspace_reading_entries}；标签 ${counts.user_tag_assignments}；候选 ${counts.candidates}；Agent 快照 ${counts.agent_snapshots}`
+  const p02 = Object.prototype.hasOwnProperty.call(counts, "p02_accepted_stages")
+    ? `P02 已确认阶段 ${counts.p02_accepted_stages}`
+    : "P02 旧版未包含"
+  const discovery = Object.prototype.hasOwnProperty.call(counts, "discovery_results")
+    ? `检索结果 ${counts.discovery_results}；外部候选 ${counts.discovery_external_candidates}`
+    : "检索工作区旧版未包含，保留当前状态"
+  return `方向 ${counts.direction_snapshots}；书架 ${counts.workspace_shelf_entries}；阅读标记 ${counts.workspace_reading_entries}；标签 ${counts.user_tag_assignments}；候选 ${counts.candidates}；Agent 快照 ${counts.agent_snapshots}；${p02}；${discovery}`
 }
 
 function groupLabel(group) {
@@ -737,6 +795,8 @@ function groupLabel(group) {
     personal_tags: "个人标签",
     discovery_candidates: "发现候选",
     agent_task_input: "Agent 输入快照",
+    p02_workflow: "P02 研究闭环",
+    discovery_workspace: "检索工作区",
   })[group] ?? "浏览器状态"
 }
 
@@ -897,6 +957,7 @@ function wireOperatorPage(documentRef, windowRef) {
           select.appendChild(option)
         }
       }
+      if (conflict.group === "discovery_workspace") select.value = "skip"
       select.addEventListener("change", updateApply)
       label.appendChild(select)
       row.appendChild(label)

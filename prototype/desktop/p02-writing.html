@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="基于当前研究材料选择期刊、编辑论文草稿并导出 Markdown；历史审查材料作为独立参考。"
+    />
+    <title>写论文 · 学术研究工作台</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231677ff'/%3E%3Cpath d='M18 47V17h15c8 0 13 4 13 11 0 5-3 9-8 10l10 9H37l-8-8h-2v8zm9-16h6c3 0 5-1 5-4s-2-4-5-4h-6z' fill='white'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="p02-writing-page">
+    <main class="app-window" aria-label="P02 投稿与写作材料桌面工作台">
+      <header class="window-bar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light traffic-light--red"></span>
+          <span class="traffic-light traffic-light--yellow"></span>
+          <span class="traffic-light traffic-light--green"></span>
+        </div>
+        <div class="window-context">
+          <span class="context-kicker">我的论文</span>
+          <span class="context-divider">/</span>
+          <strong>P02 · 写论文</strong>
+        </div>
+        <div class="writing-snapshot-label">当前浏览器的研究记录</div>
+        <div class="window-actions">
+          <a class="icon-button" href="./p02.html" aria-label="返回 P02 项目工作台">←</a>
+          <span class="avatar-button" aria-label="当前用户：杨">杨</span>
+        </div>
+      </header>
+
+      <div class="workspace-shell writing-shell">
+        <aside class="sidebar writing-sidebar">
+          <a class="brand" href="./index.html" aria-label="返回研究首页">
+            <span class="brand-mark" aria-hidden="true">R</span>
+            <span><strong>学术研究工作台</strong><small>个人研究控制台</small></span>
+          </a>
+
+<nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">从方向到写作</p>
+            <a class="nav-item" href="./index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
+            <a class="nav-item" href="./directions.html"><span aria-hidden="true">⌁</span><span>确定方向</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>搜索论文</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>分析与笔记</span></a>
+            <a class="nav-item nav-item--active" href="./p02-writing.html" aria-current="page"><span aria-hidden="true">✎</span><span>期刊与写作</span></a>
+            <details class="nav-more">
+              <summary>更多工具</summary>
+              <a class="nav-item" href="./p02.html"><span aria-hidden="true">□</span><span>P02 研究记录</span></a>
+              <a class="nav-item" href="./agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务输入</span></a>
+              <a class="nav-item" href="../../local_library_output/desktop/state-transfer.html"><span aria-hidden="true">↺</span><span>备份与恢复</span></a>
+              <a class="nav-item" href="#writing-history"><span aria-hidden="true">≋</span><span>历史选刊参考</span></a>
+            </details>
+          </nav>
+
+          <section class="sidebar-plan" aria-labelledby="writing-boundary-title">
+            <div class="plan-title-row">
+              <h2 id="writing-boundary-title">随时开始写</h2>
+              <strong>Markdown</strong>
+            </div>
+            <p>当前研究记录与草稿保持同步。可先写已有内容，材料不足的部分留待补充。</p>
+          </section>
+        </aside>
+
+        <section class="main-column p02-writing-main" id="dashboard">
+          <div class="page-heading writing-page-heading">
+            <div>
+              <p class="eyebrow">P02 · 从研究材料到论文草稿</p>
+              <h1>写论文</h1>
+              <p>选好候选期刊，参考已有分析与笔记，逐段写成自己的论文。</p>
+            </div>
+            <a class="button button--secondary" href="./p02.html">返回 P02 工作台</a>
+          </div>
+
+          <section class="panel" aria-labelledby="submission-entry-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">本次在线零阶优化论文</p><h2 id="submission-entry-title">应用投稿项目与新稿</h2><p>本次场景、数据集、实验清单和同刊排版范例已集中到独立项目，正文单独保存。</p></div>
+              <a class="button button--primary" href="./submission-project.html#writing">打开本篇论文写作 →</a>
+            </div>
+          </section>
+
+          <section class="panel writing-current-panel" id="current-writing-panel" aria-labelledby="current-writing-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">我的草稿</p>
+                <h2 id="current-writing-title">候选期刊与论文正文</h2>
+                <p>可直接填写，无需依次确认所有研究环节。保存后与研究记录页共用同一份内容。</p>
+              </div>
+            </div>
+            <p>当前候选期刊：<strong id="current-target-venue">尚未选择期刊</strong></p>
+            <form class="writing-editor-form workflow-form" id="current-writing-form">
+              <label class="writing-editor-field" for="writing-target_venue">候选期刊
+                <input id="writing-target_venue" name="target_venue" maxlength="12000" placeholder="填写你计划投稿的期刊" />
+              </label>
+              <label class="writing-editor-field" for="writing-venue_references">选刊理由、官方要求与同刊参考
+                <textarea id="writing-venue_references" name="venue_references" rows="3" maxlength="12000" placeholder="记录主题是否适合、官方作者指南链接和同刊参考论文"></textarea>
+              </label>
+              <label class="writing-editor-field writing-editor-field--wide" for="writing-problem_algorithm">问题与方法
+                <textarea id="writing-problem_algorithm" name="problem_algorithm" rows="9" maxlength="12000" placeholder="从研究问题、相关工作和方法开始。支持 Markdown 与 LaTeX 原文。"></textarea>
+              </label>
+              <label class="writing-editor-field writing-editor-field--wide" for="writing-theory_section">理论分析
+                <textarea id="writing-theory_section" name="theory_section" rows="7" maxlength="12000" placeholder="写下已有推导；尚未完成的证明保留待补标记。"></textarea>
+              </label>
+              <label class="writing-editor-field writing-editor-field--wide" for="writing-experiment_section">实验与结果
+                <textarea id="writing-experiment_section" name="experiment_section" rows="7" maxlength="12000" placeholder="记录实验设置和已有结果，区分计划与已完成实验。"></textarea>
+              </label>
+              <div class="writing-editor-actions writing-editor-field--wide">
+                <button class="button button--primary" type="submit">保存草稿</button>
+                <button class="button button--secondary" id="export-current-writing" type="button">导出 Markdown</button>
+                <a class="text-button" href="../../local_library_output/desktop/library.html">补充分析与笔记 →</a>
+              </div>
+              <p class="writing-editor-message writing-editor-field--wide" id="current-writing-message" role="status" aria-live="polite">草稿保存在当前浏览器；导出包含当前编辑和研究材料。</p>
+            </form>
+          </section>
+
+          <section class="panel writing-current-panel" id="current-materials-panel" aria-labelledby="current-materials-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">当前研究材料</p>
+                <h2 id="current-materials-title">从这里查阅分析与来源</h2>
+                <p id="current-research-status">正在读取已保存的研究记录。</p>
+              </div>
+            </div>
+            <p id="current-writing-direction"></p>
+            <div class="writing-current-materials" id="current-writing-materials"></div>
+            <div id="current-writing-sources" aria-label="当前来源论文"></div>
+            <a class="text-button" href="../../local_library_output/desktop/library.html">到论文库查看论文与笔记 →</a>
+          </section>
+
+          <details class="panel writing-history" id="writing-history">
+            <summary>历史审查参考 · P02_ET_ZO 候选方案</summary>
+            <p id="traceability-summary">静态审查快照</p>
+            <p>以下是独立的历史候选方案，保留原有期刊定位、材料与核验边界，仅供参考。它不代表你当前的研究状态，也不会自动写入上面的草稿。</p>
+          <section class="writing-status-grid" aria-label="稿件状态与期刊定位">
+            <article class="panel writing-status-card writing-status-card--blocked">
+              <div class="writing-card-meta">
+                <p class="eyebrow">历史候选稿件状态</p>
+                <span class="status status--warning" id="submission-label">研究脚手架 · 尚不可投稿</span>
+              </div>
+              <h2 id="manuscript-title">正在载入稿件信息</h2>
+              <p id="manuscript-summary">正在载入经审查的静态摘要。</p>
+            </article>
+            <article class="panel writing-status-card">
+              <div class="writing-card-meta"><p class="eyebrow">历史候选参考期刊</p><span class="status status--active">参考</span></div>
+              <h2 id="target-venue-name">正在载入期刊定位</h2>
+              <p id="target-venue-fit">期刊选择不代表稿件已经满足投稿门禁。</p>
+              <div class="writing-official-links" id="target-venue-links" aria-label="TCNS 官方链接"></div>
+            </article>
+          </section>
+
+          <section class="panel writing-traceability" aria-labelledby="traceability-title">
+            <div>
+              <p class="eyebrow">历史材料来源与可追溯性</p>
+              <h2 id="traceability-title">只使用经审查的网页快照</h2>
+            </div>
+            <p>这份历史快照整理了当时的项目决定、待核验理论分析、已定位论文来源和代码状态；它不会随你当前的研究记录变化。</p>
+          </section>
+
+          <section class="writing-literature-section" id="literature-tracks" aria-labelledby="literature-tracks-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">严格分流</p>
+                <h2 id="literature-tracks-title">两条文献轨道承担不同职责</h2>
+                <p>用途标签和边界说明是判断依据，颜色只用于辅助识别。</p>
+              </div>
+            </div>
+
+            <div class="writing-literature-grid">
+              <section class="writing-literature-lane writing-literature-lane--evidence" aria-labelledby="cross-venue-heading">
+                <header>
+                  <span class="writing-usage-label writing-usage-label--evidence">相关工作与实质证据</span>
+                  <h2 id="cross-venue-heading">同类论文 · 不同期刊</h2>
+                  <p><strong>边界：</strong>只在原文核验范围内支撑相关工作、机制比较与差异矩阵；待全文核验的记录不能支撑完成式主张。</p>
+                </header>
+                <div class="writing-paper-list" id="cross-venue-evidence" aria-live="polite"></div>
+              </section>
+
+              <section class="writing-literature-lane writing-literature-lane--style" aria-labelledby="in-venue-heading">
+                <header>
+                  <span class="writing-usage-label writing-usage-label--style">仅用于排版与写作风格</span>
+                  <h2 id="in-venue-heading">TCNS 同刊相似论文</h2>
+                  <p><strong>边界：</strong>不计入最近邻证据，不支撑算法新颖性、理论正确性或性能优势，也不直接拼接原文。</p>
+                </header>
+                <div class="writing-paper-list" id="in-venue-style-samples" aria-live="polite"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel writing-materials-panel" id="writing-materials-panel" aria-labelledby="writing-materials-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">写作材料层</p>
+                <h2 id="writing-materials-title">六份材料保持来源、主张与缺口可追溯</h2>
+                <p>材料仍处于整理状态；存在文件不等于对应理论或实验已经完成。</p>
+              </div>
+              <span class="status">6 份</span>
+            </div>
+            <div class="writing-material-grid" id="writing-materials">
+              <article class="writing-material-card" data-writing-material-card></article>
+              <article class="writing-material-card" data-writing-material-card></article>
+              <article class="writing-material-card" data-writing-material-card></article>
+              <article class="writing-material-card" data-writing-material-card></article>
+              <article class="writing-material-card" data-writing-material-card></article>
+              <article class="writing-material-card" data-writing-material-card></article>
+            </div>
+          </section>
+
+          <section class="panel writing-claims-panel" aria-labelledby="claim-summary-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">主张—证据摘要</p>
+                <h2 id="claim-summary-title">允许措辞与禁止措辞成对出现</h2>
+              </div>
+            </div>
+            <div class="writing-claim-list" id="claim-summary"></div>
+          </section>
+
+          <section class="panel writing-blockers-panel" id="submission-blockers-panel" aria-labelledby="submission-blockers-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">投稿门禁</p>
+                <h2 id="submission-blockers-title">阻塞项必须有下一步和完成条件</h2>
+                <p>以下是历史候选方案的审查结论，当前草稿的完成情况需要按你自己的证据重新判断。</p>
+              </div>
+            </div>
+            <div class="writing-blocker-grid" id="submission-blockers"></div>
+          </section>
+          </details>
+        </section>
+
+        <aside class="inspector writing-inspector" aria-labelledby="writing-inspector-title">
+          <div class="inspector-heading">
+            <div><p class="eyebrow">写作提示</p><h2 id="writing-inspector-title">从已有材料开始</h2></div>
+          </div>
+
+          <section class="current-project-card">
+            <div class="project-card-top"><code>P02</code><span class="status">可编辑草稿</span></div>
+            <h3>先写清问题，再逐段补充</h3>
+            <p>研究还在推进时，也可以开始写作。把尚未验证的内容标清楚即可。</p>
+          </section>
+
+          <section class="inspector-section source-boundary-card">
+            <h3>选刊时看什么</h3>
+            <p>核对期刊主题与近期同类论文，再到官方作者指南确认篇幅、格式和投稿要求。</p>
+            <p>在草稿上方记录期刊名称、选择理由与参考链接。</p>
+          </section>
+
+          <section class="inspector-section">
+            <div class="inspector-title-row"><h3>一条简单写作路径</h3><span class="count-badge">3</span></div>
+            <ol class="next-action-list">
+              <li><span>1</span><p>从当前研究材料中整理问题、方法和关键来源。</p></li>
+              <li><span>2</span><p>逐段填写正文，标记待补的推导、数据与引用。</p></li>
+              <li><span>3</span><p>保存草稿，导出 Markdown 后继续润色与排版。</p></li>
+            </ol>
+          </section>
+
+          <section class="thesis-map">
+            <p class="eyebrow">继续研究</p>
+            <h3>继续完善研究记录</h3>
+            <p>这里保存的期刊与正文，会同步到 P02 研究记录中的写作部分。</p>
+            <a class="button button--secondary button--full" href="./p02.html">返回 P02 →</a>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <script type="module" src="./p02-writing.mjs"></script>
+  </body>
+</html>

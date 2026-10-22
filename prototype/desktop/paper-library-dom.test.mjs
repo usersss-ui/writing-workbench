@@ -528,7 +528,14 @@ function createNoteImportControllerDocument() {
   notePaperId.dataset.noteImportPaperId = ""
   const noteCategory = make("library-note-import-category", "select")
   noteCategory.value = "note"
+  const noteFileLabel = make("library-note-import-file-label", "div")
+  const fileInputLabel = new MemoryNode("label")
   const noteFile = make("library-note-import-file", "input")
+  noteFile.required = true
+  fileInputLabel.append(noteFile)
+  noteFileLabel.append(fileInputLabel)
+  const noteDraftSource = make("library-note-import-draft-source", "p")
+  noteDraftSource.hidden = true
   const noteChecks = make("library-note-import-checks", "ul")
   const noteFileName = make("library-note-import-file-name", "input")
   const noteStatus = new MemoryNode("p")
@@ -538,7 +545,7 @@ function createNoteImportControllerDocument() {
   const noteCancel = make("library-note-import-cancel", "button")
   const noteSubmit = make("library-note-import-submit", "button")
   noteSubmit.disabled = true
-  noteForm.append(notePaperId, noteCategory, noteFile, noteChecks, noteFileName, noteStatus, noteClose, noteCancel, noteSubmit)
+  noteForm.append(notePaperId, noteCategory, noteFileLabel, noteDraftSource, noteChecks, noteFileName, noteStatus, noteClose, noteCancel, noteSubmit)
   noteDialog.append(noteForm)
 
   const baseQuery = document.querySelector
@@ -602,7 +609,9 @@ function createNoteImportControllerDocument() {
     noteForm,
     notePaperId,
     noteCategory,
+    noteFileLabel,
     noteFile,
+    noteDraftSource,
     noteChecks,
     noteFileName,
     noteStatus,
@@ -1493,6 +1502,13 @@ test("window bar exposes inert status ornaments instead of dead buttons", () => 
   assert.doesNotMatch(html, /<button[^>]*(?:aria-label="论文库说明"|aria-label="用户菜单")/u)
   assert.match(html, /<span class="icon-button"[^>]*aria-hidden="true"/u)
   assert.match(html, /<span class="avatar-button"[^>]*aria-label="当前用户：杨"/u)
+})
+
+test("论文库侧栏保留学位论文入口", () => {
+  assert.match(
+    html,
+    /<a class="nav-item" href="\.\.\/\.\.\/prototype\/desktop\/index\.html#thesis"><span aria-hidden="true">◇<\/span><span>学位论文<\/span><\/a>/u,
+  )
 })
 
 test("template keeps four material-progress groups and exposes exactly five facet entries", () => {
@@ -2455,6 +2471,77 @@ test("controller keeps static index browsing usable and local writes disabled wi
   }
 })
 
+test("paper_id 深链在索引加载后直接打开对应论文详情", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const requestedPaper = normalizedPaper({
+    paper_id: "Paper-02",
+    slug: "paper-02",
+    title_original: "Requested paper",
+    title_en: "Requested paper",
+  })
+  const controller = createLibraryController({
+    document: ui.document,
+    location: { search: "?paper_id=Paper-02" },
+    storage: memoryStorage(),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index([normalizedPaper(), requestedPaper]))
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+
+  assert.deepEqual(await controller.start(), { ok: true, paperCount: 2 })
+  assert.equal(ui.listView.hidden, true)
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(ui.ids.get("library-context-title").textContent, "Paper-02")
+})
+
+test("q 深链筛选本地论文，并把当前搜索词带到网上检索", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const onlineLink = ui.document.createElement("a")
+  ui.ids.set("search-new-paper", onlineLink)
+  const onlineModeLink = ui.document.createElement("a")
+  ui.ids.set("search-online-library", onlineModeLink)
+  const controller = createLibraryController({
+    document: ui.document,
+    location: { search: "?q=Requested%20paper" },
+    storage: memoryStorage(),
+    fetchImpl: async (url) => url.endsWith("paper-index.json")
+      ? localJsonResponse(v3Index([normalizedPaper(), normalizedPaper({
+          paper_id: "Paper-02", slug: "paper-02", title_original: "Requested paper", title_en: "Requested paper",
+        })]))
+      : localJsonResponse(finalLocalCapabilities()),
+  })
+  await controller.start()
+  assert.equal(ui.search.value, "Requested paper")
+  assert.match(ui.count.textContent, /显示 1 篇，共 2 篇/u)
+  assert.equal(onlineLink.href, "./discovery.html?q=Requested%20paper")
+  assert.equal(onlineModeLink.href, "./discovery.html?q=Requested%20paper")
+  ui.search.value = "新的关键词 & ADMM"
+  ui.search.dispatch("input")
+  assert.equal(new URL(onlineLink.href, "https://example.org/").searchParams.get("q"), "新的关键词 & ADMM")
+  assert.equal(ui.empty.hidden, false)
+  ui.reset.click()
+  assert.equal(onlineLink.href, "./discovery.html")
+  assert.equal(onlineModeLink.href, "./discovery.html")
+})
+
+test("失效的 paper_id 深链显示未匹配状态，不误选其他论文", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const controller = createLibraryController({
+    document: ui.document, location: { search: "?paper_id=Missing-01" }, storage: memoryStorage(),
+    fetchImpl: async (url) => localJsonResponse(url.endsWith("paper-index.json") ? v3Index() : finalLocalCapabilities()),
+  })
+  await controller.start()
+  assert.equal(ui.detail.hidden, true)
+  assert.equal(ui.search.value, "Missing-01")
+  assert.equal(ui.empty.hidden, false)
+  assert.match(ui.count.textContent, /显示 0 篇/u)
+})
+
 test("successful import refetches only when URL and filename identify one preview", async () => {
   const { findImportedPreviewSelection } = await import("./library.mjs")
   const previewUrl = controlledPreviewDocument("source_map", {
@@ -2518,6 +2605,131 @@ test("note dialog focus and cancel stay inside an open paper detail", async () =
   assert.equal(ui.detail.hidden, false)
   assert.equal(ui.document.activeElement, ui.addNote)
   assert.equal(inspectSignal?.aborted, true)
+})
+
+test("手工分析草稿通过现有检查导入流程绑定原论文，检查后等待确认保存", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const inspected = []
+  const controller = createLibraryController({
+    document: ui.document, storage: memoryStorage(),
+    fetchImpl: async (url, options = {}) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+      if (url === "/api/v1/notes/inspect") {
+        inspected.push(JSON.parse(options.body))
+        return localJsonResponse(noteInspection())
+      }
+      throw new Error(`检查草稿不应调用其他写入接口：${url}`)
+    },
+  })
+  await controller.start()
+  ui.document.body.querySelector('[data-note-draft-action="open"]').click()
+  const draft = ui.document.body.querySelector(".library-note-draft-dialog")
+  const textarea = draft.querySelector("textarea")
+  textarea.value = "# Paper-01 论文精读\n\n按原文记录的方法。"
+  textarea.dispatch("input")
+  const submit = draft.querySelector('[data-note-draft-action="import"]')
+  assert.equal(submit.disabled, false)
+  submit.click()
+  await settleControllerEvents()
+  assert.equal(inspected.length, 1)
+  assert.equal(inspected[0].paper_id, "Paper-01")
+  assert.equal(inspected[0].category, "note")
+  assert.equal(inspected[0].markdown, textarea.value)
+  assert.equal(draft.open, false)
+  assert.equal(ui.noteDialog.open, true)
+  assert.equal(ui.notePaperId.textContent, "Paper-01")
+  assert.equal(ui.detail.hidden, false)
+  assert.equal(ui.noteSubmit.disabled, false)
+  assert.equal(ui.noteFileLabel.hidden, true)
+  assert.equal(ui.noteFile.disabled, true)
+  assert.equal(ui.noteFile.required, false)
+  assert.equal(ui.noteDraftSource.hidden, false)
+  assert.match(ui.noteDraftSource.textContent, /来自当前页面的笔记草稿：Paper-01_论文精读\.md/u)
+  assert.match(ui.noteDraftSource.textContent, /无需另选文件/u)
+
+  ui.noteCancel.click()
+  ui.addNote.click()
+  assert.equal(ui.noteFileLabel.hidden, false)
+  assert.equal(ui.noteFile.disabled, false)
+  assert.equal(ui.noteFile.required, true)
+  assert.equal(ui.noteDraftSource.hidden, true)
+  assert.equal(ui.noteDraftSource.textContent, "")
+  assert.equal(ui.noteSubmit.disabled, true)
+  ui.noteFile.files = [markdownFile("ordinary-file.md", "# 从文件导入的论文精读")]
+  ui.noteFile.dispatch("change")
+  await settleControllerEvents()
+  assert.equal(inspected.length, 2)
+  assert.equal(inspected[1].original_file_name, "ordinary-file.md")
+  assert.equal(inspected[1].markdown, "# 从文件导入的论文精读")
+  assert.equal(ui.noteSubmit.disabled, false)
+})
+
+test("旧页面检查草稿时保留另一页面新增的阅读标记与用途架", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const { createWorkspaceStore, WORKSPACE_STORAGE_KEY } = await import("./paper-library-storage.mjs")
+  const storage = memoryStorage()
+  const oldPage = createNoteImportControllerDocument()
+  const otherPage = createNoteImportControllerDocument()
+  const inspected = []
+  const index = v3Index([normalizedPaper(), normalizedPaper({ paper_id: "Paper-02", slug: "paper-02" })])
+  const fetchImpl = async (url, options = {}) => {
+    if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+    if (url.endsWith("paper-index.json")) return localJsonResponse(index)
+    if (url === "/api/v1/notes/inspect") {
+      inspected.push(JSON.parse(options.body))
+      return localJsonResponse(noteInspection())
+    }
+    throw new Error(`unexpected ${url}`)
+  }
+  await createLibraryController({ document: oldPage.document, storage, fetchImpl }).start()
+  await createLibraryController({ document: otherPage.document, storage, fetchImpl }).start()
+  otherPage.results.querySelector('[data-paper-id="Paper-02"]').querySelector('[data-action="select-paper"]').click()
+  otherPage.document.body.querySelectorAll('[data-action="set-reading"]').find((button) => button.dataset.marker === "read").click()
+  otherPage.document.body.querySelectorAll('[data-action="toggle-shelf"]').find((button) => button.dataset.role === "theory_evidence").click()
+  const savedBeforeCheck = storage.getItem(WORKSPACE_STORAGE_KEY)
+  assert.equal(createWorkspaceStore(storage).read().personalReading["Paper-02"], "read")
+  assert.deepEqual(createWorkspaceStore(storage).read().shelf["Paper-02"], ["theory_evidence"])
+
+  oldPage.document.body.querySelector('[data-note-draft-action="open"]').click()
+  const draft = oldPage.document.body.querySelector(".library-note-draft-dialog")
+  draft.querySelector('[data-note-draft-action="import"]').click()
+  await settleControllerEvents()
+
+  assert.equal(inspected[0].paper_id, "Paper-01")
+  assert.equal(oldPage.noteDialog.open, true)
+  assert.equal(oldPage.notePaperId.textContent, "Paper-01")
+  assert.equal(oldPage.detail.hidden, false)
+  assert.equal(storage.getItem(WORKSPACE_STORAGE_KEY), savedBeforeCheck)
+  assert.equal(createWorkspaceStore(storage).read().personalReading["Paper-02"], "read")
+  assert.deepEqual(createWorkspaceStore(storage).read().shelf["Paper-02"], ["theory_evidence"])
+  assert.equal(createWorkspaceStore(storage).read().selectedPaperId, "Paper-02")
+})
+
+test("草稿检查失败时回到编辑器并保留正文，不误报笔记已导入", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createNoteImportControllerDocument()
+  const controller = createLibraryController({
+    document: ui.document, storage: memoryStorage(),
+    fetchImpl: async (url) => {
+      if (url === "/api/v1/capabilities") return localJsonResponse(finalLocalCapabilities())
+      if (url.endsWith("paper-index.json")) return localJsonResponse(v3Index())
+      throw new Error("local inspection unavailable")
+    },
+  })
+  await controller.start()
+  ui.document.body.querySelector('[data-note-draft-action="open"]').click()
+  const draft = ui.document.body.querySelector(".library-note-draft-dialog")
+  const textarea = draft.querySelector("textarea")
+  textarea.value = "# 不应丢失的手工分析"
+  textarea.dispatch("input")
+  draft.querySelector('[data-note-draft-action="import"]').click()
+  await settleControllerEvents()
+  assert.equal(draft.open, true)
+  assert.equal(ui.noteDialog.open, false)
+  assert.equal(textarea.value, "# 不应丢失的手工分析")
+  assert.equal(ui.noteSubmit.disabled, true)
 })
 
 test("stale note inspection cannot replace newer warning or blocking checks", async () => {
@@ -3186,6 +3398,20 @@ test("creating the controller is import-safe and does not fetch before explicit 
   assert.equal(fetchCount, 0)
 })
 
+test("controller explains that scan warning totals are not missing-file counts", async () => {
+  const { createLibraryController } = await import("./library.mjs")
+  const ui = createControllerDocument()
+  const controller = createLibraryController({
+    document: ui.document,
+    storage: { getItem: () => null, setItem() {}, removeItem() {} },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ ...v3Index(), warning_count: 145 }) }),
+  })
+  await controller.start()
+  assert.match(ui.warning.textContent, /145 条扫描提示/u)
+  assert.match(ui.warning.textContent, /不等于文件缺失/u)
+  assert.match(ui.warning.textContent, /本地审计/u)
+})
+
 test("controller renders unknown warning counts as user-visible uncertainty", async () => {
   const { createLibraryController } = await import("./library.mjs")
   const ui = createControllerDocument()
@@ -3553,18 +3779,22 @@ test("all three desktop pages route their paper-library actions to the generated
   for (const [name, source] of existingPages) {
     assert.match(
       source,
-      /<a class="nav-item" href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html"><span aria-hidden="true">▤<\/span><span>论文库<\/span><\/a>/u,
+      /<a class="nav-item" href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html"><span aria-hidden="true">▤<\/span><span>[^<]+<\/span><\/a>/u,
       name,
     )
     assert.doesNotMatch(source, /href="(?:\.\/index\.html)?#library"[^>]*>[^<]*(?:<[^>]+>)*论文库/u, name)
   }
   const dashboard = existingPages.find(([name]) => name === "index.html")[1]
-  assert.match(dashboard, /href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html">查看全部论文 →<\/a>/u)
+  assert.match(dashboard, /href="\.\.\/\.\.\/local_library_output\/desktop\/library\.html">打开论文库 →<\/a>/u)
 })
 
 test("paper-library CSS is page-scoped and provides the desktop three-column breakpoints", () => {
   assert.match(styles, /\.library-page \.library-shell\s*\{/u)
   assert.match(styles, /\.library-page \.library-shelf-grid\s*\{/u)
+  assert.equal(cssDeclaration(cssRule(".library-page .library-sidebar"), "display"), "flex")
+  assert.equal(cssDeclaration(cssRule(".library-page .library-sidebar"), "flex-direction"), "column")
+  assert.equal(cssDeclaration(cssRule(".library-page .library-sidebar .sidebar-plan"), "position"), "static")
+  assert.equal(cssDeclaration(cssRule(".library-page .library-sidebar .sidebar-plan"), "margin-top"), "auto")
   assert.match(styles, /@media \(max-width: 1320px\)[\s\S]*?\.library-page \.library-shelf-grid/u)
   assert.match(styles, /\.library-page \.library-table-wrap[^}]*overflow-x:\s*auto/u)
   assert.match(styles, /\.library-page \.library-inspector[^}]*overflow-y:\s*auto/u)

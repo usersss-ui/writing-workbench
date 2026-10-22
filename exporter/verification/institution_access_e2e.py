@@ -135,15 +135,20 @@ def assert_discovery_layout(page: Page, width: int) -> None:
 
 
 def run_keyword_discovery(page: Page) -> None:
-    page.locator("#keyword-search-form button[type='submit']").click()
+    page.locator("#keyword-query").fill("时变有向网络、分布式约束优化、低通信")
+    page.locator("#keyword-start-year").fill("2022")
+    page.locator("#keyword-end-year").fill("2026")
+    page.locator("#keyword-language").select_option("en")
+    page.locator(".discovery-query-tools > summary").filter(has_text="可选：英文检索式").click()
+    page.locator("#generate-english-query").click()
     ensure(page.locator("#english-query").input_value() == EXPECTED_EXPRESSION, "keyword_translation")
     ensure("已生成英文检索式" in page.locator("#keyword-search-status").inner_text(), "keyword_status")
     page.locator("#keyword-live-search").click()
     page.locator("#keyword-live-results-list .discovery-result-card").first.wait_for(state="visible")
     cards = page.locator("#keyword-live-results-list .discovery-result-card")
     ensure(cards.count() == 3, "openalex_card_count")
-    ensure(page.locator("[data-live-result-count]").inner_text().strip() == "3 条真实结果", "openalex_count")
-    ensure("OpenAlex 共匹配 3 条" in page.locator("#keyword-search-status").inner_text(), "openalex_status")
+    ensure(page.locator("[data-live-result-count]").inner_text().strip() == "3 篇唯一已加载结果", "openalex_count")
+    ensure("来源匹配 3 · 已加载 3" in page.locator("#discovery-source-status").text_content(), "openalex_source_status")
     ensure(page.evaluate("document.activeElement?.id") == "keyword-search-results", "openalex_result_focus")
     for paper_id in ("W9000000003", "W9000000004", "W9000000005"):
         ensure(
@@ -153,7 +158,11 @@ def run_keyword_discovery(page: Page) -> None:
 
 
 def add_candidate(page: Page, paper_id: str) -> Any:
-    page.locator(f'button[data-add-candidate="{paper_id}"]').click()
+    result = page.locator(f'#keyword-live-results-list [data-paper-id="{paper_id}"]')
+    result.locator('[data-select-result]').click()
+    ensure(page.locator('[data-candidate-count]').inner_text().strip() == '0', 'external_candidate_separate_owner')
+    page.once('dialog', lambda dialog: dialog.accept())
+    result.locator('[data-convert-result]').click()
     card = page.locator(f'[data-queue-paper="{paper_id}"]')
     card.wait_for(state="visible")
     ensure(page.locator("[data-candidate-count]").inner_text().strip() != "0", "candidate_count")
@@ -255,6 +264,7 @@ def verify_discovery_viewport(
         context,
         origin,
         openalex_response=openalex_payload(),
+        openalex_doi_responses={work["doi"].removeprefix("https://doi.org/"): work for work in openalex_payload()["results"]},
         institution_response=institution_profile(),
     )
     page = context.new_page()
@@ -273,13 +283,13 @@ def verify_discovery_viewport(
 
         assert_institution_access(page)
         page.screenshot(path=str(screenshot_path(width, height, "institution-access.png")), full_page=True)
-        ensure(network.openalex_requests == 1, "openalex_request_count")
+        ensure(network.openalex_requests == 2 and network.openalex_verification_requests == 1, "openalex_search_and_verified_conversion_count")
         ensure(network.institution_requests == 1, "institution_request_count")
 
         with page.expect_navigation(wait_until="networkidle"):
-            page.get_by_role("link", name="论文库", exact=True).click()
+            page.get_by_role("link", name="分析与笔记", exact=True).click()
         ensure(page.url == f"{origin}/local_library_output/desktop/library.html", "discovery_navigation")
-        ensure(page.locator("#library-page-title").inner_text().strip() == "个人论文库", "discovery_navigation_target")
+        ensure(page.locator("#library-page-title").inner_text().strip() == "本地论文 · 分析与笔记", "discovery_navigation_target")
         assert_no_document_overflow(page, "discovery_navigation_overflow")
         assert_browser_storage_privacy(page, "discovery_storage_privacy")
         ensure(not network.problems, "discovery_network:" + ",".join(network.problems))

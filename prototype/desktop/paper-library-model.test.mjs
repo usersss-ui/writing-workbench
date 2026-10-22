@@ -296,6 +296,31 @@ test("normalizes Unicode case and repeated spaces in searchable metadata", () =>
   assert.match(searchableText(paper, facetSchema), /directed optimization/u)
 })
 
+test("matches every direction keyword across metadata fields and rejects partial coverage", () => {
+  const paper = { ...papers[0], title_zh: "有向网络算法", title_en: "", source_terms: ["时变拓扑"] }
+  const result = matchPaperQuery(paper, "分布式优化 有向网络 时变拓扑", facetSchema)
+  assert.equal(result.matched, true)
+  assert.ok(result.hits.some((hit) => hit.field === "中文标题" && hit.snippet === "有向网络算法"))
+  assert.ok(result.hits.some((hit) => hit.field === "研究领域" && hit.snippet === "分布式优化"))
+  assert.ok(result.hits.some((hit) => hit.field === "原文术语" && hit.snippet === "时变拓扑"))
+  assert.deepEqual(matchPaperQuery(paper, "分布式优化 未知方向", facetSchema), { matched: false, hits: [] })
+})
+
+test("direction labels match canonical network facets without matching the opposite balance", () => {
+  const schema = { groups: [
+    { path: "network.direction", label: "网络方向", values: ["有向", "无向"] },
+    { path: "network.time", label: "网络时变性", values: ["时变", "固定"] },
+    { path: "network.balance", label: "网络平衡性", values: ["平衡", "不平衡"] },
+  ] }
+  const paper = { paper_id: "Graph-01", title_zh: "网络算法", facets: {
+    network: { direction: ["有向"], time: ["时变"], balance: ["不平衡"] },
+  } }
+  assert.equal(matchPaperQuery(paper, "有向网络 时变拓扑 非平衡网络", schema).matched, true)
+  assert.equal(matchPaperQuery(paper, "有向网络 平衡网络", schema).matched, false)
+  assert.equal(matchPaperQuery(paper, "无向网络", schema).matched, false)
+  assert.equal(matchPaperQuery(paper, "静态拓扑", schema).matched, false)
+})
+
 test("facet filters use OR within one path and AND across paths", () => {
   const result = filterLibrary(papers, {
     facets: {

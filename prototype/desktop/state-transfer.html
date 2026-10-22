@@ -22,8 +22,8 @@
         <p class="eyebrow">一次性本地工具</p>
         <h1 id="state-transfer-title">浏览器研究状态迁移</h1>
         <p>
-          只处理研究方向、论文工作区、个人标签、发现候选与 Agent 输入快照。
-          不读取论文正文、笔记、原始路径、凭据或其他网站状态。
+          只处理研究方向、论文工作区、个人标签、发现候选、Agent 输入快照、P02 研究闭环（含写作草稿）与检索工作区。
+          不读取论文源文件、笔记文件、原始路径、凭据或其他网站状态。磁盘上的应用投稿项目需在项目页另行导出完整 JSON，包含项目正文、证据与材料快照。
         </p>
         <div class="state-transfer-origin-line">
           <span>当前来源</span>
@@ -37,12 +37,12 @@
             <div>
               <p class="eyebrow">步骤一</p>
               <h2 id="state-transfer-export-title">导出当前来源</h2>
-              <p>先严格校验五组已提交状态，再生成带 canonical SHA-256 的 JSON 文件。</p>
+              <p>先严格校验七组已保存状态，再生成带 SHA-256 校验的 v3 JSON 文件。兼容 v1／v2 备份，旧文件未包含的状态保留当前内容。</p>
             </div>
           </div>
           <div class="state-transfer-boundary">
             <strong>不会导出</strong>
-            <span>pending 事务、任意其他 localStorage、正文、路径、认证信息</span>
+            <span>磁盘投稿项目、pending 事务、任意其他 localStorage、论文源文件、路径、认证信息；P02 写作草稿包含在本次导出中</span>
           </div>
           <button class="button button--secondary" id="state-transfer-export" type="button">导出已校验状态</button>
         </section>

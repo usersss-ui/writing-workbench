@@ -1,6 +1,8 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { makeElement, memoryStorage } from "./discovery-test-fixtures.mjs"
+import { createDiscoveryWorkspaceStore } from "./discovery-workspace.mjs"
 import {
   buildKeywordSearchExpression,
   createDiscoveryController,
@@ -9,6 +11,7 @@ import {
 } from "./discovery.mjs"
 
 const template = await readFile(new URL("./discovery.template.html", import.meta.url), "utf8")
+const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8")
 const absoluteUsersPath = (...parts) => ["", "Users", ...parts].join("/")
 
 const institution = Object.freeze({
@@ -30,12 +33,21 @@ const institution = Object.freeze({
 })
 
 test("中文研究意图生成可编辑的英文检索式，并拒绝无法可靠翻译的词", () => {
+  assert.equal(buildKeywordSearchExpression("在线优化"), '("online optimization")')
   assert.equal(typeof buildKeywordSearchExpression, "function")
   assert.equal(
     buildKeywordSearchExpression("时变有向网络中的低通信分布式约束优化"),
     '("time-varying directed graph" AND "distributed constrained optimization" AND "communication-efficient")',
   )
   assert.equal(buildKeywordSearchExpression("事件触发与耦合约束"), '("event-triggered" AND "coupled constraints")')
+  assert.equal(
+    buildKeywordSearchExpression("分布式优化 有向网络 时变拓扑 非平衡网络 耦合约束 低通信"),
+    '("distributed optimization" AND "directed network" AND "time-varying topology" AND "unbalanced network" AND "coupled constraints" AND "communication-efficient")',
+  )
+  assert.equal(
+    buildKeywordSearchExpression("时变有向网络 低通信 耦合约束 收敛性"),
+    '("time-varying directed graph" AND "coupled constraints" AND "communication-efficient" AND "convergence")',
+  )
   assert.equal(buildKeywordSearchExpression("privacy-preserving distributed optimization"), "privacy-preserving distributed optimization")
   assert.throws(() => buildKeywordSearchExpression("量子通信"), /不能可靠转换全部中文关键词/u)
 })
@@ -56,6 +68,24 @@ test("论文发现页面是中文桌面工作台，并包含可访问的双模�
   assert.doesNotMatch(template, /<iframe|<embed|<object/u)
 })
 
+test("论文发现页保留完整研究流程导航并使用稳定的论文库图标", () => {
+  assert.match(
+    template,
+    /<a class="nav-item" href="\.\.\/\.\.\/prototype\/desktop\/index\.html#thesis"><span aria-hidden="true">◇<\/span><span>学位论文<\/span><\/a>/u,
+  )
+  const libraryAction = template.match(
+    /<a class="icon-button" href="\.\/library\.html" aria-label="打开论文库">([\s\S]*?)<\/a>/u,
+  )?.[1]
+  assert.ok(libraryAction)
+  assert.match(libraryAction, /<svg[^>]*class="window-action-icon"[^>]*aria-hidden="true"[\s\S]*?<\/svg>/u)
+  assert.equal(libraryAction.replace(/<svg[\s\S]*?<\/svg>/u, "").trim(), "")
+  assert.match(
+    styles,
+    /\.window-actions \.icon-button,\s*\.window-actions \.avatar-button\s*\{[^}]*display:\s*grid;[^}]*place-items:\s*center;/u,
+  )
+  assert.match(styles, /\.window-action-icon\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;/u)
+})
+
 test("所有发现页外部目的地是可见 HTTPS 普通链接且没有登录嵌入", () => {
   const anchors = [...template.matchAll(/<a\b[^>]*>/gu)].map(([tag]) => tag)
   const external = anchors.filter((tag) => /href="https:\/\//u.test(tag))
@@ -66,26 +96,6 @@ test("所有发现页外部目的地是可见 HTTPS 普通链接且没有登录�
   }
   assert.doesNotMatch(template, /document\.cookie|<form[^>]+action="https:/iu)
 })
-
-function makeElement({ dataset = {}, attributes = {}, tagName = "div" } = {}) {
-  const listeners = new Map()
-  const attrs = new Map(Object.entries(attributes))
-  return {
-    dataset: { ...dataset }, tagName: tagName.toUpperCase(), value: "", ownText: "", hidden: false,
-    disabled: false, children: [], options: [], href: "", focusCount: 0,
-    set textContent(value) { this.ownText = String(value); this.children = []; this.options = [] },
-    get textContent() { return this.ownText + this.children.map((child) => child.textContent).join("") },
-    addEventListener(type, listener) { listeners.set(type, listener) },
-    dispatch(type, event = {}) { return listeners.get(type)?.({ preventDefault() {}, currentTarget: this, ...event }) },
-    setAttribute(name, value) { attrs.set(name, String(value)) },
-    getAttribute(name) { return attrs.get(name) ?? null },
-    removeAttribute(name) { attrs.delete(name) },
-    appendChild(child) { this.children.push(child); return child },
-    replaceChildren(...children) { this.ownText = ""; this.children = children; this.options = children },
-    append(...children) { this.children.push(...children); this.options.push(...children) },
-    focus() { this.focusCount += 1 },
-  }
-}
 
 function candidateStore() {
   let candidates = []
@@ -208,6 +218,9 @@ function keywordRoot() {
   const elements = new Map([
     ["#keyword-search-form", makeElement({ tagName: "form" })], ["#keyword-query", makeElement()], ["#english-query", makeElement()],
     ["#keyword-sort", makeElement()], ["#keyword-live-search", makeElement({ tagName: "button" })], ["#keyword-search-status", makeElement()],
+    ["#keyword-start-year", makeElement()], ["#keyword-end-year", makeElement()], ["#keyword-language", makeElement()],
+    ["#generate-english-query", makeElement({ tagName: "button" })], ["#keyword-load-more", makeElement({ tagName: "button" })],
+    ["#local-match-status", makeElement()], ["#refresh-local-matches", makeElement({ tagName: "button" })], ["#actual-search-query", makeElement()],
     ["#keyword-search-results", makeElement()], ["#keyword-live-results-list", makeElement()], ["[data-live-result-count]", makeElement()],
     ["#keyword-discovery-panel", makeElement()], ["#known-paper-panel", makeElement()], ["#candidate-queue-panel", makeElement()],
     ["#access-guide-panel", makeElement()], ["#candidate-queue-status", makeElement()], ["#candidate-queue-list", makeElement()],
@@ -216,17 +229,159 @@ function keywordRoot() {
     ["[data-provider-name]", makeElement()], ["#institution-step-open", makeElement({ tagName: "a" })], ["#institution-step-auth", makeElement({ tagName: "a" })], ["#institution-step-library", makeElement({ tagName: "a" })],
     ["#access-copy-target", makeElement()], ["#access-copy", makeElement({ tagName: "button" })], ["#access-copy-status", makeElement()], ["#access-warnings", makeElement({ tagName: "ul" })],
   ])
+  for (const name of ["discovery-import-file", "discovery-import-preview", "discovery-query-plan", "discovery-review-panel", "discovery-source-status", "discovery-status", "discovery-history"]) elements.set(`#${name}`, makeElement())
+  const viewTabs = ["all", "curated"].map(view => makeElement({ dataset: { discoveryView: view } }))
+  for (const tab of viewTabs) elements.set(`[data-discovery-view="${tab.dataset.discoveryView}"]`, tab)
   elements.get("#known-paper-panel").hidden = true
   elements.get("#access-guide-panel").hidden = true
   elements.get("#access-result").hidden = true
   elements.get("#keyword-query").value = "时变有向网络中的低通信分布式约束优化"
   elements.get("#keyword-sort").value = "relevance"
+  elements.get("#keyword-language").value = "all"
   return {
     querySelector(selector) { return elements.get(selector) ?? null },
-    querySelectorAll(selector) { return selector === "[data-discovery-mode]" ? [keywordTab, accessTab] : [] },
+    querySelectorAll(selector) { return selector === "[data-discovery-mode]" ? [keywordTab, accessTab] : selector === "[data-discovery-view]" ? viewTabs : [] },
     createElement(tagName) { return makeElement({ tagName }) }, elements, keywordTab, accessTab,
   }
 }
+
+test('all view is default and switching to curated does not query again', async () => {
+  const root = keywordRoot(); let calls = 0
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    workspaceStore: createDiscoveryWorkspaceStore(memoryStorage()), fetchImpl: async () => ({ ok: false }), loadIndex: async () => ({ papers: [] }),
+    searchWorks: async () => { calls++; return { total: 1, works: [task11Candidate()], nextCursor: null } } })
+  await controller.start(); await root.elements.get('#keyword-live-search').dispatch('click')
+  assert.equal(controller.getDiscoverySnapshot().view, 'all')
+  await root.elements.get('[data-discovery-view="curated"]').dispatch('click')
+  assert.equal(calls, 1); assert.equal(controller.getDiscoverySnapshot().view, 'curated')
+})
+
+test("显式范围传入检索，加载更多沿用同一范围且合并重复结果", async () => {
+  const root = keywordRoot()
+  const calls = []
+  const first = task11Candidate()
+  const second = task11Candidate({ paperId: "W200", title: "Second paper" })
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }), loadIndex: async () => ({ papers: [] }),
+    searchWorks: async (args) => { calls.push(args); return calls.length === 1
+      ? { total: 30, works: [first], nextCursor: "cursor-2" }
+      : { total: 30, works: [first, second], nextCursor: null } },
+  })
+  await controller.start()
+  root.elements.get("#keyword-query").value = "distributed optimization"
+  root.elements.get("#keyword-start-year").value = "2000"
+  root.elements.get("#keyword-end-year").value = "2025"
+  await root.elements.get("#keyword-search-form").dispatch("submit")
+  assert.deepEqual(calls[0], { query: "distributed optimization", sort: "relevance", startYear: 2000, endYear: 2025, language: "all", cursor: "*", perPage: 25 })
+  assert.equal(root.elements.get("#keyword-load-more").hidden, false)
+  await root.elements.get("#keyword-load-more").dispatch("click")
+  assert.equal(calls[1].cursor, "cursor-2")
+  assert.equal(calls[1].startYear, 2000)
+  assert.deepEqual(controller.getWorks().map((work) => work.paperId), [first.paperId, "W200"])
+  assert.match(root.elements.get("#discovery-source-status").textContent, /来源匹配 30/u)
+  assert.equal(root.elements.get("#keyword-load-more").hidden, true)
+})
+
+test("索引失败时结果本地状态未知，重试后根据PDF状态标记并提供本地阅读入口", async () => {
+  const root = keywordRoot()
+  let fail = true
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }),
+    loadIndex: async () => { if (fail) throw new Error("offline"); return { papers: [{ paper_id: "Local-01", doi_or_url: "https://doi.org/10.1109/access.2023.3327199", title_original: "Local paper", source_documents: { pdf: [{ url: `../../local_library_data/sources/local-01/pdf/${"a".repeat(64)}.pdf` }] } }] } },
+    searchWorks: async () => ({ total: 1, works: [task11Candidate()], nextCursor: null }),
+  })
+  await controller.start()
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  let card = findDescendant(root.elements.get("#keyword-live-results-list"), element => Boolean(element.dataset?.resultId))
+  assert.equal(card.dataset.localStatus, "unknown")
+  assert.match(card.textContent, /状态未知/u)
+  assert.doesNotMatch(card.textContent, /本地未匹配/u)
+  fail = false
+  await root.elements.get("#refresh-local-matches").dispatch("click")
+  card = findDescendant(root.elements.get("#keyword-live-results-list"), element => Boolean(element.dataset?.resultId))
+  assert.equal(card.dataset.localStatus, "existing_pdf")
+  assert.match(card.textContent, /本地已有 PDF/u)
+  const localLink = findDescendant(card, (element) => element.tagName === "A" && element.href.includes("paper_id=Local-01"))
+  assert.ok(localLink)
+})
+
+test("同 DOI 的明显题名冲突保留核对提示，不因已索引 PDF 或笔记而锁定同篇", async () => {
+  const root = keywordRoot()
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }),
+    loadIndex: async () => ({ papers: [{ paper_id: 'Local-01', doi_or_url: task11Candidate().doi,
+      title_original: 'Seasonal migration patterns of tropical birds', artifact_availability: { note: true },
+      source_documents: { pdf: [{ url: './synthetic-paper.pdf' }] } }] }),
+    searchWorks: async () => ({ total: 1, works: [task11Candidate()], nextCursor: null }),
+  })
+  await controller.start()
+  await root.elements.get('#keyword-live-search').dispatch('click')
+  const card = findDescendant(root.elements.get('#keyword-live-results-list'), element => Boolean(element.dataset?.resultId))
+  assert.equal(card.dataset.localStatus, 'possible_match')
+  assert.match(card.textContent, /题名.*冲突/u)
+  assert.doesNotMatch(card.textContent, /无需重复下载|本地已收录/u)
+  assert.equal(findDescendant(card, element => Boolean(element.dataset?.selectResult)).disabled, false)
+})
+
+test("更换范围让旧翻页结果失效，非法年份不发出搜索", async () => {
+  const root = keywordRoot()
+  let finish
+  let calls = 0
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }), loadIndex: async () => ({ papers: [] }),
+    searchWorks: async () => { calls += 1; if (calls === 1) return { total: 2, works: [task11Candidate()], nextCursor: "more" }; return new Promise((resolve) => { finish = resolve }) },
+  })
+  await controller.start()
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  const paging = root.elements.get("#keyword-load-more").dispatch("click")
+  root.elements.get("#keyword-start-year").value = "2026"
+  root.elements.get("#keyword-start-year").dispatch("input")
+  finish({ total: 2, works: [task11Candidate({ paperId: "W200" })], nextCursor: null })
+  await paging
+  assert.equal(controller.getWorks().length, 0)
+  root.elements.get("#keyword-end-year").value = "2020"
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(calls, 2)
+  assert.match(root.elements.get("#keyword-search-status").textContent, /年份/u)
+})
+
+test("年份输入尚未完成时不能按不限范围发出检索", async () => {
+  const root = keywordRoot()
+  let calls = 0
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }), loadIndex: async () => ({ papers: [] }),
+    searchWorks: async () => { calls += 1; return { total: 0, works: [], nextCursor: null } },
+  })
+  await controller.start()
+  root.elements.get("#keyword-start-year").validity = { badInput: true }
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(calls, 0)
+  assert.match(root.elements.get("#keyword-search-status").textContent, /年份/u)
+})
+
+test("翻页失败保留已有结果与游标，重试后继续同一范围", async () => {
+  const root = keywordRoot()
+  const calls = []
+  const first = task11Candidate()
+  const controller = createKeywordDiscoveryController({ root, candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }), loadIndex: async () => ({ papers: [] }),
+    searchWorks: async (args) => {
+      calls.push(args)
+      if (calls.length === 2) throw new Error("暂时限流")
+      return calls.length === 1 ? { total: 2, works: [first], nextCursor: "cursor-2" }
+        : { total: 2, works: [task11Candidate({ paperId: "W200" })], nextCursor: null }
+    },
+  })
+  await controller.start()
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  await root.elements.get("#keyword-load-more").dispatch("click")
+  assert.deepEqual(controller.getWorks(), [Object.fromEntries(Object.entries(first).filter(([key]) => key !== "stage"))])
+  assert.match(root.elements.get("#keyword-search-status").textContent, /已有结果已保留/u)
+  assert.equal(root.elements.get("#keyword-load-more").disabled, false)
+  await root.elements.get("#keyword-load-more").dispatch("click")
+  assert.deepEqual(calls[2], calls[1])
+  assert.equal(controller.getWorks().length, 2)
+})
 
 test("关键词控制器切换模式、搜索真实结果，并将结果放入待筛选队列", async () => {
   const root = keywordRoot()
@@ -244,12 +399,12 @@ test("关键词控制器切换模式、搜索真实结果，并将结果放入�
   assert.equal(root.elements.get("#known-paper-panel").hidden, false)
   assert.equal(root.accessTab.getAttribute("tabindex"), "0")
   root.keywordTab.dispatch("click")
-  root.elements.get("#keyword-search-form").dispatch("submit")
+  root.elements.get("#generate-english-query").dispatch("click")
   assert.match(root.elements.get("#english-query").value, /communication-efficient/u)
   await root.elements.get("#keyword-live-search").dispatch("click")
   assert.equal(calls[0].sort, "relevance")
-  assert.equal(root.elements.get("[data-live-result-count]").textContent, "1 条真实结果")
-  assert.equal(root.elements.get("#keyword-live-results-list").children[0].children[0].textContent, "安全标题")
+  assert.equal(root.elements.get("[data-live-result-count]").textContent, "1 篇唯一已加载结果")
+  assert.equal(findDescendant(root.elements.get("#keyword-live-results-list"), element => Boolean(element.dataset?.resultId)).children[0].textContent, "安全标题")
 })
 
 test("关键词控制器把三种可见排序映射为 OpenAlex 检索契约", async () => {
@@ -266,6 +421,77 @@ test("关键词控制器把三种可见排序映射为 OpenAlex 检索契约", a
     await root.elements.get("#keyword-live-search").dispatch("click")
     assert.equal(calls.at(-1).sort, expectedSort)
   }
+})
+
+test("方向词可直接点击搜索，并在本地与网上检索之间保留当前意图", async () => {
+  const root = keywordRoot()
+  const localLink = makeElement({ tagName: "a" })
+  root.elements.set("#search-local-library", localLink)
+  const calls = []
+  const controller = createKeywordDiscoveryController({
+    root, initialQuery: "事件触发 耦合约束", candidateStore: candidateStore(),
+    fetchImpl: async () => ({ ok: false }),
+    searchWorks: async (options) => { calls.push(options); return { total: 0, works: [] } },
+  })
+  await controller.start()
+  assert.equal(new URL(localLink.href, "https://example.org/").searchParams.get("q"), "事件触发 耦合约束")
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(calls[0]?.query, "事件触发 耦合约束")
+  assert.match(root.elements.get("#keyword-search-status").textContent, /减少关键词|缩短检索/u)
+  root.elements.get("#keyword-query").value = "联邦学习"
+  root.elements.get("#keyword-query").dispatch("input")
+  assert.equal(new URL(localLink.href, "https://example.org/").searchParams.get("q"), "联邦学习")
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(calls.at(-1).query, "联邦学习")
+})
+
+test("更换检索意图后不显示旧结果，失败可重试且保留手工英文检索式", async () => {
+  const root = keywordRoot()
+  let failure = false
+  const calls = []
+  const controller = createKeywordDiscoveryController({
+    root, candidateStore: candidateStore(), fetchImpl: async () => ({ ok: false }),
+    searchWorks: async ({ query }) => {
+      calls.push(query)
+      if (failure) throw new Error("网络连接失败")
+      return { total: 1, works: [task11Candidate()] }
+    },
+  })
+  await controller.start()
+  root.elements.get("#english-query").value = "manual English query"
+  root.elements.get("#english-query").dispatch("input")
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(calls.at(-1), "manual English query")
+  assert.equal(controller.getWorks().length, 1)
+  root.elements.get("#keyword-query").value = "联邦学习"
+  root.elements.get("#keyword-query").dispatch("input")
+  assert.equal(controller.getWorks().length, 0)
+  assert.equal(root.elements.get("#keyword-live-results-list").children.length, 0)
+  failure = true
+  await root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(root.elements.get("#keyword-live-search").disabled, false)
+  assert.match(root.elements.get("#keyword-search-status").textContent, /网络连接失败/u)
+  assert.match(root.elements.get("#keyword-search-status").textContent, /重试/u)
+})
+
+test("检索中修改关键词后，旧请求的迟到结果不能覆盖新意图", async () => {
+  const root = keywordRoot()
+  let resolveSearch
+  const controller = createKeywordDiscoveryController({
+    root, candidateStore: candidateStore(), fetchImpl: async () => ({ ok: false }),
+    searchWorks: () => new Promise((resolve) => { resolveSearch = resolve }),
+  })
+  await controller.start()
+  const operation = root.elements.get("#keyword-live-search").dispatch("click")
+  assert.equal(root.elements.get("#keyword-live-search").disabled, true)
+  assert.match(root.elements.get("#keyword-search-status").textContent, /正在检索/u)
+  root.elements.get("#keyword-query").value = "联邦学习"
+  root.elements.get("#keyword-query").dispatch("input")
+  resolveSearch({ total: 1, works: [task11Candidate()] })
+  await operation
+  assert.equal(controller.getWorks().length, 0)
+  assert.match(root.elements.get("#keyword-search-status").textContent, /关键词已更新/u)
+  assert.equal(root.elements.get("#keyword-live-search").disabled, false)
 })
 
 test("模式 Tab 以箭头、Home 和 End 键移动焦点并激活对应面板", () => {
@@ -301,6 +527,53 @@ test("机构配置只从固定同源资源读取，并由发现控制器显式�
   const root = { querySelector() { return null }, querySelectorAll() { return [] }, createElement(tagName) { return makeElement({ tagName }) } }
   const controller = createDiscoveryController({ root, loadInstitution: async () => { throw new Error("missing") }, clipboard: undefined })
   await assert.doesNotReject(controller.start())
+})
+
+test("论文发现页从 q 深链预填研究意图，但不会自动发起外部检索", async () => {
+  const root = keywordRoot()
+  let searchCalls = 0
+  const controller = createDiscoveryController({
+    root,
+    location: { search: "?q=%E4%BA%8B%E4%BB%B6%E8%A7%A6%E5%8F%91%20%E8%80%A6%E5%90%88%E7%BA%A6%E6%9D%9F" },
+    loadInstitution: async () => institution,
+    storage: undefined,
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+    searchWorks: async () => { searchCalls += 1; return { total: 0, costUsd: 0, works: [] } },
+  })
+
+  await controller.start()
+  assert.equal(root.elements.get("#keyword-query").value, "事件触发 耦合约束")
+  assert.equal(root.elements.get("#english-query").value, "")
+  assert.equal(searchCalls, 0)
+})
+
+test("方向入口保持 OR 并暂停自动搜索，参数污染或过长输入显示错误", async () => {
+  for (const axes of [JSON.stringify({ version: 1, axes: { problem: ['分布式优化', '在线优化'] } }), '{"version":1,"axes":{"__proto__":[]}}']) {
+    const root = keywordRoot()
+    const calls = []
+    const controller = createDiscoveryController({ root, location: { search: '?' + new URLSearchParams({ q: '分布式优化 在线优化', search: '1', axes }) },
+      loadInstitution: async () => institution, storage: undefined,
+      fetchImpl: async (url) => { calls.push(String(url)); return { ok: false, status: 404, json: async () => ({}) } },
+    })
+    await controller.start()
+    assert.equal(calls.some(url => url.includes('api.openalex.org')), false)
+    if (axes.includes('__proto__')) assert.match(root.elements.get('#keyword-search-status').textContent, /方向参数无效/)
+    else {
+      assert.equal(root.elements.get('#english-query').value, '(("distributed optimization" OR "online optimization"))')
+      assert.match(root.elements.get('#keyword-search-status').textContent, /确认/)
+      assert.match(root.elements.get('#keyword-search-status').textContent, /分布式优化或在线优化/)
+      root.elements.get('#keyword-query').value = 'manual NOT revised'
+      await root.elements.get('#keyword-query').dispatch('input')
+      assert.equal(root.elements.get('#english-query').value, '')
+    }
+  }
+  const root = keywordRoot()
+  const controller = createKeywordDiscoveryController({ root, initialQuery: 'x'.repeat(1001), autoSearch: true, candidateStore: candidateStore(),
+    searchWorks: async () => { throw new Error('must not run') }, loadIndex: async () => ({ papers: [] }),
+  })
+  await controller.start()
+  assert.equal(root.elements.get('#keyword-query').value.length, 1001)
+  assert.match(root.elements.get('#keyword-search-status').textContent, /缩短/)
 })
 
 test("已知论文访问显示平台冲突警告，并只给出普通的新窗口 HTTPS 链接", async () => {
@@ -372,7 +645,7 @@ test("Task 11 RED2 confirmed card requires an explicit valid local ID and archiv
   assert.equal(archive.disabled, false)
   await archive.dispatch("click")
 
-  assert.equal(indexLoads, 1, "the public index is freshly loaded after the 201 response")
+  assert.equal(indexLoads, 2, "the public index is loaded at startup and freshly reloaded after the 201 response")
   assert.deepEqual(store.marked, ["W4387886124"])
   assert.equal(confirmations.length, 1)
   assert.match(confirmations[0], /Wang23-DIO/u)
@@ -807,13 +1080,13 @@ test("Task 11 RED2 failed immediate rebuild refreshes recovery, and explicit rec
   input.dispatch("input")
   await archive.dispatch("click")
   assert.deepEqual(store.marked, [], "a last-good response cannot mark the browser candidate")
-  assert.equal(indexLoads, 0)
+  assert.equal(indexLoads, 1, "startup loads local status; failed rebuild must not reload the index")
   const banner = findDescendant(root.elements.get("#candidate-queue-panel"), (node) => node.dataset?.archiveRecoveryBanner === "")
   const rebuild = findDescendant(banner, (node) => node.dataset?.archiveRecoveryAction === "rebuild")
   assert.ok(rebuild)
   assert.equal(findCandidateControl(root, "archiveCandidate", "W4387886124").disabled, true)
   await rebuild.dispatch("click")
-  assert.equal(indexLoads, 1)
+  assert.equal(indexLoads, 2)
   assert.deepEqual(store.marked, ["W4387886124"])
   assert.equal(capabilityReads, 3, "successful recovery must re-read capabilities")
   assert.equal(banner.hidden, false, "the current session keeps a neutral recovery result")

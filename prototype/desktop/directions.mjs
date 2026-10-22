@@ -1,346 +1,173 @@
-import { countByReadingState, filterPapers, rankPapers } from "./paper-filter.mjs"
-import { contributionLabel, defaultDirectionSelection, papers, stateLabel } from "./papers-data.mjs"
+import { defaultDirectionSelection } from "./papers-data.mjs"
+import { directionToConditions, encodeDirectionAxes } from "./discovery-query-plan.mjs"
 import {
   createDirectionSaveController,
   createDirectionSnapshotStore,
   wireDirectionSaveButtons,
 } from "./direction-snapshot.mjs"
 
-const selected = {}
-let activeState = "all"
-let searchTerm = ""
+export function initializeDirections({ document, window }) {
+  const selected = {}
+  const filters = document.querySelector("#direction-filters")
+  const form = document.querySelector("#direction-search-form")
+  const queryInput = document.querySelector("#paper-search")
+  const axesInput = document.createElement("input")
+  axesInput.type = "hidden"
+  axesInput.name = "axes"
+  axesInput.disabled = true
+  form?.append(axesInput)
+  let appliedQuery = null
+  const startYear = document.querySelector("#search-start-year")
+  const endYear = document.querySelector("#search-end-year")
+  const language = document.querySelector("#search-language")
+  const toast = document.querySelector("#toast")
+  let toastTimeout = null
+  let storage = null
+  try { storage = window.localStorage } catch {}
+  const directionStore = createDirectionSnapshotStore(storage)
+  const selectionValues = () => Object.values(selected).flat()
 
-const filters = document.querySelector("#direction-filters")
-const paperList = document.querySelector("#paper-list")
-const sortSelect = document.querySelector("#paper-sort")
-const dialog = document.querySelector("#search-dialog")
-const toast = document.querySelector("#toast")
-
-function browserStorage() {
-  try {
-    return window.localStorage
-  } catch {
-    return null
+  function showToast(message) {
+    if (!toast) return
+    toast.textContent = message
+    toast.classList.add("toast--visible")
+    window.clearTimeout(toastTimeout)
+    toastTimeout = window.setTimeout(() => toast.classList.remove("toast--visible"), 2200)
   }
-}
 
-const directionStore = createDirectionSnapshotStore(browserStorage())
+  function renderSavedDirection(snapshot) {
+    const state = document.querySelector("#direction-save-state")
+    const axes = document.querySelector("#direction-save-axes")
+    if (state) {
+      const date = snapshot ? new Date(snapshot.saved_at) : null
+      state.textContent = snapshot
+        ? "已显式保存 · " + new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date)
+        : "尚未显式保存研究方向"
+    }
+    if (!axes) return
+    axes.replaceChildren()
+    const values = snapshot ? Object.values(snapshot.axes).flat() : []
+    for (const value of values.length ? values : ["选择条件后点击“保存研究方向”固定当前输入"]) {
+      const tag = document.createElement("span")
+      tag.textContent = value
+      axes.append(tag)
+    }
+  }
 
-function valuesForSelection() {
-  return Object.values(selected).flat()
-}
+  function render() {
+    const values = selectionValues()
+    const count = document.querySelector("#selected-count")
+    if (count) count.textContent = directionToConditions(selected).conditions.length + " 个条件"
+    const localLink = document.querySelector("#search-local-library")
+    const localQuery = queryInput?.value.trim() ?? ""
+    if (localLink) localLink.href = "../../local_library_output/desktop/library.html"
+      + (localQuery ? "?q=" + encodeURIComponent(localQuery) : "")
 
-function setSelection(nextSelection) {
-  Object.keys(selected).forEach((axis) => delete selected[axis])
-  Object.entries(nextSelection).forEach(([axis, values]) => {
-    if (values.length > 0) selected[axis] = [...values]
-  })
+    const advancedLink = document.querySelector("#search-new-paper")
+    if (advancedLink) {
+      const params = new URLSearchParams({ q: values.join(" "), search: "1" })
+      params.set("axes", encodeDirectionAxes(selected))
+      if (startYear?.value) params.set("startYear", startYear.value)
+      if (endYear?.value) params.set("endYear", endYear.value)
+      params.set("language", language?.value || "all")
+      advancedLink.href = "../../local_library_output/desktop/discovery.html?" + params
+      advancedLink.setAttribute("aria-disabled", String(values.length === 0))
+    }
+    const apply = document.querySelector("#use-direction-in-search")
+    if (apply) apply.disabled = values.length === 0
+  }
 
-  filters?.querySelectorAll(".filter-group").forEach((group) => {
-    const axis = group.dataset.axis
-    group.querySelectorAll(".filter-chip").forEach((chip) => {
-      const isSelected = selected[axis]?.includes(chip.dataset.value) ?? false
-      chip.classList.toggle("filter-chip--selected", isSelected)
-      chip.setAttribute("aria-pressed", String(isSelected))
+  function setSelection(nextSelection) {
+    for (const axis of Object.keys(selected)) delete selected[axis]
+    for (const [axis, values] of Object.entries(nextSelection)) {
+      if (values.length) selected[axis] = [...values]
+    }
+    filters?.querySelectorAll(".filter-group").forEach((group) => {
+      group.querySelectorAll(".filter-chip").forEach((chip) => {
+        const active = selected[group.dataset.axis]?.includes(chip.dataset.value) ?? false
+        chip.classList.toggle("filter-chip--selected", active)
+        chip.setAttribute("aria-pressed", String(active))
+      })
     })
+    render()
+  }
+
+  filters?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".filter-chip")
+    const axis = chip?.closest(".filter-group")?.dataset.axis
+    const value = chip?.dataset.value
+    if (!axis || !value) return
+    const values = selected[axis] ?? []
+    setSelection({ ...selected, [axis]: values.includes(value) ? values.filter((item) => item !== value) : [...values, value] })
+  })
+  document.querySelector("#reset-direction")?.addEventListener("click", () => setSelection(defaultDirectionSelection))
+  document.querySelector("#clear-direction")?.addEventListener("click", () => setSelection({}))
+  document.querySelector("#use-direction-in-search")?.addEventListener("click", () => {
+    if (!queryInput || selectionValues().length === 0) return
+    queryInput.value = selectionValues().join(" ")
+    appliedQuery = queryInput.value
+    axesInput.value = encodeDirectionAxes(selected)
+    axesInput.disabled = false
+    queryInput.setCustomValidity("")
+    render()
+    queryInput.focus()
+    showToast("已将研究条件填入关键词，可继续修改后搜索。")
+  })
+  document.querySelector("#search-new-paper")?.addEventListener("click", (event) => {
+    if (selectionValues().length > 0) return
+    event.preventDefault()
+    showToast("请先选择研究条件，或在上方输入关键词搜索。")
   })
 
-  render()
-}
-
-function showToast(message) {
-  if (!toast) return
-  toast.textContent = message
-  toast.classList.add("toast--visible")
-  window.clearTimeout(showToast.timeout)
-  showToast.timeout = window.setTimeout(() => toast.classList.remove("toast--visible"), 2200)
-}
-
-function formatSavedTime(value) {
-  const date = new Date(value)
-  return Number.isFinite(date.valueOf())
-    ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date)
-    : value
-}
-
-function renderSavedDirection(snapshot) {
-  const state = document.querySelector("#direction-save-state")
-  const axes = document.querySelector("#direction-save-axes")
-  if (state) {
-    state.textContent = snapshot
-      ? `已显式保存 · ${formatSavedTime(snapshot.saved_at)}`
-      : "尚未显式保存研究方向"
+  for (const control of [queryInput, startYear, endYear, language]) {
+    control?.addEventListener("input", () => {
+      if (control === queryInput) {
+        appliedQuery = null
+        axesInput.value = ""
+        axesInput.disabled = true
+      }
+      queryInput?.setCustomValidity("")
+      endYear?.setCustomValidity("")
+      render()
+    })
+    control?.addEventListener("change", render)
   }
-  if (!axes) return
-  axes.replaceChildren()
-  const values = snapshot ? Object.values(snapshot.axes).flat() : []
-  if (values.length === 0) {
-    const hint = document.createElement("span")
-    hint.textContent = "选择条件后点击“保存课题候选”固定当前输入"
-    axes.append(hint)
-    return
-  }
-  values.forEach((value) => {
-    const tag = document.createElement("span")
-    tag.textContent = value
-    axes.append(tag)
+  form?.addEventListener("submit", (event) => {
+    if (!queryInput) return
+    queryInput.value = queryInput.value.trim()
+    if (queryInput.value !== appliedQuery) {
+      axesInput.value = ""
+      axesInput.disabled = true
+    }
+    queryInput.setCustomValidity(queryInput.value ? "" : "请输入搜索关键词。")
+    const reversedYears = startYear?.value && endYear?.value && Number(startYear.value) > Number(endYear.value)
+    endYear?.setCustomValidity(reversedYears ? "结束年份不能早于开始年份。" : "")
+    if (!queryInput.value || reversedYears) {
+      event.preventDefault()
+      ;(queryInput.value ? endYear : queryInput)?.reportValidity()
+    }
+    render()
   })
-}
-
-function activePapers() {
-  const matched = filterPapers(papers, selected)
-  const byState = activeState === "all"
-    ? matched
-    : matched.filter((paper) => paper.readingState === activeState)
-  const bySearch = searchTerm
-    ? byState.filter((paper) => `${paper.id} ${paper.title} ${paper.venue} ${paper.note}`.toLowerCase().includes(searchTerm))
-    : byState
-  return rankPapers(bySearch, sortSelect?.value ?? "relevance")
-}
-
-function createPaperRow(paper) {
-  const article = document.createElement("article")
-  article.className = "paper-row"
-
-  const state = document.createElement("span")
-  state.className = `paper-state paper-state--${paper.readingState}`
-  state.textContent = stateLabel[paper.readingState] ?? paper.readingState
-
-  const main = document.createElement("div")
-  main.className = "paper-main"
-  const meta = document.createElement("div")
-  meta.className = "paper-title-row"
-  meta.textContent = `${paper.year} · ${paper.venue} · ${paper.id}`
-  const title = document.createElement("h3")
-  title.textContent = paper.title
-  const note = document.createElement("p")
-  note.textContent = paper.note
-  main.append(meta, title, note)
-
-  const contribution = document.createElement("div")
-  contribution.className = "paper-contribution"
-  const badge = document.createElement("span")
-  badge.className = `contribution contribution--${paper.contribution}`
-  badge.textContent = contributionLabel[paper.contribution] ?? paper.contribution
-  const simulation = document.createElement("small")
-  simulation.textContent = paper.simulation
-  contribution.append(badge, simulation)
-
-  const action = document.createElement("button")
-  action.className = "paper-action"
-  action.type = "button"
-  action.setAttribute("aria-label", `打开《${paper.title}》的结构化阅读`)
-  action.textContent = "→"
-  action.addEventListener("click", () => showToast(`已定位《${paper.title}》的阅读入口`))
-
-  article.append(state, main, contribution, action)
-  return article
-}
-
-function renderPapers() {
-  if (!paperList) return
-  paperList.replaceChildren()
-  const visiblePapers = activePapers()
-
-  if (visiblePapers.length === 0) {
-    const empty = document.createElement("div")
-    empty.className = "empty-state"
-    const title = document.createElement("strong")
-    title.textContent = searchTerm ? "没有符合搜索词的论文" : "当前状态下没有匹配论文"
-    const hint = document.createElement("span")
-    hint.textContent = "可减少组合条件、切换阅读状态，或搜索新论文补齐证据。"
-    empty.append(title, hint)
-    paperList.append(empty)
-    return
-  }
-
-  visiblePapers.forEach((paper) => paperList.append(createPaperRow(paper)))
-}
-
-function renderTabs(matched) {
-  const counts = countByReadingState(matched)
-  const allCounts = { all: matched.length, ...counts }
-
-  document.querySelectorAll("[data-count]").forEach((element) => {
-    element.textContent = allCounts[element.dataset.count] ?? 0
+  document.addEventListener("keydown", (event) => {
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return
+    event.preventDefault()
+    document.querySelector("#paper-search")?.focus()
   })
 
-  document.querySelectorAll(".state-tab").forEach((tab) => {
-    const isActive = tab.dataset.state === activeState
-    tab.classList.toggle("state-tab--active", isActive)
-    tab.setAttribute("aria-selected", String(isActive))
-    tab.tabIndex = isActive ? 0 : -1
-    if (isActive) paperList?.setAttribute("aria-labelledby", tab.id)
+  const saveController = createDirectionSaveController({
+    store: directionStore,
+    getSelection: () => selected,
+    renderSaved: renderSavedDirection,
+    notify: showToast,
   })
+  wireDirectionSaveButtons([
+    document.querySelector("#save-candidate"),
+    document.querySelector("#save-candidate-side"),
+  ], saveController.save)
+  const saved = saveController.initialize()
+  setSelection(saved?.axes ?? defaultDirectionSelection)
 }
 
-function activateStateTab(tab, { focus = false } = {}) {
-  if (!tab?.dataset.state) return
-  activeState = tab.dataset.state
-  render()
-  if (focus) tab.focus()
+if (typeof document !== "undefined" && typeof window !== "undefined") {
+  initializeDirections({ document, window })
 }
-
-function renderInspector(matched) {
-  const selection = valuesForSelection()
-  const counts = countByReadingState(matched)
-  const tags = document.querySelector("#combination-tags")
-  const metricMatches = document.querySelector("#metric-matches")
-  const metricCompleted = document.querySelector("#metric-completed")
-  const metricReading = document.querySelector("#metric-reading")
-  const combinationStatus = document.querySelector("#combination-status")
-  const axisCount = document.querySelector("#axis-count")
-  const combinationName = document.querySelector("#combination-name")
-  const explanation = document.querySelector("#combination-explanation")
-  const gapList = document.querySelector("#gap-list")
-
-  tags?.replaceChildren(...selection.map((value) => {
-    const tag = document.createElement("span")
-    tag.textContent = value
-    return tag
-  }))
-  if (tags && selection.length === 0) {
-    const tag = document.createElement("span")
-    tag.textContent = "尚未选择条件"
-    tags.append(tag)
-  }
-
-  if (metricMatches) metricMatches.textContent = matched.length
-  if (metricCompleted) metricCompleted.textContent = counts.completed
-  if (metricReading) metricReading.textContent = counts.reading
-  if (combinationStatus) combinationStatus.textContent = `直接匹配 ${matched.length}`
-  if (axisCount) axisCount.textContent = `${Object.keys(selected).length} 个维度`
-
-  if (combinationName) {
-    combinationName.textContent = selection.length === 0
-      ? "全部研究方向"
-      : selection.slice(0, 4).join(" · ")
-  }
-  if (explanation) {
-    explanation.textContent = selection.length === 0
-      ? "未限定研究维度，当前显示论文库中的全部演示文献。"
-      : `当前以 ${selection.length} 个条件交叉筛选，重点检查这些条件是否已被同一篇工作同时覆盖。`
-  }
-
-  if (gapList) {
-    const coverage = matched.length === 0
-      ? ["暂无直接覆盖", "当前论文库中没有工作同时满足全部条件，需扩大检索范围。"]
-      : matched.length === 1
-        ? ["组合覆盖仍然稀疏", "目前只有 1 篇论文同时满足所选条件，尚不足以确认稳定贡献边界。"]
-        : ["已有直接覆盖", `已有 ${matched.length} 篇论文满足组合，需要从机制或理论保证上进一步缩小差异。`]
-    gapList.querySelector("strong").textContent = coverage[0]
-    gapList.querySelector("small").textContent = coverage[1]
-  }
-}
-
-function render() {
-  const matched = filterPapers(papers, selected)
-  const selectionCount = valuesForSelection().length
-  const selectedCount = document.querySelector("#selected-count")
-  const resultsSummary = document.querySelector("#results-summary")
-
-  if (selectedCount) selectedCount.textContent = `${selectionCount} 个条件`
-  if (resultsSummary) {
-    resultsSummary.textContent = `当前组合找到 ${matched.length} 篇直接匹配论文；列表显示 ${activePapers().length} 篇。`
-  }
-
-  renderTabs(matched)
-  renderPapers()
-  renderInspector(matched)
-}
-
-filters?.addEventListener("click", (event) => {
-  const chip = event.target.closest(".filter-chip")
-  if (!chip) return
-  const axis = chip.closest(".filter-group")?.dataset.axis
-  const value = chip.dataset.value
-  if (!axis || !value) return
-
-  const axisValues = selected[axis] ?? []
-  selected[axis] = axisValues.includes(value)
-    ? axisValues.filter((item) => item !== value)
-    : [...axisValues, value]
-  if (selected[axis].length === 0) delete selected[axis]
-
-  chip.classList.toggle("filter-chip--selected")
-  chip.setAttribute("aria-pressed", String(chip.classList.contains("filter-chip--selected")))
-  activeState = "all"
-  render()
-})
-
-document.querySelector("#reset-direction")?.addEventListener("click", () => {
-  activeState = "all"
-  searchTerm = ""
-  const search = document.querySelector("#paper-search")
-  if (search) search.value = ""
-  setSelection(defaultDirectionSelection)
-})
-
-document.querySelector("#clear-direction")?.addEventListener("click", () => {
-  activeState = "all"
-  setSelection({})
-})
-
-document.querySelectorAll(".state-tab").forEach((tab) => {
-  tab.addEventListener("click", () => activateStateTab(tab))
-})
-
-document.querySelector(".state-tabs")?.addEventListener("keydown", (event) => {
-  const tabs = [...document.querySelectorAll(".state-tab")]
-  const currentIndex = tabs.indexOf(document.activeElement)
-  if (currentIndex === -1) return
-
-  const keyTargets = {
-    ArrowLeft: (currentIndex - 1 + tabs.length) % tabs.length,
-    ArrowRight: (currentIndex + 1) % tabs.length,
-    Home: 0,
-    End: tabs.length - 1,
-  }
-  const targetIndex = keyTargets[event.key]
-  if (targetIndex === undefined) return
-
-  event.preventDefault()
-  activateStateTab(tabs[targetIndex], { focus: true })
-})
-
-sortSelect?.addEventListener("change", render)
-
-document.querySelector("#paper-search")?.addEventListener("input", (event) => {
-  searchTerm = event.target.value.trim().toLowerCase()
-  render()
-})
-
-document.addEventListener("keydown", (event) => {
-  if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return
-  event.preventDefault()
-  if (!dialog?.open) document.querySelector("#paper-search")?.focus()
-})
-
-document.querySelector("#search-new-paper")?.addEventListener("click", () => {
-  const topic = document.querySelector("#search-topic")
-  if (topic && valuesForSelection().length > 0) topic.value = valuesForSelection().join(" ")
-  dialog?.showModal()
-})
-
-document.querySelector("#save-search")?.addEventListener("click", () => {
-  showToast("检索功能尚未接入；当前未保存检索任务")
-})
-
-const directionSaveController = createDirectionSaveController({
-  store: directionStore,
-  getSelection: () => selected,
-  renderSaved: renderSavedDirection,
-  notify: showToast,
-})
-wireDirectionSaveButtons([
-  document.querySelector("#save-candidate"),
-  document.querySelector("#save-candidate-side"),
-], directionSaveController.save)
-
-const savedDirection = directionSaveController.initialize()
-setSelection(savedDirection?.axes ?? defaultDirectionSelection)
-
-requestAnimationFrame(() => {
-  if (!location.hash) return
-  document.querySelector(location.hash)?.scrollIntoView({ behavior: "auto", block: "start" })
-})

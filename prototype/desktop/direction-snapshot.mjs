@@ -15,6 +15,14 @@ export const DIRECTION_AXIS_VALUES = Object.freeze({
 
 const ROOT_KEYS = Object.freeze(["version", "project_id", "saved_at", "axes"])
 const AXIS_KEYS = Object.freeze(Object.keys(DIRECTION_AXIS_VALUES))
+const STABLE_PAPER_ID = /^(?:[A-Za-z][A-Za-z0-9]+(?:-[A-Za-z0-9]+)+|LIB-[A-F0-9]{12})$/u
+
+export function paperLibraryDetailHref(paperId) {
+  if (typeof paperId !== "string" || !STABLE_PAPER_ID.test(paperId)) {
+    throw new TypeError("论文 ID 无效")
+  }
+  return `../../local_library_output/desktop/library.html?paper_id=${encodeURIComponent(paperId)}`
+}
 
 function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false

@@ -8,39 +8,17 @@ import {
   markCandidateArchivedAfterIndexRefresh,
   requestArchiveRebuild,
 } from "./library.mjs"
-import { searchOpenAlexWorks } from "./openalex-search.mjs"
+import { createDiscoveryWorkspaceStore } from "./discovery-workspace.mjs"
+import { createDiscoverySessionUI } from "./discovery-session-ui.mjs"
+import { buildDiscoveryQueryPlan, decodeDirectionAxes, translateDiscoveryKeywords } from "./discovery-query-plan.mjs"
 
 const ARCHIVE_DISCLOSURE = "仅归档书目信息，不含 PDF/OCR/证据核验"
 const ARCHIVE_RECONCILIATION_PENDING = "恢复已完成，但新索引或本地候选状态尚未核对。"
 
-const KEYWORDS = Object.freeze([
-  ["时变非平衡有向网络", "time-varying unbalanced directed graph"],
-  ["时变有向网络", "time-varying directed graph"],
-  ["分布式在线约束优化", "distributed online constrained optimization"],
-  ["分布式约束优化", "distributed constrained optimization"],
-  ["低通信", "communication-efficient"],
-  ["事件触发", "event-triggered"],
-  ["耦合约束", "coupled constraints"],
-  ["隐私", "privacy-preserving"],
-  ["零阶", "zeroth-order"],
-  ["联邦学习", "federated learning"],
-])
-
 function text(value) { return typeof value === "string" ? value.trim() : "" }
 
 export function buildKeywordSearchExpression(value) {
-  const source = text(value)
-  if (!source) throw new Error("请输入研究方向或关键词")
-  if (!/[\u3400-\u9fff]/u.test(source)) return source
-  let remainder = source.replace(/[的中在上与和及、，,。；;（）()\s]/gu, "")
-  const terms = []
-  for (const [chinese, english] of KEYWORDS) {
-    if (!remainder.includes(chinese)) continue
-    remainder = remainder.replace(chinese, "")
-    terms.push(`"${english}"`)
-  }
-  if (remainder || terms.length === 0) throw new Error("不能可靠转换全部中文关键词；请改用英文检索式")
-  return `(${terms.join(" AND ")})`
+  return translateDiscoveryKeywords(value)
 }
 
 function node(root, selector) { return root?.querySelector?.(selector) ?? null }
@@ -48,34 +26,6 @@ function nodes(root, selector) { return [...(root?.querySelectorAll?.(selector) 
 function setText(root, selector, value) { const element = node(root, selector); if (element) element.textContent = value }
 function setHref(element, value) { if (!element) return; if (typeof value === "string" && value.startsWith("https://")) element.href = value; else element.removeAttribute?.("href") }
 function setHidden(element, hidden) { if (element) element.hidden = hidden }
-function normalizeSearchSort(value) {
-  return ({ relevance: "relevance", citations: "citations", newest: "newest", cited_by_count: "citations", publication_date: "newest" })[value] ?? "relevance"
-}
-
-function workCard(root, work, addCandidate) {
-  const article = root.createElement("article")
-  article.className = "discovery-result-card"
-  article.dataset.paperId = work.paperId
-  const title = root.createElement("h3")
-  title.textContent = work.title
-  const meta = root.createElement("p")
-  meta.textContent = [work.year ?? "年份未报告", work.source, `被引 ${work.citations}`].join(" · ")
-  const actions = root.createElement("div")
-  const open = root.createElement("a")
-  open.textContent = "打开公开落地页 ↗"
-  open.href = work.landingPageUrl
-  open.target = "_blank"
-  open.rel = "noopener noreferrer"
-  const add = root.createElement("button")
-  add.type = "button"
-  add.dataset.addCandidate = work.paperId
-  add.textContent = "加入候选"
-  add.addEventListener("click", () => addCandidate(work))
-  actions.appendChild(open); actions.appendChild(add)
-  article.appendChild(title); article.appendChild(meta); article.appendChild(actions)
-  return article
-}
-
 function candidateCard(root, candidate, actions) {
   const article = root.createElement("article")
   article.dataset.queuePaper = candidate.paperId
@@ -146,21 +96,59 @@ function candidateCard(root, candidate, actions) {
 
 export function createKeywordDiscoveryController({
   root,
+  initialQuery = "",
+  initialScope = {},
+  initialDirection = null,
+  initialDirectionError = "",
+  autoSearch = false,
   prepareAccess = () => {},
-  searchWorks = searchOpenAlexWorks,
+  searchWorks,
+  searchPage,
+  batchController,
+  workspaceStore,
   candidateStore,
   fetchImpl = globalThis.fetch,
   loadIndex = () => loadPaperIndex(fetchImpl),
   confirmArchive = (message) => globalThis.confirm?.(message) === true,
 } = {}) {
   if (!root || !candidateStore) throw new TypeError("关键词发现控制器缺少必要依赖")
-  let works = []
+  let indexGeneration = 0
+  let localIndex = { status: "loading", papers: [] }
   let localCapabilities = null
   let recoveryBanner = null
   let recoveryNotice = ""
   let completedRecoveryKey = null
   const localPaperIds = new Map()
   const archiveStates = new Map()
+
+  const session = createDiscoverySessionUI({ root, workspaceStore, searchWorks, searchPage, batchController,
+    candidateStore, fetchImpl, confirmArchive, initialDirection, onQueueChange: () => renderQueue() })
+  const renderLocalStatus = () => {
+    setText(root, "#local-match-status", localIndex.status === "ready"
+      ? `已核对当前本地索引 ${localIndex.papers.length} 篇。仅确认 PDF 是否在索引中可打开；疑似项需人工核对。`
+      : localIndex.status === "loading" ? "正在核对本地索引；读取完成前，本地状态为未知。"
+        : "本地索引读取失败，不能判断是否已收录。网上检索仍可使用，请刷新本地状态。")
+    session.updateLocal(localIndex.status === "ready" ? localIndex.papers : null)
+  }
+  const acceptLocalIndex = (index) => {
+    if (!Array.isArray(index?.papers)) throw new Error("本地索引格式无效")
+    localIndex = { status: "ready", papers: index.papers }
+    renderLocalStatus()
+  }
+  const refreshLocalIndex = async () => {
+    const generation = ++indexGeneration
+    localIndex = { status: "loading", papers: [] }
+    renderLocalStatus()
+    try {
+      const index = await loadIndex()
+      if (generation !== indexGeneration) return
+      acceptLocalIndex(index)
+    } catch {
+      if (generation !== indexGeneration) return
+      localIndex = { status: "error", papers: [] }
+      renderLocalStatus()
+    }
+  }
 
   const archiveState = (paperId) => archiveStates.get(paperId) ?? { busy: false, status: "" }
   const updateArchiveState = (paperId, patch) => {
@@ -234,6 +222,8 @@ export function createKeywordDiscoveryController({
       ))
       const hadConfirmedCandidate = matchingCandidates.length === 1
       const freshIndex = await loadIndex()
+      indexGeneration += 1
+      acceptLocalIndex(freshIndex)
       marked = markCandidateArchivedAfterIndexRefresh({
         candidateStore,
         paperIndex: freshIndex,
@@ -364,6 +354,8 @@ export function createKeywordDiscoveryController({
         return
       }
       const freshIndex = await loadIndex()
+      indexGeneration += 1
+      acceptLocalIndex(freshIndex)
       const marked = markCandidateArchivedAfterIndexRefresh({
         candidateStore,
         paperIndex: freshIndex,
@@ -421,24 +413,37 @@ export function createKeywordDiscoveryController({
     setHidden(node(root, "#access-guide-panel"), keyword)
     for (const tab of nodes(root, "[data-discovery-mode]")) { const selected = tab.dataset.discoveryMode === mode; tab.setAttribute("aria-selected", String(selected)); tab.setAttribute("tabindex", selected ? "0" : "-1") }
   }
-  const runSearch = async () => {
-    const query = text(node(root, "#english-query")?.value)
-    if (!query) { setText(root, "#keyword-search-status", "请先生成或填写英文检索式。"); return }
-    const button = node(root, "#keyword-live-search"); if (button) button.disabled = true
-    try {
-      const result = await searchWorks({ query, sort: normalizeSearchSort(node(root, "#keyword-sort")?.value) })
-      works = result.works
-      const list = node(root, "#keyword-live-results-list")
-      list?.replaceChildren(...works.map((work) => workCard(root, work, (item) => { candidateStore.add(item); renderQueue() })))
-      setText(root, "[data-live-result-count]", `${works.length} 条真实结果`)
-      setText(root, "#keyword-search-status", `OpenAlex 共匹配 ${result.total} 条；当前显示 ${works.length} 条。`)
-      node(root, "#keyword-search-results")?.focus?.()
-    } catch (error) { setText(root, "#keyword-search-status", error?.message || "OpenAlex 检索失败") } finally { if (button) button.disabled = false }
+  const syncLocalSearchLink = () => {
+    const link = node(root, "#search-local-library")
+    if (!link) return
+    const query = text(node(root, "#keyword-query")?.value)
+    link.href = `./library.html${query ? `?q=${encodeURIComponent(query)}` : ""}`
   }
   return {
     async start() {
       recoveryNotice = ""
       completedRecoveryKey = null
+      const initialQueryValue = typeof initialQuery === "string" ? initialQuery : ""
+      const keywordInput = node(root, "#keyword-query")
+      if (keywordInput && initialQueryValue) keywordInput.value = initialQueryValue
+      let entryWarning = initialDirectionError
+      if (initialQueryValue) {
+        try { buildDiscoveryQueryPlan({ raw: initialQueryValue }) } catch (error) { entryWarning = error.message }
+      }
+      if (initialDirection?.conditions.length && !entryWarning) {
+        const plan = buildDiscoveryQueryPlan({ conditions: initialDirection.conditions, expand: false })
+        const englishInput = node(root, "#english-query")
+        if (englishInput) englishInput.value = plan.selected[0].expression
+        entryWarning = initialDirection.conditions.map(condition => condition.label).join("；") + "。" + initialDirection.warnings.join(" ")
+      }
+      for (const [key, selector] of [["startYear", "#keyword-start-year"], ["endYear", "#keyword-end-year"], ["language", "#keyword-language"]]) {
+        const field = node(root, selector)
+        if (field && typeof initialScope[key] === "string") field.value = initialScope[key]
+      }
+      setHidden(node(root, "#keyword-load-more"), true)
+      syncLocalSearchLink()
+      session.start()
+      keywordInput?.addEventListener("input", syncLocalSearchLink)
       const tabs = nodes(root, "[data-discovery-mode]")
       const selectTab = (tab) => { activate(tab.dataset.discoveryMode); tab.focus?.() }
       for (const [index, tab] of tabs.entries()) {
@@ -454,13 +459,18 @@ export function createKeywordDiscoveryController({
           selectTab(tabs[nextIndex])
         })
       }
-      node(root, "#keyword-search-form")?.addEventListener("submit", (event) => { event.preventDefault(); try { const expression = buildKeywordSearchExpression(node(root, "#keyword-query")?.value); const input = node(root, "#english-query"); if (input) input.value = expression; setText(root, "#keyword-search-status", "已生成英文检索式；确认后搜索 OpenAlex。"); node(root, "#keyword-search-results")?.focus?.() } catch (error) { setText(root, "#keyword-search-status", error.message) } })
-      node(root, "#keyword-live-search")?.addEventListener("click", runSearch)
+      node(root, "#refresh-local-matches")?.addEventListener("click", refreshLocalIndex)
+      root.defaultView?.addEventListener?.("focus", refreshLocalIndex)
+      root.defaultView?.addEventListener?.("pageshow", (event) => { if (event.persisted) void refreshLocalIndex() })
       renderQueue(); activate("keyword")
-      await refreshCapabilities()
+      const startup = [refreshCapabilities(), refreshLocalIndex()]
+      if (entryWarning) setText(root, "#keyword-search-status", entryWarning)
+      if (autoSearch && initialQueryValue && !entryWarning) startup.push(session.search())
+      await Promise.all(startup)
     },
     prepareAccess(locator) { prepareAccess(locator) },
-    getWorks() { return [...works] },
+    getWorks() { return session.getWorks() },
+    getDiscoverySnapshot() { return session.getSnapshot() },
   }
 }
 
@@ -485,11 +495,30 @@ export function createDiscoveryController({
   fetchImpl = globalThis.fetch,
   loadIndex,
   confirmArchive,
+  location = globalThis.location,
 } = {}) {
   const store = createCandidateStore(storage)
+  const parameters = new URLSearchParams(
+    typeof location?.search === "string" ? location.search : "",
+  )
+  const initialQuery = parameters.get("q") ?? ""
+  let initialDirection = null
+  let initialDirectionError = ""
+  if (parameters.has("axes")) {
+    try {
+      if (parameters.getAll("axes").length !== 1) throw new Error("研究方向参数无效；请返回方向页重新选择")
+      initialDirection = decodeDirectionAxes(parameters.get("axes"))
+    } catch (error) { initialDirectionError = error.message }
+  }
   const keyword = createKeywordDiscoveryController({
     root,
+    initialQuery,
+    initialDirection,
+    initialDirectionError,
+    initialScope: Object.fromEntries(["startYear", "endYear", "language"].filter((key) => parameters.has(key)).map((key) => [key, parameters.get(key)])),
+    autoSearch: parameters.get("search") === "1",
     candidateStore: store,
+    workspaceStore: createDiscoveryWorkspaceStore(storage),
     fetchImpl,
     ...(typeof loadIndex === "function" ? { loadIndex } : {}),
     ...(typeof confirmArchive === "function" ? { confirmArchive } : {}),

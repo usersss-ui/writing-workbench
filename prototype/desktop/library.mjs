@@ -11,6 +11,7 @@ import {
 import { createWorkspaceStore } from "./paper-library-storage.mjs"
 import { createUserTagStore } from "./paper-user-tags.mjs"
 import {
+  installNoteDraftEditor,
   mountSafeControlledPreview,
   mountSafeSourceOcrPreview,
   renderInspector,
@@ -1839,7 +1840,7 @@ function renderShelfSummaries(document, summaries, activeRoles) {
 function warningSummary(count) {
   if (!Number.isInteger(count) || count < 0) return "扫描警告数量未提供"
   if (count === 0) return "扫描未记录警告"
-  return `${count} 条扫描警告；详细信息仅保存在本地审计中`
+  return `${count} 条扫描提示（可能含未识别附件或笔记格式问题，不等于文件缺失）；详情保存在本地审计中`
 }
 
 function paperById(papers, paperId) {
@@ -1913,7 +1914,13 @@ function renderNoteImportChecks(document, mount, checks) {
   mount.replaceChildren(fragment)
 }
 
-export function createLibraryController({ document, storage, fetchImpl = globalThis.fetch, candidateStore = null }) {
+export function createLibraryController({
+  document,
+  storage,
+  fetchImpl = globalThis.fetch,
+  candidateStore = null,
+  location = document?.defaultView?.location,
+}) {
   const store = createWorkspaceStore(storage)
   const userTagStore = createUserTagStore(storage)
   let userTagNotice = ""
@@ -1940,6 +1947,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   let imageLightboxTrigger = null
   let noteImportBusy = false
   let noteInspection = null
+  let noteDraft = null
   let noteInspectGeneration = 0
   let noteInspectAbortController = null
   let pendingImportedResult = null
@@ -1962,6 +1970,8 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   function elements() {
     return {
       search: document.getElementById("library-search"),
+      onlineSearch: document.getElementById("search-new-paper"),
+      onlineSearchMode: document.getElementById("search-online-library"),
       shelf: document.getElementById("p02-shelf"),
       filterForm: document.getElementById("library-filters"),
       facetPanelTriggers: [...document.querySelectorAll("[data-facet-panel-trigger]")],
@@ -2003,7 +2013,9 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       noteImportForm: document.getElementById("library-note-import-form"),
       noteImportPaperId: document.querySelector("[data-note-import-paper-id]"),
       noteImportCategory: document.getElementById("library-note-import-category"),
+      noteImportFileLabel: document.getElementById("library-note-import-file-label"),
       noteImportFile: document.getElementById("library-note-import-file"),
+      noteImportDraftSource: document.getElementById("library-note-import-draft-source"),
       noteImportChecks: document.getElementById("library-note-import-checks"),
       noteImportFileName: document.getElementById("library-note-import-file-name"),
       noteImportStatus: document.querySelector("[data-note-import-status]"),
@@ -2425,6 +2437,10 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
 
   function render() {
     const ui = elements()
+    for (const link of [ui.onlineSearch, ui.onlineSearchMode].filter(Boolean)) {
+      const query = (filters.query ?? "").trim()
+      link.href = `./discovery.html${query ? `?q=${encodeURIComponent(query)}` : ""}`
+    }
     const workspaceState = store.read()
     const userTagState = userTagStore.read()
     const view = buildDesktopLibraryViewState({
@@ -2530,9 +2546,20 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
 
   function syncNoteImportControls() {
     const ui = elements()
+    const fromDraft = noteDraft !== null
+    if (ui.noteImportFileLabel) ui.noteImportFileLabel.hidden = fromDraft
+    if (ui.noteImportDraftSource) {
+      ui.noteImportDraftSource.hidden = !fromDraft
+      ui.noteImportDraftSource.textContent = fromDraft
+        ? `来自当前页面的笔记草稿：${noteDraft.originalFileName}，无需另选文件。`
+        : ""
+    }
+    if (ui.noteImportFile) {
+      ui.noteImportFile.disabled = noteImportBusy || fromDraft
+      ui.noteImportFile.required = !fromDraft
+    }
     for (const control of [
       ui.noteImportCategory,
-      ui.noteImportFile,
       ui.noteImportFileName,
       ui.noteImportClose,
       ui.noteImportCancel,
@@ -2568,6 +2595,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     abortNoteInspection()
     noteImportBusy = false
     noteInspection = null
+    noteDraft = null
     noteInspectGeneration += 1
     if (ui.noteImportPaperId) ui.noteImportPaperId.textContent = detailPaperId
     if (ui.noteImportCategory) ui.noteImportCategory.value = "note"
@@ -2593,20 +2621,21 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     const ui = elements()
     const paperId = detailPaperId
     const category = ui.noteImportCategory?.value
-    const file = ui.noteImportFile?.files?.[0]
-    const originalFileName = file?.name ?? ""
+    const draft = noteDraft
+    const file = draft ? null : ui.noteImportFile?.files?.[0]
+    const originalFileName = draft?.originalFileName ?? file?.name ?? ""
     const generation = ++noteInspectGeneration
     noteInspection = null
     if (ui.noteImportChecks) ui.noteImportChecks.replaceChildren()
     if (ui.noteImportFileName) ui.noteImportFileName.value = ""
-    if (ui.noteImportStatus) ui.noteImportStatus.textContent = file ? "正在检查 Markdown…" : "请选择 Markdown 文件"
+    if (ui.noteImportStatus) ui.noteImportStatus.textContent = file || draft ? "正在检查 Markdown…" : "请选择 Markdown 文件"
     syncNoteImportControls()
     if (
       noteImportBusy
       || !ui.noteImportDialog?.open
       || !paperById(papers, paperId)
       || !LOCAL_CAPABILITY_CATEGORIES.some((item) => item.value === category)
-      || !file
+      || (!file && !draft)
     ) return false
 
     const AbortControllerImpl = document.defaultView?.AbortController ?? globalThis.AbortController
@@ -2614,7 +2643,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
     noteInspectAbortController = requestController
     let markdown = null
     try {
-      markdown = await decodeUtf8MarkdownFile(file)
+      markdown = draft ? draft.markdown : await decodeUtf8MarkdownFile(file)
       const inspection = await inspectLocalMarkdownNote({
         fetchImpl,
         paperId,
@@ -2624,12 +2653,13 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
         signal: requestController?.signal,
       })
       const currentUi = elements()
-      const currentFileName = currentUi.noteImportFile?.files?.[0]?.name ?? ""
+      const currentFileName = noteDraft?.originalFileName ?? currentUi.noteImportFile?.files?.[0]?.name ?? ""
       if (
         generation !== noteInspectGeneration
         || !currentUi.noteImportDialog?.open
         || detailPaperId !== paperId
         || currentUi.noteImportCategory?.value !== category
+        || noteDraft !== draft
         || currentFileName !== originalFileName
       ) return false
       noteInspection = inspection
@@ -2878,11 +2908,33 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
 
   function bindEvents() {
     const ui = elements()
+    installNoteDraftEditor({
+      document,
+      canImport: () => localCapabilities?.note_import === true,
+      async onImport({ paperId, markdown, originalFileName }) {
+        const paper = paperById(papers, paperId)
+        if (!paper || noteImportBusy || localCapabilities?.note_import !== true) return false
+        detailOpen = true
+        detailPaperId = paperId
+        detailTriggerPaperId = paperId
+        activeReaderTab = "note"
+        sourceViewMode = defaultSourceViewMode(paper.source_documents)
+        sourcePdfIndex = 0
+        sourceOcrIndex = 0
+        readerMaterialSelection = Object.fromEntries(CONTROLLED_PREVIEW_KEYS.map((kind) => [kind, null]))
+        render()
+        if (!openNoteImportDialog()) return false
+        noteDraft = { markdown, originalFileName }
+        const inspected = await inspectSelectedNoteFile()
+        if (!inspected) closeNoteImportDialog()
+        return inspected
+      },
+    })
     bindUserTagEditor(ui.inspectorRoot)
     bindUserTagEditor(ui.detail)
     ui.addNote?.addEventListener("click", openNoteImportDialog)
     ui.archiveRebuild?.addEventListener("click", () => { void recoverCandidateArchive() })
-    ui.noteImportFile?.addEventListener("change", () => { void inspectSelectedNoteFile() })
+    ui.noteImportFile?.addEventListener("change", () => { noteDraft = null; void inspectSelectedNoteFile() })
     ui.noteImportCategory?.addEventListener("change", () => { void inspectSelectedNoteFile() })
     ui.noteImportFileName?.addEventListener("input", syncNoteImportControls)
     ui.noteImportForm?.addEventListener("submit", (event) => { void submitNoteImport(event) })
@@ -2895,6 +2947,7 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       abortNoteInspection()
       noteImportBusy = false
       noteInspection = null
+      noteDraft = null
       noteInspectGeneration += 1
       if (ui.noteImportChecks) ui.noteImportChecks.replaceChildren()
       if (ui.noteImportFile) ui.noteImportFile.value = ""
@@ -3155,6 +3208,14 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
   async function start() {
     if (!document) return { ok: false, paperCount: 0 }
     if (!eventsBound) {
+      const query = new URLSearchParams(
+        typeof location?.search === "string" ? location.search : "",
+      ).get("q")?.trim() ?? ""
+      if (query && query.length <= 1000) {
+        filters = { ...filters, query }
+        const search = elements().search
+        if (search) search.value = query
+      }
       bindEvents()
       eventsBound = true
     }
@@ -3173,8 +3234,28 @@ export function createLibraryController({ document, storage, fetchImpl = globalT
       papers = index.papers
       facetSchema = index.facet_schema
       warningCount = index.warning_count
-      const persistedSelection = store.read().selectedPaperId
-      if (!paperById(papers, persistedSelection) && papers.length > 0) store.setSelectedPaper(papers[0].paper_id)
+      let persistedSelection = store.read().selectedPaperId
+      if (!paperById(papers, persistedSelection) && papers.length > 0) {
+        store.setSelectedPaper(papers[0].paper_id)
+        persistedSelection = papers[0].paper_id
+      }
+      const requestedPaperId = new URLSearchParams(
+        typeof location?.search === "string" ? location.search : "",
+      ).get("paper_id")
+      if (validPaperId(requestedPaperId) && paperById(papers, requestedPaperId)) {
+        store.setSelectedPaper(requestedPaperId)
+        detailOpen = true
+        detailPaperId = requestedPaperId
+        activeReaderTab = "note"
+        sourceViewMode = defaultSourceViewMode(paperById(papers, requestedPaperId)?.source_documents)
+        sourcePdfIndex = 0
+        sourceOcrIndex = 0
+        readerMaterialSelection = Object.fromEntries(CONTROLLED_PREVIEW_KEYS.map((kind) => [kind, null]))
+      } else if (validPaperId(requestedPaperId)) {
+        filters = { ...filters, query: requestedPaperId }
+        const search = elements().search
+        if (search) search.value = requestedPaperId
+      }
       if (candidateStore && localCapabilities?.recovery?.required === false) {
         try { reconcileArchivedCandidates({ candidateStore, paperIndex: index }) } catch { archiveRecoveryStatus = "候选状态保存失败。" }
       }

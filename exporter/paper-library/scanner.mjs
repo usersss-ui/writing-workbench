@@ -105,7 +105,8 @@ function createSafeMarkdownPrefixReader(fileSystem = {}) {
       const openedBefore = await handle.stat({ bigint: true })
       if (!openedBefore.isFile() || statFingerprint(openedBefore) !== before.fingerprint) throw unsafeMarkdown()
 
-      const buffer = Buffer.alloc(MARKDOWN_PREFIX_BYTES)
+      // Three lookahead bytes complete any UTF-8 character that starts in the prefix.
+      const buffer = Buffer.alloc(MARKDOWN_PREFIX_BYTES + 3)
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
       const openedAfter = await handle.stat({ bigint: true })
       const after = await pathSnapshot(file.lexical_path, sourceRoot)
@@ -114,7 +115,10 @@ function createSafeMarkdownPrefixReader(fileSystem = {}) {
         || after.fingerprint !== statFingerprint(openedAfter)
         || after.canonicalPath !== before.canonicalPath
       ) throw unsafeMarkdown()
-      return buffer.subarray(0, bytesRead).toString("utf8")
+      const decoder = new TextDecoder("utf-8", { ignoreBOM: true })
+      return decoder.decode(buffer.subarray(0, bytesRead), {
+        stream: bytesRead < openedAfter.size,
+      })
     } finally {
       if (handle) await handle.close()
     }

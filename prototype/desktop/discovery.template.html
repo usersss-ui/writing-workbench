@@ -14,26 +14,45 @@
         <div class="traffic-lights" aria-hidden="true"><span class="traffic-light traffic-light--red"></span><span class="traffic-light traffic-light--yellow"></span><span class="traffic-light traffic-light--green"></span></div>
         <div class="window-context"><span class="context-kicker">研究工作台</span><span class="context-divider">/</span><strong>论文发现</strong></div>
         <div class="command-search discovery-command-summary" aria-label="当前页面说明"><span aria-hidden="true">⌕</span><span>公开书目检索 · 人工确认访问</span></div>
-        <div class="window-actions"><a class="icon-button" href="./library.html" aria-label="打开论文库">▤</a><span class="avatar-button" aria-label="当前用户">杨</span></div>
+        <div class="window-actions">
+          <a class="icon-button" href="./library.html" aria-label="打开论文库">
+            <svg class="window-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M6.5 4.75h11A1.75 1.75 0 0 1 19.25 6.5v12.75H8.5a2 2 0 0 1-2-2V4.75Z" />
+              <path d="M6.5 7H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h11.75M10 9h5.75M10 12.5h5.75M10 16h3.75" />
+            </svg>
+          </a>
+          <span class="avatar-button" aria-label="当前用户">杨</span>
+        </div>
       </header>
 
       <div class="workspace-shell discovery-shell">
         <aside class="sidebar">
           <a class="brand" href="../../prototype/desktop/index.html" aria-label="返回研究首页"><span class="brand-mark" aria-hidden="true">R</span><span><strong>学术研究工作台</strong><small>个人研究控制台</small></span></a>
-          <nav class="primary-nav" aria-label="主导航">
-            <p class="nav-caption">研究流程</p>
+<nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">从方向到写作</p>
             <a class="nav-item" href="../../prototype/desktop/index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
-            <a class="nav-item" href="../../prototype/desktop/directions.html"><span aria-hidden="true">⌁</span><span>方向探索</span></a>
-            <a class="nav-item nav-item--active" href="./discovery.html" aria-current="page"><span aria-hidden="true">⌕</span><span>论文发现</span></a>
-            <a class="nav-item" href="./library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
-            <a class="nav-item" href="../../prototype/desktop/agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务</span></a>
-            <a class="nav-item" href="../../prototype/desktop/p02.html"><span aria-hidden="true">□</span><span>我的论文</span></a>
+            <a class="nav-item" href="../../prototype/desktop/directions.html"><span aria-hidden="true">⌁</span><span>确定方向</span></a>
+            <a class="nav-item nav-item--active" href="./discovery.html" aria-current="page"><span aria-hidden="true">⌕</span><span>搜索论文</span></a>
+            <a class="nav-item" href="./library.html"><span aria-hidden="true">▤</span><span>分析与笔记</span></a>
+            <a class="nav-item" href="../../prototype/desktop/p02-writing.html"><span aria-hidden="true">✎</span><span>期刊与写作</span></a>
+            <details class="nav-more">
+              <summary>更多工具</summary>
+              <a class="nav-item" href="../../prototype/desktop/p02.html"><span aria-hidden="true">□</span><span>P02 研究记录</span></a>
+              <a class="nav-item" href="../../prototype/desktop/agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务输入</span></a>
+              <a class="nav-item" href="./state-transfer.html"><span aria-hidden="true">↺</span><span>备份与恢复</span></a>
+              <a class="nav-item" href="../../prototype/desktop/index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
+            </details>
           </nav>
           <section class="sidebar-plan" aria-labelledby="discovery-plan-title"><div class="plan-title-row"><h2 id="discovery-plan-title">发现边界</h2><strong>手动</strong></div><p>候选只保存公开元数据；是否获取全文、是否形成笔记，均须后续人工核验。</p></section>
         </aside>
 
         <section class="main-column discovery-main">
           <div class="page-heading discovery-heading"><div><p class="eyebrow">公开书目 · 人工筛选</p><h1>从研究意图发现可核验的论文线索</h1><p>先检索 OpenAlex，再将候选放入当前浏览器队列；候选归档均标为“元数据待核验”。</p></div><a class="button button--secondary" href="https://openalex.org/" target="_blank" rel="noopener noreferrer">打开 OpenAlex ↗</a></div>
+
+          <nav class="search-source-links" aria-label="论文搜索范围">
+            <a id="search-local-library" href="./library.html">本地已有论文</a>
+            <span aria-current="page">网上搜索新论文</span>
+          </nav>
 
           <section class="panel discovery-panel" aria-labelledby="discovery-mode-title">
             <div class="discovery-mode-tabs" id="discovery-mode-tabs" role="tablist" aria-label="论文发现方式">
@@ -42,15 +61,61 @@
             </div>
 
             <section id="keyword-discovery-panel" role="tabpanel" aria-labelledby="discovery-mode-keyword">
-              <div class="section-heading"><div><p class="eyebrow">关键词发现</p><h2 id="discovery-mode-title">将中文研究意图转换为可编辑英文检索式</h2><p>转换不确定时会停止；你可以直接编辑英文检索式后再发送公开检索。</p></div></div>
+              <div class="section-heading"><div><p class="eyebrow">真实检索 · 本地查重</p><h2 id="discovery-mode-title">搜索论文，看看哪些还缺全文</h2><p>按你指定的范围检索 OpenAlex，并在本机对照论文库。不会上传本地论文，也不会自动下载或覆盖文件。</p></div></div>
               <form id="keyword-search-form" class="discovery-form">
-                <label>中文研究意图<textarea id="keyword-query" rows="2">时变有向网络中的低通信分布式约束优化</textarea></label>
-                <label>英文检索式<textarea id="english-query" rows="2" placeholder="生成后可编辑"></textarea></label>
-                <label>排序方式<select id="keyword-sort"><option value="relevance">相关性</option><option value="citations">引用次数</option><option value="newest">发表时间</option></select></label>
-                <div class="discovery-form-actions"><button class="button button--secondary" type="submit">生成英文检索式</button><button class="button button--primary" id="keyword-live-search" type="button">搜索 OpenAlex</button></div>
+                <label>关键词或论文题名<textarea id="keyword-query" rows="2" maxlength="1000" placeholder="输入中英文关键词、论文题名或 DOI"></textarea></label>
+                <div class="discovery-search-options">
+                  <label>起始年份<input id="keyword-start-year" type="number" min="1000" max="9999" step="1" placeholder="不限" /></label>
+                  <label>结束年份<input id="keyword-end-year" type="number" min="1000" max="9999" step="1" placeholder="不限" /></label>
+                  <label>语言<select id="keyword-language"><option value="all">不限语言</option><option value="en">英文</option><option value="zh">中文</option></select></label>
+                  <label>排序方式<select id="keyword-sort"><option value="relevance">相关性</option><option value="citations">引用次数</option><option value="newest">发表时间</option></select></label>
+                </div>
+                <details class="discovery-query-tools"><summary>可选：英文检索式</summary>
+                  <p>默认按上方原词搜索。需要转换常用研究术语时，可生成后自行修改；填写英文式后会优先使用它。</p>
+                  <label>英文检索式<textarea id="english-query" rows="2" maxlength="1000" placeholder="可直接输入；留空则使用上方关键词"></textarea></label>
+                  <button class="button button--secondary" id="generate-english-query" type="button">生成英文检索式</button>
+                </details>
+                <div class="discovery-form-actions"><button class="button button--primary" id="keyword-live-search" type="button">搜索论文</button></div>
               </form>
+              <p class="discovery-status">留空年份表示不限；每个组合每页加载 25 条，一批最多六条查询。范围不符会说明原因，未知语言、文献类型与撤稿状态保留为待核验。已加载结果不代表领域全部文献。</p>
+              <div class="discovery-view-tabs" role="tablist" aria-label="检索结果视图">
+                <button type="button" role="tab" data-discovery-view="all" aria-selected="true" aria-controls="keyword-search-results" tabindex="0">全部结果</button>
+                <button type="button" role="tab" data-discovery-view="curated" aria-selected="false" aria-controls="keyword-search-results" tabindex="-1">重点推荐</button>
+              </div>
+              <details class="discovery-query-tools"><summary>条件、检索组合与来源</summary>
+                <div id="discovery-query-plan"></div><div id="discovery-source-status" aria-live="polite"></div>
+                <p><a id="discovery-open-scholar" href="https://scholar.google.com/" target="_blank" rel="noopener noreferrer">Google Scholar 人工检索 ↗</a> · <a id="discovery-open-cnki" href="https://kns.cnki.net/kns8s/" target="_blank" rel="noopener noreferrer">知网人工检索 ↗</a></p>
+                <p id="discovery-external-status" role="status">外跳只打开来源页面。请自行确认范围，再将题录导入；打开页面不会增加结果数。</p>
+              </details>
+              <details class="discovery-query-tools"><summary>导入题录与导出所选论文</summary>
+                <p>支持 BibTeX（.bib）和 RIS（.ris），每个文件最多 2 MiB、500 条。未知知网格式不兼容；请从来源导出明确支持的格式。导入先预览，确认后保存。</p>
+                <div class="discovery-search-options"><label>声明来源<select id="discovery-import-provider"><option value="manual">人工整理</option><option value="scholar">Google Scholar</option><option value="cnki">知网</option></select></label>
+                <label>文件格式<select id="discovery-import-format"><option value="bibtex">BibTeX</option><option value="ris">RIS</option></select></label><label>选择题录文件<input id="discovery-import-file" type="file" accept=".bib,.bibtex,.ris" /></label></div>
+                <details><summary>手动录入一篇论文</summary><div class="discovery-search-options">
+                  <label>题名<input id="discovery-manual-title" maxlength="2000" /></label><label>DOI<input id="discovery-manual-doi" maxlength="500" /></label><label>发表年份<input id="discovery-manual-year" maxlength="4" /></label><label>作者<input id="discovery-manual-author" maxlength="500" /></label>
+                </div><button type="button" id="discovery-manual-preview">预览手动题录</button></details>
+                <div id="discovery-import-preview" role="status" aria-live="polite"></div>
+                <label>导出格式<select id="discovery-export-format"><option value="bibtex">BibTeX</option><option value="ris">RIS</option></select></label><button type="button" id="discovery-export">导出勾选论文</button><pre id="discovery-export-preview"></pre>
+                <p>只导出实际勾选的论文；完整工作区备份请使用备份页面，备份只含已保存状态。</p>
+              </details>
+              <details class="discovery-query-tools"><summary>期刊核验与推荐规则</summary>
+                <p>英文期刊使用 JIF Q1/Q2，主学科默认 Automation &amp; Control Systems。中文名单仅限 ISSN 0254-4156、1000-8152。需先人工确认期刊身份；相似英文刊名不自动符合。</p>
+                <label>JCR CSV 文件<input type="file" id="discovery-journal-file" accept=".csv" /></label>
+                <p>将下面字段填为 CSV 中对应的列名，预览后再确认。每个文件最多 2 MiB。</p>
+                <div class="discovery-search-options">
+                  <label>期刊名列<input id="discovery-jcr-title" value="title" /></label><label>ISSN 列<input id="discovery-jcr-issns" value="issns" /></label><label>指标列（值须为 JIF）<input id="discovery-jcr-metric" value="metric" /></label><label>数据年度列<input id="discovery-jcr-data_year" value="data_year" /></label><label>发布年度列（可选）<input id="discovery-jcr-release_year" /></label><label>学科列<input id="discovery-jcr-category" value="category" /></label><label>分区列<input id="discovery-jcr-quartile" value="quartile" /></label><label>公开来源网址列<input id="discovery-jcr-source_url" value="source_url" /></label><label>来源说明列（可替代网址列）<input id="discovery-jcr-import_description" /></label>
+                </div><button type="button" id="discovery-journal-preview-button">预览 JCR 核验记录</button><div id="discovery-journal-preview" role="status"></div>
+                <div class="discovery-search-options"><label>规则数据年度<input id="discovery-rule-year" type="number" min="1000" max="9999" placeholder="使用已核验的最新年度" /></label><label>主学科<input id="discovery-rule-category" value="Automation &amp; Control Systems" /></label></div><button type="button" id="discovery-apply-rules">确认规则并重算本批推荐</button>
+              </details>
+              <details class="discovery-query-tools"><summary>已保存批次</summary><button type="button" id="discovery-reload">重新载入已保存状态</button><div id="discovery-history"></div><p>历史查询不会自动重试；清理先预览，仍被候选或核验证据引用的记录会保留。</p></details>
+              <p id="discovery-status" role="status" aria-live="polite"></p>
+              <details class="discovery-query-tools"><summary>已选外部候选</summary><div id="discovery-external-candidates"></div><p>候选独立保存；核验 DOI 并确认后才衔接原归档队列。</p></details>
+              <section id="discovery-review-panel" class="discovery-review-panel" hidden aria-label="论文核验面板"></section>
+              <p id="actual-search-query" class="discovery-status"></p>
               <p id="keyword-search-status" class="discovery-status" role="status" aria-live="polite">尚未向 OpenAlex 发起检索。</p>
-              <section id="keyword-search-results" class="discovery-results" tabindex="-1" aria-labelledby="keyword-results-title"><div class="result-header"><h3 id="keyword-results-title">公开检索结果</h3><span data-live-result-count>0 条真实结果</span></div><div id="keyword-live-results-list" class="discovery-result-list"></div></section>
+              <section class="discovery-local-summary" aria-label="本地对照状态"><p id="local-match-status" class="discovery-status" role="status">正在读取本地索引…</p><button id="refresh-local-matches" type="button" class="text-button">刷新本地状态</button></section>
+              <p class="discovery-status">本地状态只依据当前生成的论文库索引：PDF 与笔记分别标记。刷新只重新读取索引；导入或重建论文库后才会更新源材料扫描结果。此页不会自动下载 PDF 或生成笔记。</p>
+              <section id="keyword-search-results" class="discovery-results" tabindex="-1" aria-labelledby="keyword-results-title"><div class="result-header"><h3 id="keyword-results-title">已加载论文 · 本地材料核对</h3><span data-live-result-count>0 篇唯一已加载结果</span></div><div id="keyword-live-results-list" class="discovery-result-list"></div><button id="keyword-load-more" class="button button--secondary" type="button" hidden>加载下一页</button></section>
             </section>
 
             <section id="known-paper-panel" role="tabpanel" aria-labelledby="discovery-mode-access" hidden>

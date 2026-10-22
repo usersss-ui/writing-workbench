@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, Route, sync_playwright
@@ -284,8 +284,11 @@ def openalex_payload() -> dict[str, Any]:
             "title": title,
             "authorships": [{"author": {"display_name": "Fixture Author"}}],
             "publication_year": 2026,
+            "language": "en",
+            "type": "article",
+            "is_retracted": False,
             "primary_location": {
-                "source": {"display_name": "Fixture Journal"},
+                "source": {"id": "https://openalex.org/S9000000001", "display_name": "Fixture Journal", "type": "journal", "issn_l": "1234-5679", "issn": ["1234-5679"]},
                 "landing_page_url": f"https://example.org/papers/{slug}",
             },
             "cited_by_count": citations,
@@ -304,7 +307,7 @@ def openalex_payload() -> dict[str, Any]:
                 "abstract": [2],
             },
         })
-    return {"meta": {"count": len(works), "cost_usd": 0}, "results": works}
+    return {"meta": {"count": len(works), "cost_usd": 0, "next_cursor": None}, "results": works}
 
 
 def confirmed_archive_candidate(paper_id: str) -> dict[str, Any]:
@@ -340,14 +343,25 @@ class StrictNetwork:
         origin: str,
         *,
         openalex_response: dict[str, Any] | None = None,
+        openalex_pages: dict[tuple[str, str], dict[str, Any]] | None = None,
+        openalex_doi_responses: dict[str, dict[str, Any]] | None = None,
+        openalex_query: str = '("time-varying directed graph" AND "distributed constrained optimization" AND "communication-efficient")',
+        openalex_filter: str = "from_publication_date:2022-01-01,to_publication_date:2026-12-31,language:en,is_retracted:false",
         institution_response: dict[str, Any] | None = None,
     ) -> None:
         self.origin = normalized_local_origin(origin)
         self.origin_parts = urlparse(self.origin)
         self.openalex_response = openalex_response
+        self.openalex_pages = openalex_pages
+        self.openalex_doi_responses = openalex_doi_responses or {}
+        self.openalex_query = openalex_query
+        self.openalex_filter = openalex_filter
         self.institution_response = institution_response
         self.problems: list[str] = []
         self.openalex_requests = 0
+        self.openalex_verification_requests = 0
+        self.openalex_cursors: list[str] = []
+        self.openalex_queries: list[tuple[str, str]] = []
         self.institution_requests = 0
         context.route("**/*", self._route)
 
@@ -365,12 +379,21 @@ class StrictNetwork:
         ):
             return False
         query = parse_qs(parsed.query, keep_blank_values=True)
-        expected_expression = '("time-varying directed graph" AND "distributed constrained optimization" AND "communication-efficient")'
+        cursor = query.get("cursor")
+        search = query.get("search")
+        if not cursor or len(cursor) != 1 or not search or len(search) != 1:
+            return False
+        if self.openalex_pages is not None:
+            if (search[0], cursor[0]) not in self.openalex_pages:
+                return False
+        elif cursor != ["*"] or search != [self.openalex_query]:
+            return False
         return query == {
-            "search": [expected_expression],
-            "filter": ["from_publication_date:2022-01-01,to_publication_date:2026-12-31,language:en,is_retracted:false"],
+            "search": search,
+            "filter": [self.openalex_filter],
             "sort": ["relevance_score:desc"],
-            "per_page": ["10"],
+            "per_page": ["25"],
+            "cursor": cursor,
             "select": [OPENALEX_SELECT],
         }
 
@@ -397,19 +420,37 @@ class StrictNetwork:
             if parsed.scheme in {"data", "blob", "about", "chrome", "chrome-extension"}:
                 route.continue_()
                 return
-            if self.openalex_response is not None and parsed.hostname == "api.openalex.org":
+            if parsed.hostname == "api.openalex.org" and parsed.path.startswith("/works/doi:"):
+                doi = unquote(parsed.path.removeprefix("/works/doi:"))
+                if (route.request.method != "GET" or doi not in self.openalex_doi_responses
+                        or f"{parsed.scheme}://{parsed.netloc}{parsed.path}" != f"{OPENALEX_ENDPOINT}/doi:{quote(doi, safe='')}"
+                        or parsed.username is not None or parsed.password is not None or parsed.fragment
+                        or parse_qs(parsed.query, keep_blank_values=True) != {"select": [OPENALEX_SELECT]}):
+                    self.problems.append("openalex_doi_request_contract")
+                    route.abort("blockedbyclient")
+                    return
+                self.openalex_requests += 1
+                self.openalex_verification_requests += 1
+                route.fulfill(status=200, headers={"Access-Control-Allow-Origin": "*", "Content-Type": "application/json; charset=utf-8"}, body=json.dumps(self.openalex_doi_responses[doi], ensure_ascii=False))
+                return
+            if (self.openalex_response is not None or self.openalex_pages is not None) and parsed.hostname == "api.openalex.org":
                 if not self._valid_openalex_request(route):
                     self.problems.append("openalex_request_contract")
                     route.abort("blockedbyclient")
                     return
                 self.openalex_requests += 1
+                cursor = parse_qs(parsed.query)["cursor"][0]
+                search = parse_qs(parsed.query)["search"][0]
+                self.openalex_cursors.append(cursor)
+                self.openalex_queries.append((search, cursor))
+                payload = self.openalex_pages[(search, cursor)] if self.openalex_pages is not None else self.openalex_response
                 route.fulfill(
                     status=200,
                     headers={
                         "Access-Control-Allow-Origin": "*",
                         "Content-Type": "application/json; charset=utf-8",
                     },
-                    body=json.dumps(self.openalex_response, ensure_ascii=False, separators=(",", ":")),
+                    body=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                 )
                 return
             self.problems.append(f"unexpected_external:{parsed.hostname or 'unknown'}")
@@ -427,11 +468,18 @@ class BrowserAudit:
         self.origin = origin
         self.problems: list[str] = []
         self.expected_http: dict[tuple[str, str, int], int] = {}
+        self.phase = "page"
         self.expected_console_status: dict[int, int] = {}
         page.on("console", self._console)
         page.on("pageerror", lambda _error: self.problems.append("pageerror"))
-        page.on("requestfailed", lambda _request: self.problems.append("requestfailed"))
+        page.on("requestfailed", self._request_failed)
         page.on("response", self._response)
+
+    def _request_failed(self, request) -> None:
+        parsed = urlparse(request.url)
+        path = parsed.path
+        category = next((name for name in ("/api/v1/", "/local_library_data/", "/local_library_output/", "/prototype/desktop/") if path.startswith(name)), "other")
+        self.problems.append(f"requestfailed:{self.phase}:{parsed.scheme}:{category}:{request.resource_type}:{request.failure}")
 
     def expect_http(self, method: str, path: str, status: int) -> None:
         key = (method, path, status)
@@ -585,6 +633,12 @@ def assert_reader_materials(page: Page, origin: str) -> None:
     ensure(ocr_images.count() >= 1, "reader_ocr_image")
     ocr_image_count = ocr_images.count()
 
+    # The lazy PDF frame starts Chrome's built-in viewer asynchronously. Leaving
+    # the source tab removes its src; wait for that navigation before switching
+    # so the acceptance itself does not abort an in-flight viewer document.
+    pdf_frame.scroll_into_view_if_needed()
+    page.wait_for_load_state("networkidle")
+
     page.locator('[data-reader-tab="note"]').click()
     _select_first_material(page, "#library-note-material-select")
     page.wait_for_function(
@@ -692,9 +746,12 @@ def verify_library_viewport(
         page.keyboard.press("Meta+K")
         ensure(page.evaluate("document.activeElement?.id") == "library-search", "library_command_focus")
 
+        audit.phase = "reader_materials"
         assert_reader_materials(page, origin)
         page.screenshot(path=str(screenshot_path(width, height, "library-reader.png")), full_page=True)
+        audit.phase = "personal_tags"
         assert_personal_tags(page)
+        audit.phase = "metadata_only"
         assert_metadata_only(page)
         page.locator("#library-search").fill("")
         assert_three_column_layout(page, width)

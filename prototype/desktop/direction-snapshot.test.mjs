@@ -80,6 +80,16 @@ test("方向快照白名单与页面中的十个维度保持一致", async () =>
   ))
 })
 
+test("方向论文入口用稳定 paper_id 生成论文库详情深链", async () => {
+  const module = await import("./direction-snapshot.mjs")
+  assert.equal(typeof module.paperLibraryDetailHref, "function")
+  assert.equal(
+    module.paperLibraryDetailHref("Nedic09-DSG"),
+    "../../local_library_output/desktop/library.html?paper_id=Nedic09-DSG",
+  )
+  assert.throws(() => module.paperLibraryDetailHref("../private"), /论文 ID/u)
+})
+
 test("两个保存入口共用显式保存动作，成功展示时间与轴且空选择不覆盖旧快照", async () => {
   const module = await import("./direction-snapshot.mjs")
   const storage = fakeStorage()

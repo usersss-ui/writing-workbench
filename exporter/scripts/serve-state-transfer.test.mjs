@@ -26,6 +26,14 @@ import {
 
 const EXPECTED_ASSETS = Object.freeze([
   "state-transfer.mjs",
+  "p02-workflow.mjs",
+  "discovery-workspace.mjs",
+  "discovery-batch.mjs",
+  "discovery-identity.mjs",
+  "discovery-record.mjs",
+  "openalex-search.mjs",
+  "bibliography-normalization.mjs",
+  "journal-review.mjs",
   "direction-snapshot.mjs",
   "agent-task-input.mjs",
   "paper-library-storage.mjs",
@@ -154,7 +162,7 @@ test("transitional CLI accepts only an explicit old-port choice and is import-sa
   assert.deepEqual(imported, { code: 0, signal: null, stdout: "", stderr: "" })
 })
 
-test("transitional server serves only the page and exact eight-file closure by GET and HEAD", async (t) => {
+test("transitional server serves only the page and exact sixteen-file closure by GET and HEAD", async (t) => {
   const repoRoot = await makeFixture(t)
   const fixture = await listenFixture(t, { repoRoot })
   assert.match(fixture.origin, /^http:\/\/127\.0\.0\.1:\d+$/u)

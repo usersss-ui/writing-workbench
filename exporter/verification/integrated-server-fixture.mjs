@@ -58,6 +58,7 @@ const buildDesktopFiles = Object.freeze([
   "state-transfer.html",
   "styles.css",
   "state-transfer.mjs",
+  "p02-workflow.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -66,8 +67,12 @@ const buildDesktopFiles = Object.freeze([
   "paper-user-tags.mjs",
   "candidate-storage.mjs",
   "discovery.mjs",
+  "discovery-query-plan.mjs",
   "institution-access.mjs",
   "openalex-search.mjs",
+  "bibliography-normalization.mjs",
+  "discovery-record.mjs",
+  "local-paper-match.mjs",
   "direction-snapshot.mjs",
   "agent-task-input.mjs",
   "vendor/katex/LICENSE",
@@ -179,6 +184,17 @@ async function createMetadataOnlyPaper(sourceRoot) {
   await put(sourceRoot, `${FIXTURE_IDS.metadataOnlyPaper}/.metadata.commit`, serializeArchiveCommit(metadata))
 }
 
+async function createNoteOnlyPaper(sourceRoot) {
+  const metadata = serializeArchiveMetadata({
+    paperId: 'Fixture24-Note', archiveSourceId: FIXTURE_ARCHIVE_SOURCE_ID,
+    candidate: { ...archiveCandidate({ paperId: 'Fixture24-Note', title: 'Note-Only Controlled Search Fixture', year: 2024, openAlexId: 'W9100000016' }), doi: '10.1234/fixture.note' },
+    archivedAt: '2026-09-01T00:00:00.000Z',
+  })
+  await put(sourceRoot, 'Fixture24-Note/metadata.yaml', metadata)
+  await put(sourceRoot, 'Fixture24-Note/.metadata.commit', serializeArchiveCommit(metadata))
+  await put(sourceRoot, 'Fixture24-Note/Fixture24-Note_论文精读.md', '# Controlled note\n\nA deterministic note-only fixture without a PDF.\n')
+}
+
 async function createConfiguration(repoRoot, sourceRoot) {
   await put(repoRoot, "local_library_config/library.local.json", `${JSON.stringify({
     version: 1,
@@ -188,6 +204,14 @@ async function createConfiguration(repoRoot, sourceRoot) {
   await put(repoRoot, "local_library_config/paper-overrides.json", `${JSON.stringify({
     version: 1,
     papers: {
+      [`${FIXTURE_ARCHIVE_SOURCE_ID}::Fixture24-Note`]: {
+        paper_id: 'Fixture24-Note',
+        title_original: 'Note-Only Controlled Search Fixture',
+        authors: ['Fixture Author'],
+        publication_year: 2024,
+        doi_or_url: '10.1234/fixture.note',
+        preferred_note: 'Fixture24-Note_论文精读.md',
+      },
       [`${FIXTURE_ARCHIVE_SOURCE_ID}::Rich Paper`]: {
         paper_id: FIXTURE_IDS.richPaper,
         title_original: "Rich Integrated Fixture for Distributed Optimization",
@@ -241,6 +265,7 @@ export async function createIntegratedRepositoryFixture({ tempParent } = {}) {
     await copyDesktopRuntime(root)
     await createRichPaper(sourceRoot)
     await createMetadataOnlyPaper(sourceRoot)
+    await createNoteOnlyPaper(sourceRoot)
     await createConfiguration(root, sourceRoot)
     return Object.freeze({
       root,

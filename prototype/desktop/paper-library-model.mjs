@@ -77,6 +77,15 @@ const SEARCH_FIELDS = Object.freeze([
   Object.freeze({ key: "paper_id", label: "论文 ID", list: false }),
 ])
 
+const DIRECTION_QUERY_FACETS = Object.freeze({
+  "有向网络": ["network.direction", "有向"],
+  "无向网络": ["network.direction", "无向"],
+  "时变拓扑": ["network.time", "时变"],
+  "静态拓扑": ["network.time", "固定"],
+  "非平衡网络": ["network.balance", "不平衡"],
+  "平衡网络": ["network.balance", "平衡"],
+})
+
 const TITLE_COLLATOR = new Intl.Collator("zh-CN", {
   numeric: true,
   sensitivity: "base",
@@ -267,6 +276,8 @@ export function searchableText(paper, facetSchema, userTags = []) {
 export function matchPaperQuery(paper, query, facetSchema, userTags = []) {
   const normalizedQuery = normalizeText(query)
   if (!normalizedQuery) return { matched: true, hits: [] }
+  const terms = [...new Set(normalizedQuery.split(" "))]
+  const matchedTerms = new Set()
 
   const hits = []
   const seen = new Set()
@@ -276,13 +287,20 @@ export function matchPaperQuery(paper, query, facetSchema, userTags = []) {
       dedupeKey: field.dedupeKey ?? field.label,
       values: fieldValues(paper, field),
     })),
-    ...schemaGroups(facetSchema).map((group) => ({ label: group.label, values: facetValues(paper, group.path) })),
+    ...schemaGroups(facetSchema).map((group) => ({ label: group.label, path: group.path, values: facetValues(paper, group.path) })),
     { label: "原文术语", values: Array.isArray(paper?.source_terms) ? paper.source_terms.filter((value) => typeof value === "string") : [] },
     { label: "我的标签", values: Array.isArray(userTags) ? userTags.filter((value) => typeof value === "string") : [] },
   ]
   for (const field of fields) {
     for (const rawValue of field.values) {
-      if (!normalizeText(rawValue).includes(normalizedQuery)) continue
+      const value = normalizeText(rawValue)
+      const fieldTerms = terms.filter((term) => {
+        if (value.includes(term)) return true
+        const alias = DIRECTION_QUERY_FACETS[term]
+        return alias && field.path === alias[0] && value === alias[1]
+      })
+      if (fieldTerms.length === 0) continue
+      fieldTerms.forEach((term) => matchedTerms.add(term))
       const snippet = capCodePoints(displayText(rawValue))
       if (!snippet) continue
       const dedupeKey = `${field.dedupeKey ?? field.label}\u0000${snippet}`
@@ -291,7 +309,9 @@ export function matchPaperQuery(paper, query, facetSchema, userTags = []) {
       hits.push({ field: field.label, snippet })
     }
   }
-  return { matched: hits.length > 0, hits }
+  return matchedTerms.size === terms.length
+    ? { matched: true, hits }
+    : { matched: false, hits: [] }
 }
 
 export function filterLibrary(papers, filters = {}, workspaceState = {}, userTagState = {}) {

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN" class="submission-root">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>应用投稿项目 · 学术研究工作台</title>
+  <link rel="icon" href="data:," /><link rel="stylesheet" href="./styles.css" /><link rel="stylesheet" href="./submission-project.css" />
+</head>
+<body>
+<main class="app-window" aria-label="应用投稿项目">
+  <header class="window-bar">
+    <a class="submission-back" href="./index.html">← 研究首页</a>
+    <div class="window-context"><span>我的论文</span><span>/</span><strong>应用投稿项目</strong></div>
+    <span class="submission-local">本机项目 · 独立保存</span>
+  </header>
+  <div class="workspace-shell submission-shell">
+    <aside class="sidebar">
+      <a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">R</span><span><strong>学术研究工作台</strong><small>从证据走向投稿</small></span></a>
+      <nav class="primary-nav" aria-label="项目导航">
+        <p class="nav-caption">这篇论文</p>
+        <a class="nav-item" href="#overview"><span>01</span><span>项目与路线</span></a>
+        <a class="nav-item" href="#algorithm"><span>02</span><span>算法与代码核验</span></a>
+        <a class="nav-item" href="#experiments"><span>03</span><span>应用实验</span></a>
+        <a class="nav-item" href="#journals"><span>04</span><span>选刊与排版范例</span></a>
+        <a class="nav-item" href="#writing"><span>05</span><span>写作与导出</span></a>
+        <a class="nav-item" href="#materials"><span>06</span><span>全部原始材料</span></a>
+        <p class="nav-caption">工作台</p>
+        <a class="nav-item" href="../../local_library_output/desktop/library.html"><span>▤</span><span>论文库与笔记</span></a>
+        <a class="nav-item" href="./p02-writing.html"><span>✎</span><span>P02 写作记录</span></a>
+      </nav>
+      <section class="sidebar-plan"><div class="plan-title-row"><h2>现在推进什么</h2><strong id="progress-count">待读取</strong></div><p id="sidebar-next">正在读取这篇论文的研究材料…</p></section>
+    </aside>
+    <section class="main-column submission-main">
+      <div class="submission-toolbar">
+        <div><strong id="save-status" role="status" aria-live="polite">正在读取本机项目…</strong><small id="route-status">应用场景与期刊尚未选择</small></div>
+        <button id="save-project" class="button button--primary" disabled>保存项目</button>
+      </div>
+      <p id="project-error" class="submission-error" role="alert" hidden></p>
+      <div id="project-content" hidden>
+        <section id="overview" class="submission-overview">
+          <p class="eyebrow">从理论推导到应用论文 <span id="materials-date"></span></p>
+          <div class="submission-title-row"><h1 id="project-title"></h1><span class="submission-badge" id="project-status"></span></div>
+          <p id="project-summary"></p>
+          <div class="submission-recommendation"><span>建议起点</span><p id="project-recommendation"></p><a href="#writing">进入写作 ↓</a></div>
+          <h2>先比较应用，再确定主线</h2><p class="submission-hint">点击场景查看数据、条件与期刊；采用后成为本篇论文的写作路线。优势仍需用实验验证。</p>
+          <div id="scenario-tabs" class="scenario-tabs" role="group" aria-label="比较应用场景"></div>
+          <div class="scenario-detail" id="scenario-detail"></div>
+          <div class="submission-section-label"><h3>这条路线的数据集</h3><span>官方来源与使用边界</span></div>
+          <div id="dataset-list" class="submission-grid"></div>
+        </section>
+        <section id="algorithm" class="panel">
+          <div class="section-heading"><div><p class="eyebrow">研究依据</p><h2>算法能支持什么，现有代码还缺什么</h2></div></div>
+          <p class="submission-hint">核验发现来自本次报告；实现缺口需要通过代码改造和实验补齐。</p><div id="algorithm-list"></div>
+        </section>
+        <section id="experiments" class="panel">
+          <div class="section-heading"><div><p class="eyebrow">证据先于结论</p><h2>应用实验清单</h2></div><span id="experiment-route" class="submission-badge"></span></div>
+          <p class="submission-hint">按当前查看的场景显示。各路线独立保存记录；“已完成”须填写证据，仅表示你的记录，系统尚未运行或核验实验。</p>
+          <div id="experiment-list" class="experiment-list"></div>
+        </section>
+        <section id="journals" class="panel">
+          <div class="section-heading"><div><p class="eyebrow">按应用与证据选刊</p><h2>候选期刊与同刊范例</h2></div></div>
+          <p class="submission-hint" id="journal-context"></p><div id="journal-list" class="submission-grid"></div>
+          <h3>看它们如何组织问题、方法与实验</h3><p class="submission-hint">PDF 标明发表版或作者版。初投稿模板仍应以期刊官方指南为准。</p>
+          <div id="reference-list" class="reference-list"></div>
+        </section>
+        <section id="writing" class="panel">
+          <div class="section-heading"><div><p class="eyebrow">本篇论文的新稿</p><h2>把材料转为章节</h2></div><button id="append-outline" class="button button--secondary">追加所选路线提纲</button></div>
+          <p class="submission-hint">提纲根据已采用路线生成，保留现有正文。结果与数值留待填写；原始理论稿在下方材料区。</p>
+          <label class="submission-field" for="project-notes">路线决策与待解决问题<textarea id="project-notes" rows="3" maxlength="20000" placeholder="为什么选这条路线；哪些假设或数据处理需要再确认…"></textarea></label>
+          <label class="submission-field" for="project-draft">论文正文 · Markdown<textarea id="project-draft" rows="18" maxlength="200000" placeholder="先采用一条路线，再追加章节提纲；也可以直接开始写。"></textarea></label>
+          <div class="submission-export-actions"><button id="export-writing" class="button button--primary">导出写作 Markdown</button><button id="export-project" class="button button--secondary">导出完整项目 JSON</button><button id="import-project" class="button button--secondary">恢复项目 JSON</button><input id="project-file" type="file" accept=".json,application/json" hidden /></div>
+          <p class="submission-hint">导出包含当前未保存的编辑内容。项目 JSON 含正文、各路线实验记录和结构化研究材料快照，不含原始 PDF／报告全文；原文件仍需单独备份。浏览器“备份与恢复”不包含本项目。</p>
+          <div id="import-preview" class="submission-import" hidden><h3>备份已读取，尚未替换编辑内容</h3><p id="import-summary"></p><p>载入会替换当前编辑区。可先导出当前项目保留副本；载入后仍需点击“保存项目”。</p><button id="apply-import" class="button button--secondary">载入备份到编辑区</button><button id="cancel-import" class="button button--secondary">取消</button></div>
+        </section>
+        <section id="materials" class="panel"><div class="section-heading"><div><p class="eyebrow">可回查的来源</p><h2>报告、理论稿与参考论文</h2></div></div><div id="document-list" class="document-list"></div></section>
+      </div>
+      <noscript><p>请启用 JavaScript 以读取项目材料、记录实验和保存正文。</p></noscript>
+    </section>
+  </div>
+</main>
+<script type="module" src="./submission-project.mjs"></script>
+</body></html>

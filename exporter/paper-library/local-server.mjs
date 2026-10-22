@@ -19,6 +19,12 @@ import {
 } from "./note-import.mjs"
 import { loadPrivateLibraryContext, rebuildConfiguredLibrary } from "./runtime.mjs"
 import { createWriteCoordinator } from "./write-coordinator.mjs"
+import {
+  SUBMISSION_STATE_REQUEST_MAX_BYTES,
+  loadSubmissionProject,
+  readSubmissionDocument,
+  saveSubmissionProjectState,
+} from "./submission-project.mjs"
 
 export const SOURCE_PATH_REQUEST_MAX_BYTES = 16 * 1024
 export const ARCHIVE_REQUEST_MAX_BYTES = 65_536
@@ -56,9 +62,23 @@ export const APPROVED_PROTOTYPE_FILES = Object.freeze([
   "index.html",
   "directions.html",
   "p02.html",
+  "p02-writing.html",
+  "p02-writing-data.mjs",
+  "p02-writing.mjs",
+  "submission-project.html",
+  "submission-project.css",
+  "submission-project.mjs",
+  "submission-project-model.mjs",
+  "submission-project-ui.mjs",
+  "p02-workflow.mjs",
+  "p02-workflow-ui.mjs",
   "agent-tasks.html",
   "app.mjs",
+  "research-home.mjs",
   "directions.mjs",
+  "bibliography-normalization.mjs",
+  "discovery-record.mjs",
+  "discovery-query-plan.mjs",
   "direction-snapshot.mjs",
   "papers-data.mjs",
   "paper-filter.mjs",
@@ -83,8 +103,20 @@ const DEFAULT_STATIC_FILE_SYSTEM = Object.freeze({
   noFollowFlag: constants.O_NOFOLLOW,
 })
 const APPROVED_GENERATED_ASSET_SET = new Set([
+  "bibliography-import.mjs",
+  "discovery-candidate-bridge.mjs",
+  "discovery-recommendation.mjs",
+  "discovery-results-ui.mjs",
+  "discovery-review-ui.mjs",
+  "discovery-session-ui.mjs",
+  "local-discovery.mjs",
+  "discovery-workspace.mjs",
+  "discovery-batch.mjs",
+  "discovery-identity.mjs",
+  "journal-review.mjs",
   "styles.css",
   "state-transfer.mjs",
+  "p02-workflow.mjs",
   "library.mjs",
   "paper-inspector.mjs",
   "paper-math-renderer.mjs",
@@ -95,8 +127,12 @@ const APPROVED_GENERATED_ASSET_SET = new Set([
   "agent-task-input.mjs",
   "candidate-storage.mjs",
   "discovery.mjs",
+  "discovery-query-plan.mjs",
   "institution-access.mjs",
   "openalex-search.mjs",
+  "bibliography-normalization.mjs",
+  "discovery-record.mjs",
+  "local-paper-match.mjs",
   "nuist.institution.json",
   ...KATEX_BROWSER_FILES,
 ])
@@ -138,6 +174,14 @@ const ERROR_STATUS = Object.freeze({
   ARCHIVE_WRITE_FAILED: 500,
   ARCHIVE_TRANSACTION_AMBIGUOUS: 500,
   ARCHIVE_RECOVERY_FAILED: 500,
+  SUBMISSION_PROJECT_NOT_FOUND: 404,
+  SUBMISSION_PROJECT_INVALID: 500,
+  SUBMISSION_STATE_INVALID: 400,
+  SUBMISSION_STATE_CORRUPT: 500,
+  SUBMISSION_REVISION_CONFLICT: 409,
+  SUBMISSION_WRITE_FAILED: 500,
+  SUBMISSION_DOCUMENT_NOT_FOUND: 404,
+  SUBMISSION_DOCUMENT_TOO_LARGE: 413,
   INTERNAL_ERROR: 500,
 })
 
@@ -169,6 +213,14 @@ const ERROR_MESSAGE = Object.freeze({
   ARCHIVE_WRITE_FAILED: "候选归档事务失败",
   ARCHIVE_TRANSACTION_AMBIGUOUS: "候选归档需要人工恢复",
   ARCHIVE_RECOVERY_FAILED: "论文库恢复构建失败",
+  SUBMISSION_PROJECT_NOT_FOUND: "尚未配置本地投稿项目",
+  SUBMISSION_PROJECT_INVALID: "本地投稿项目配置无效，请检查配置文件",
+  SUBMISSION_STATE_INVALID: "投稿项目状态无效；请检查选题、期刊及实验依据",
+  SUBMISSION_STATE_CORRUPT: "本地投稿状态已损坏；已停止读写以保留原文件",
+  SUBMISSION_REVISION_CONFLICT: "投稿项目已在其他页面更新，请先重新载入",
+  SUBMISSION_WRITE_FAILED: "投稿项目保存失败",
+  SUBMISSION_DOCUMENT_NOT_FOUND: "投稿材料不存在或不允许读取",
+  SUBMISSION_DOCUMENT_TOO_LARGE: "投稿材料超过读取大小上限",
   INTERNAL_ERROR: "本地论文库请求失败",
 })
 
@@ -681,6 +733,22 @@ export function createPrivateLibraryRequestHandler({
           sendNotFound(request, response, true)
           return
         }
+        if (request.method === "GET" && target === "/api/v1/submission-project") {
+          sendJson(response, 200, await loadSubmissionProject({ repoRoot }))
+          return
+        }
+        const submissionDocument = /^\/api\/v1\/submission-project\/documents\/([a-z0-9]+(?:-[a-z0-9]+)*)$/u.exec(target)
+        if (request.method === "GET" && submissionDocument) {
+          const document = await readSubmissionDocument({ repoRoot, documentId: submissionDocument[1] })
+          response.writeHead(200, {
+            ...baseHeaders(document.contentType),
+            "Cache-Control": "no-store",
+            "Content-Length": document.body.length,
+            "Content-Disposition": "inline",
+          })
+          response.end(document.body)
+          return
+        }
         if (request.method === "GET" && target === "/api/v1/capabilities") {
           let recovery = coordinator.getState().recovery
           let context = null
@@ -692,6 +760,7 @@ export function createPrivateLibraryRequestHandler({
           return
         }
         const route = new Map([
+          ["/api/v1/submission-project/state", SUBMISSION_STATE_REQUEST_MAX_BYTES],
           ["/api/v1/papers/source-path", SOURCE_PATH_REQUEST_MAX_BYTES],
           ["/api/v1/notes/inspect", INSPECT_REQUEST_MAX_BYTES],
           ["/api/v1/notes/import", IMPORT_REQUEST_MAX_BYTES],
@@ -712,6 +781,12 @@ export function createPrivateLibraryRequestHandler({
           && request.headers["x-research-console-action"] !== "rebuild-library"
         ) throw requestError("ACTION_CONFIRMATION_REQUIRED")
         const rawBody = await readJsonBody(request, route.get(target))
+
+        if (target === "/api/v1/submission-project/state") {
+          const result = await coordinator.run(() => saveSubmissionProjectState({ repoRoot, request: rawBody }))
+          sendJson(response, 200, result)
+          return
+        }
 
         if (target === "/api/v1/papers/source-path") {
           const body = sourcePathBody(rawBody)

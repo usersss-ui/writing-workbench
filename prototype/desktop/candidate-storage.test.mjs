@@ -294,7 +294,7 @@ test("OpenAlex sanitization prevents repeatedly encoded credential links from re
       status: 200,
       async json() {
         return {
-          meta: { count: 1 },
+          meta: { count: 1, next_cursor: null },
           results: [{
             id: "https://openalex.org/W77",
             doi: null,

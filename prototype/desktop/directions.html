@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="学术研究工作台方向探索页：组合研究维度、筛选论文并识别研究空白。"
+      content="输入关键词搜索真实论文，查看与本地资料的匹配情况；可选保存研究方向条件。"
     />
-    <title>方向探索 · 学术研究工作台</title>
+    <title>确定方向与搜索论文 · 学术研究工作台</title>
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231677ff'/%3E%3Cpath d='M18 47V17h15c8 0 13 4 13 11 0 5-3 9-8 10l10 9H37l-8-8h-2v8zm9-16h6c3 0 5-1 5-4s-2-4-5-4h-6z' fill='white'/%3E%3C/svg%3E"
@@ -25,20 +25,15 @@
         <div class="window-context">
           <span class="context-kicker">研究工作台</span>
           <span class="context-divider">/</span>
-          <strong>方向探索</strong>
+          <strong>确定方向</strong>
         </div>
-        <label class="command-search">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" aria-label="搜索当前匹配论文" placeholder="搜索当前匹配论文" id="paper-search" />
-          <kbd aria-hidden="true">⌘ K</kbd>
-        </label>
         <div class="window-actions">
-          <button class="icon-button" type="button" aria-label="通知">○</button>
-          <button class="avatar-button" type="button" aria-label="用户菜单">杨</button>
+          <span class="icon-button" aria-hidden="true">○</span>
+          <span class="avatar-button" aria-label="当前用户：杨">杨</span>
         </div>
       </header>
 
-      <div class="workspace-shell">
+      <div class="workspace-shell home-shell">
         <aside class="sidebar">
           <a class="brand" href="./index.html" aria-label="返回研究首页">
             <span class="brand-mark" aria-hidden="true">R</span>
@@ -48,68 +43,84 @@
             </span>
           </a>
 
-          <nav class="primary-nav" aria-label="主导航">
-            <p class="nav-caption">研究流程</p>
+<nav class="primary-nav" aria-label="主导航">
+            <p class="nav-caption">从方向到写作</p>
             <a class="nav-item" href="./index.html"><span aria-hidden="true">⌂</span><span>研究首页</span></a>
-            <a class="nav-item nav-item--active" href="./directions.html" aria-current="page">
-              <span aria-hidden="true">⌁</span><span>方向探索</span>
-            </a>
-            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>论文发现</span></a>
-            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>论文库</span></a>
-            <a class="nav-item" href="./agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务</span></a>
-            <a class="nav-item" href="./index.html#projects"><span aria-hidden="true">□</span><span>我的论文</span></a>
-            <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
-
-            <p class="nav-caption nav-caption--spaced">研究资产</p>
-            <a class="nav-item" href="./index.html#simulation"><span aria-hidden="true">⌘</span><span>仿真与代码</span></a>
-            <a class="nav-item" href="./index.html#claims"><span aria-hidden="true">✓</span><span>主张与证据</span></a>
+            <a class="nav-item nav-item--active" href="./directions.html" aria-current="page"><span aria-hidden="true">⌁</span><span>确定方向</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/discovery.html"><span aria-hidden="true">⌕</span><span>搜索论文</span></a>
+            <a class="nav-item" href="../../local_library_output/desktop/library.html"><span aria-hidden="true">▤</span><span>分析与笔记</span></a>
+            <a class="nav-item" href="./p02-writing.html"><span aria-hidden="true">✎</span><span>期刊与写作</span></a>
+            <details class="nav-more">
+              <summary>更多工具</summary>
+              <a class="nav-item" href="./p02.html"><span aria-hidden="true">□</span><span>P02 研究记录</span></a>
+              <a class="nav-item" href="./agent-tasks.html"><span aria-hidden="true">✦</span><span>研究任务输入</span></a>
+              <a class="nav-item" href="../../local_library_output/desktop/state-transfer.html"><span aria-hidden="true">↺</span><span>备份与恢复</span></a>
+              <a class="nav-item" href="./index.html#thesis"><span aria-hidden="true">◇</span><span>学位论文</span></a>
+            </details>
           </nav>
 
           <section class="sidebar-plan" aria-labelledby="direction-progress-title">
             <div class="plan-title-row">
-              <h2 id="direction-progress-title">方向核验</h2>
-              <strong>2 / 4</strong>
+              <h2 id="direction-progress-title">当前用途</h2>
+              <strong>选择方向</strong>
             </div>
-            <div class="progress-track" role="progressbar" aria-label="方向核验进度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="2">
-              <span style="width: 50%"></span>
-            </div>
-            <p>下一步：补齐耦合约束与低通信的直接对照。</p>
+            <p>从关键词开始搜索真实论文，再查看本地是否已有 PDF 或阅读材料。需要细化研究方向时，可以展开可选条件。</p>
           </section>
         </aside>
 
-        <section class="main-column" id="directions">
+        <section class="main-column home-main direction-main" id="directions">
           <div class="page-heading">
             <div>
-              <p class="eyebrow">方向探索</p>
-              <h1>按研究维度组合方向</h1>
-              <p>同一维度内取并集，跨维度取交集；用论文证据核验组合是否形成真实研究空白。</p>
-            </div>
-            <div class="heading-actions">
-              <button class="button button--secondary" id="search-new-paper" type="button">搜索新论文</button>
-              <button class="button button--primary" id="save-candidate" type="button">＋ 保存课题候选</button>
+              <p class="eyebrow">先找到真实资料</p>
+              <h1>输入关键词，直接搜索论文</h1>
+              <p>输入研究问题、方法或论文题名，检索后直接查看结果与本地论文库的匹配情况。</p>
             </div>
           </div>
 
-          <section class="theory-boundary" aria-labelledby="direction-save-state">
-            <span aria-hidden="true">i</span>
-            <div>
-              <strong id="direction-save-state">尚未显式保存研究方向</strong>
-              <div class="direction-tag-list" id="direction-save-axes" aria-label="最近一次保存的研究条件">
-                <span>选择条件后点击“保存课题候选”固定当前输入</span>
-              </div>
+          <section class="panel" aria-labelledby="direction-search-title">
+            <div class="section-heading">
+              <div><h2 id="direction-search-title">你想查什么？</h2><p>关键词可以自由组合，年份和语言可选。</p></div>
             </div>
+            <form class="direction-search-form" id="direction-search-form" method="get" action="../../local_library_output/desktop/discovery.html">
+              <label for="paper-search">搜索关键词
+                <input id="paper-search" name="q" type="search" required autocomplete="off" placeholder="例如：event triggered distributed optimization" />
+              </label>
+              <div class="direction-search-options">
+                <label for="search-start-year">开始年份（可选）<input id="search-start-year" name="startYear" type="number" min="1000" max="9999" step="1" placeholder="不限" /></label>
+                <label for="search-end-year">结束年份（可选）<input id="search-end-year" name="endYear" type="number" min="1000" max="9999" step="1" placeholder="不限" /></label>
+                <label for="search-language">论文语言<select id="search-language" name="language"><option value="all" selected>不限语言</option><option value="en">英文</option><option value="zh">中文</option></select></label>
+              </div>
+              <input type="hidden" name="search" value="1" />
+              <button class="button button--primary" id="direction-search-submit" type="submit">搜索真实论文并对照本地资料 →</button>
+            </form>
+            <nav class="search-source-links" aria-label="本地资料入口">
+              <a id="search-local-library" href="../../local_library_output/desktop/library.html">只搜索本地已有论文 →</a>
+            </nav>
+            <p class="library-quick-help">结果会标注“本地已有 PDF”“已入库但缺 PDF”“未匹配”或“疑似匹配”。疑似匹配需要核对题名、作者或 DOI。</p>
           </section>
 
-          <section class="panel" aria-labelledby="dimension-title">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">10 个研究维度</p>
-                <h2 id="dimension-title">研究维度组合</h2>
-                <p>默认载入 P02 的六项核心条件。可继续叠加反馈、隐私、算法与理论保证，观察证据覆盖如何变化。</p>
+          <details class="panel direction-advanced" id="direction-advanced">
+            <summary>可选：细化并保存研究方向 <span>展开十个研究维度</span></summary>
+            <div class="direction-advanced-body">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">10 个研究维度</p>
+                  <h2 id="dimension-title">研究维度组合</h2>
+                  <p>已保存的条件会恢复到这里。条件只在你点击“填入关键词”或“按这些条件搜索”时用于检索。</p>
+                </div>
+                <button class="button button--secondary button--small" id="reset-direction" type="button">恢复 P02 默认</button>
               </div>
-              <button class="button button--secondary button--small" id="reset-direction" type="button">恢复 P02 默认</button>
-            </div>
-
+              <section class="theory-boundary" aria-labelledby="direction-save-state">
+                <span aria-hidden="true">i</span>
+                <div>
+                  <strong id="direction-save-state">尚未显式保存研究方向</strong>
+                  <div class="direction-tag-list" id="direction-save-axes" aria-label="最近一次保存的研究条件"><span>选择条件后点击“保存研究方向”固定当前输入</span></div>
+                </div>
+              </section>
+              <div class="heading-actions">
+                <button class="button button--primary" id="save-candidate" type="button">保存研究方向</button>
+                <button class="button button--secondary" id="use-direction-in-search" type="button">把这些条件填入关键词</button>
+              </div>
             <div class="filter-grid" id="direction-filters">
               <fieldset class="filter-group" data-axis="problem">
                 <legend>1 · 研究问题</legend>
@@ -167,109 +178,21 @@
               </fieldset>
             </div>
 
-            <div class="filter-footer">
-              <p><span class="selection-dot" aria-hidden="true"></span><strong id="selected-count">6 个条件</strong>已参与组合</p>
-              <button class="text-button" id="clear-direction" type="button">清空全部条件</button>
-            </div>
-          </section>
 
-          <section class="panel" id="direction-results" aria-labelledby="results-title">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">匹配文献</p>
-                <h2 id="results-title">匹配论文与阅读状态</h2>
-                <p id="results-summary" aria-live="polite">当前组合找到 1 篇直接匹配论文。</p>
+              <div class="filter-footer">
+                <p><span class="selection-dot" aria-hidden="true"></span><strong id="selected-count">6 个条件</strong>已选中</p>
+                <button class="text-button" id="clear-direction" type="button">清空全部条件</button>
               </div>
-              <label class="sort-control">排序
-                <select id="paper-sort" aria-label="论文排序方式">
-                  <option value="relevance">相关性</option>
-                  <option value="year">年份（新到旧）</option>
-                  <option value="contribution">研究贡献</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="direction-library-toolbar">
-              <div class="state-tabs" role="tablist" aria-label="按阅读状态筛选">
-                <button class="state-tab state-tab--active" id="direction-tab-all" type="button" role="tab" aria-controls="paper-list" aria-selected="true" tabindex="0" data-state="all">全部 <span data-count="all">1</span></button>
-                <button class="state-tab" id="direction-tab-completed" type="button" role="tab" aria-controls="paper-list" aria-selected="false" tabindex="-1" data-state="completed">已读 <span data-count="completed">0</span></button>
-                <button class="state-tab" id="direction-tab-reading" type="button" role="tab" aria-controls="paper-list" aria-selected="false" tabindex="-1" data-state="reading">在读 <span data-count="reading">1</span></button>
-                <button class="state-tab" id="direction-tab-queued" type="button" role="tab" aria-controls="paper-list" aria-selected="false" tabindex="-1" data-state="queued">未开始 <span data-count="queued">0</span></button>
+              <div class="heading-actions">
+                <a class="button button--secondary" id="search-new-paper" href="../../local_library_output/desktop/discovery.html?q=%E5%88%86%E5%B8%83%E5%BC%8F%E4%BC%98%E5%8C%96%20%E6%9C%89%E5%90%91%E7%BD%91%E7%BB%9C%20%E6%97%B6%E5%8F%98%E6%8B%93%E6%89%91%20%E9%9D%9E%E5%B9%B3%E8%A1%A1%E7%BD%91%E7%BB%9C%20%E8%80%A6%E5%90%88%E7%BA%A6%E6%9D%9F%20%E4%BD%8E%E9%80%9A%E4%BF%A1&amp;search=1&amp;language=all">按这些条件搜索 →</a>
+                <button class="button button--primary" id="save-candidate-side" type="button">保存研究方向</button>
               </div>
-              <p>点击论文右侧箭头进入结构化阅读</p>
+              <p class="library-quick-help">“填入关键词”会替换上方搜索框内容，可继续编辑。保存方向只保存你的选择，不代表研究结论或文献覆盖情况。</p>
             </div>
-
-            <div class="paper-list" id="paper-list" role="tabpanel" aria-labelledby="direction-tab-all" aria-live="polite"></div>
-          </section>
+          </details>
         </section>
-
-        <aside class="inspector" aria-labelledby="combination-title">
-          <div class="inspector-heading">
-            <div>
-              <p class="eyebrow">当前方向组合</p>
-              <h2 id="combination-title">当前组合解释</h2>
-            </div>
-            <span class="status status--active">P02</span>
-          </div>
-
-          <section class="current-project-card">
-            <div class="project-card-top"><code id="axis-count">6 个维度</code><span class="status status--active" id="combination-status">直接匹配 1</span></div>
-            <h3 id="combination-name">动态有向网络下的低通信约束优化</h3>
-            <p id="combination-explanation">在分布式优化中，聚焦时变、权重非平衡的有向网络，并同时处理耦合约束与低通信目标。</p>
-            <div class="direction-tag-list" id="combination-tags" aria-label="已选研究条件"></div>
-          </section>
-
-          <section class="inspector-section">
-            <h3>证据覆盖统计</h3>
-            <dl class="direction-metrics">
-              <div><dt>直接匹配</dt><dd id="metric-matches">1</dd></div>
-              <div><dt>已读</dt><dd id="metric-completed">0</dd></div>
-              <div><dt>在读</dt><dd id="metric-reading">1</dd></div>
-            </dl>
-            <ul class="check-list" id="coverage-list">
-              <li><span>✓</span>时变有向网络已有方法基线</li>
-              <li><span>✓</span>耦合约束已有近邻工作</li>
-              <li><span>○</span>低通信直接证据仍需补充</li>
-            </ul>
-          </section>
-
-          <section class="inspector-section">
-            <div class="inspector-title-row"><h3>研究空白</h3><span class="count-badge">2</span></div>
-            <ul class="blocker-list" id="gap-list">
-              <li><span aria-hidden="true">!</span><div><strong>组合覆盖仍然稀疏</strong><small>目前只有 1 篇论文同时满足六项条件。</small></div></li>
-              <li><span aria-hidden="true">!</span><div><strong>贡献边界尚未核验</strong><small>需比较事件触发、压缩通信与每轮通信的差异。</small></div></li>
-            </ul>
-          </section>
-
-          <section class="thesis-map">
-            <p class="eyebrow">下一步决策</p>
-            <h3>形成 P02 贡献边界卡</h3>
-            <p>先补齐直接对照，再把机制差异、理论代价和仿真基线写入课题候选。</p>
-            <button class="button button--primary button--full" id="save-candidate-side" type="button">保存课题候选 →</button>
-          </section>
-        </aside>
       </div>
     </main>
-
-    <dialog class="search-dialog" id="search-dialog" aria-labelledby="search-dialog-title">
-      <form method="dialog">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">新文献检索</p><h2 id="search-dialog-title">搜索指定方向的新论文</h2></div>
-          <button class="icon-button" value="cancel" aria-label="关闭">×</button>
-        </div>
-        <p>保存当前方向的检索条件；结果确认后再进入阅读队列，不自动写入研究证据。</p>
-        <label>研究主题<input name="topic" id="search-topic" value="时变有向网络 低通信 耦合约束" /></label>
-        <div class="dialog-grid">
-          <label>年份范围<select name="years"><option>近 5 年</option><option>近 10 年</option><option>不限</option></select></label>
-          <label>优先类型<select name="priority"><option>开创性与关键方法</option><option>实际问题</option><option>最新论文</option></select></label>
-        </div>
-        <div class="dialog-note"><strong>建议流程</strong><span>检索 → 去重 → 人工筛选 → 加入阅读队列 → 结构化解读</span></div>
-        <div class="dialog-actions">
-          <button class="button button--secondary" value="cancel">取消</button>
-          <button class="button button--primary" id="save-search" value="default">保存检索任务</button>
-        </div>
-      </form>
-    </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script type="module" src="./directions.mjs"></script>

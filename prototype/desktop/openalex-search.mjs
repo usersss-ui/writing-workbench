@@ -1,5 +1,11 @@
+import { cleanText, normalizeDoi, safeHttpsUrl } from "./bibliography-normalization.mjs"
+import { normalizeDiscoveryRecord } from "./discovery-record.mjs"
+export { normalizeDoi, safeHttpsUrl } from "./bibliography-normalization.mjs"
+
 const OPENALEX_WORKS_ENDPOINT = "https://api.openalex.org/works"
 const MAX_QUERY_CHARACTERS = 1_000
+const MAX_CURSOR_CHARACTERS = 2_048
+const MAX_PER_PAGE = 50
 const MAX_TOTAL = 100_000_000
 const MAX_ABSTRACT_ENTRIES = 5_000
 const MAX_ABSTRACT_POSITIONS = 5_000
@@ -16,6 +22,9 @@ const SELECT_FIELDS = [
   "best_oa_location",
   "topics",
   "abstract_inverted_index",
+  "language",
+  "type",
+  "is_retracted",
 ]
 
 const SORTS = Object.freeze({
@@ -23,16 +32,6 @@ const SORTS = Object.freeze({
   newest: Object.freeze({ parameter: "publication_date:desc", basis: "出版时间（新到旧）" }),
   citations: Object.freeze({ parameter: "cited_by_count:desc", basis: "OpenAlex 引用次数（高到低）" }),
 })
-
-const CREDENTIAL_QUERY_KEYS = new Set([
-  ["access", "token"].join(""), ["api", "key"].join(""), ["auth", "token"].join(""),
-  ["authori", "zation"].join(""), ["bearer", "token"].join(""), ["xapi", "key"].join(""),
-  ["client", "secret"].join(""), ["coo", "kie"].join(""), ["creden", "tials"].join(""),
-  ["oauth", "token"].join(""),
-  ["pass", "word"].join(""), ["private", "key"].join(""), ["refresh", "token"].join(""),
-  ["sec", "ret"].join(""), ["secret", "key"].join(""), "session",
-  ["session", "id"].join(""), ["to", "ken"].join(""),
-])
 
 function searchError(code, message, details = {}) {
   const error = new Error(message)
@@ -51,124 +50,16 @@ function normalizeQuery(query) {
   return value
 }
 
-function cleanText(value, maximum = 20_000) {
-  if (typeof value !== "string") return ""
-  return value
-    .replace(/[\u0000-\u001f\u007f]/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, maximum)
-}
-
-function rawPathHasDotSegment(value) {
-  const match = value.match(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*(\/[^?#]*)?/iu)
-  if (!match?.[1]) return false
-  return match[1].split("/").some((segment) => {
-    if (segment === "." || segment === "..") return true
-    try {
-      return decodeURIComponent(segment).split("/").some((part) => part === "." || part === "..")
-    } catch {
-      return true
-    }
-  })
-}
-
-function normalizedQueryKey(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]/gu, "")
-}
-
-function decodedQueryKey(value) {
-  if (
-    typeof value !== "string" || value.length > 512 ||
-    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
-  ) return null
-  let decoded = value
-  for (let depth = 0; depth < 4; depth += 1) {
-    if (!/%[0-9a-f]{2}/iu.test(decoded)) return decoded
-    try {
-      const next = decodeURIComponent(decoded)
-      if (next === decoded || next.length > 512 || /[\u0000-\u001f\u007f\u2028\u2029]/u.test(next)) return null
-      decoded = next
-    } catch {
-      return null
-    }
-  }
-  return /%[0-9a-f]{2}/iu.test(decoded) ? null : decoded
-}
-
-function isCredentialQueryKey(value) {
-  const decoded = decodedQueryKey(value)
-  if (decoded === null) return true
-  const key = normalizedQueryKey(decoded)
-  return CREDENTIAL_QUERY_KEYS.has(key) || [
-    ["to", "ken"].join(""), ["sec", "ret"].join(""), ["pass", "word"].join(""),
-    ["pass", "phrase"].join(""), ["api", "key"].join(""), ["private", "key"].join(""),
-    ["signa", "ture"].join(""), ["j", "wt"].join(""),
-    ["creden", "tial"].join(""), ["coo", "kie"].join(""),
-  ].some((marker) => key.includes(marker))
-}
-
-function isPrivateIpv4(hostname) {
-  const parts = hostname.split(".")
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/u.test(part))) return false
-  const octets = parts.map(Number)
-  if (octets.some((part) => part > 255)) return true
-  const [a, b] = octets
-  return a === 0 || a === 10 || a === 127 || a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && (b === 0 || b === 168)) ||
-    (a === 198 && (b === 18 || b === 19))
-}
-
-function isPublicHostname(hostname) {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "").replace(/\.$/u, "")
-  if (
-    !host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
-    host.endsWith(".home.arpa") || !host.includes(".")
-  ) return false
-  if (host.includes(":")) return false
-  return !isPrivateIpv4(host)
-}
-
-export function safeHttpsUrl(value) {
-  if (typeof value !== "string" || value.length > 2_048) return null
-  if (/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)) return null
-  const text = value.trim()
-  if (!text || text.length > 2_048 || text.includes("\\") || rawPathHasDotSegment(text)) return null
-  try {
-    const url = new URL(text)
-    if (
-      url.protocol !== "https:" || url.username || url.password || url.port ||
-      url.hash || !isPublicHostname(url.hostname)
-    ) return null
-    for (const key of url.searchParams.keys()) {
-      if (isCredentialQueryKey(key)) return null
-    }
-    return url.href
-  } catch {
-    return null
-  }
+function isValidCursor(value) {
+  // Cursors are opaque: preserve them exactly, and encode them only as a query value.
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_CURSOR_CHARACTERS &&
+    /^[\u0021-\u007e]+$/u.test(value)
 }
 
 function normalizePaperId(value) {
   if (typeof value !== "string" || value.length > 100) return null
   const match = cleanText(value, 100).match(/^https:\/\/openalex\.org\/(W\d+)\/?$/iu)
   return match ? match[1].toUpperCase() : null
-}
-
-export function normalizeDoi(value) {
-  if (
-    typeof value !== "string" || value.length > 512 || value.includes("\\") ||
-    /[\u0000-\u001f\u007f\u2028\u2029]/u.test(value)
-  ) return null
-  let doi = cleanText(value, 512)
-  if (!doi) return null
-  doi = doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu, "").replace(/^doi:\s*/iu, "").toLowerCase()
-  if (!/^10\.\d{4,9}\/[\-._;()/:a-z0-9]+$/u.test(doi) || doi.includes("//")) return null
-  const suffix = doi.slice(doi.indexOf("/") + 1)
-  return suffix.split("/").some((part) => part === "." || part === "..") ? null : doi
 }
 
 function normalizeNames(value, selector, maximumItems) {
@@ -300,43 +191,103 @@ function normalizeWork(work) {
 
 export function buildOpenAlexSearchUrl({
   query,
-  currentYear = 2026,
-  perPage = 10,
   sort = "relevance",
+  startYear = null,
+  endYear = null,
+  language = "all",
+  cursor = "*",
+  perPage = 25,
 } = {}) {
   const normalizedQuery = normalizeQuery(query)
-  if (!Number.isInteger(currentYear) || currentYear < 1000 || currentYear > 9999) {
+  if ([startYear, endYear].some((year) => year !== null && (
+    !Number.isInteger(year) || year < 1000 || year > 9999
+  ))) {
     throw searchError("request_failed", "检索年份无效")
   }
-  if (!Number.isInteger(perPage) || perPage < 1) {
+  if (startYear !== null && endYear !== null && startYear > endYear) {
+    throw searchError("request_failed", "起始年份不能晚于结束年份")
+  }
+  if (!["all", "en", "zh"].includes(language)) throw searchError("request_failed", "检索语言无效")
+  if (!isValidCursor(cursor)) throw searchError("request_failed", "检索分页位置无效")
+  if (!Number.isInteger(perPage) || perPage < 1 || perPage > MAX_PER_PAGE) {
     throw searchError("request_failed", "检索数量无效")
   }
   if (!Object.hasOwn(SORTS, sort)) throw searchError("request_failed", "检索排序方式无效")
 
+  const filters = []
+  if (startYear !== null) filters.push(`from_publication_date:${startYear}-01-01`)
+  if (endYear !== null) filters.push(`to_publication_date:${endYear}-12-31`)
+  if (language !== "all") filters.push(`language:${language}`)
+  filters.push("is_retracted:false")
+
   const url = new URL(OPENALEX_WORKS_ENDPOINT)
   url.searchParams.set("search", normalizedQuery)
-  url.searchParams.set(
-    "filter",
-    `from_publication_date:${currentYear - 4}-01-01,to_publication_date:${currentYear}-12-31,language:en,is_retracted:false`,
-  )
+  url.searchParams.set("filter", filters.join(","))
   url.searchParams.set("sort", SORTS[sort].parameter)
-  url.searchParams.set("per_page", String(Math.min(10, perPage)))
+  url.searchParams.set("per_page", String(perPage))
+  url.searchParams.set("cursor", cursor)
   url.searchParams.set("select", SELECT_FIELDS.join(","))
   return url.toString()
 }
 
-export async function searchOpenAlexWorks({
+async function readSearchPage({
   query,
   fetchImpl = fetch,
   signal,
-  currentYear = 2026,
-  perPage = 10,
   sort = "relevance",
+  startYear = null,
+  endYear = null,
+  language = "all",
+  cursor = "*",
+  perPage = 25,
 } = {}) {
   if (typeof fetchImpl !== "function") throw searchError("request_failed", "检索请求函数无效")
   const normalizedQuery = normalizeQuery(query)
-  const url = buildOpenAlexSearchUrl({ query: normalizedQuery, currentYear, perPage, sort })
+  const url = buildOpenAlexSearchUrl({ query: normalizedQuery, sort, startYear, endYear, language, cursor, perPage })
 
+  const payload = await fetchOpenAlexPayload({ url, fetchImpl, signal })
+  if (
+    !payload || typeof payload !== "object" || Array.isArray(payload) ||
+    !payload.meta || typeof payload.meta !== "object" || Array.isArray(payload.meta) ||
+    !Array.isArray(payload.results) || payload.results.length > perPage ||
+    !Number.isSafeInteger(payload.meta.count) || payload.meta.count < 0 || payload.meta.count > MAX_TOTAL ||
+    payload.meta.count < payload.results.length
+  ) {
+    throw searchError("invalid_response", "OpenAlex 返回的数据结构无效")
+  }
+
+  const nextCursor = payload.meta.next_cursor
+  if (
+    (nextCursor !== null && (!isValidCursor(nextCursor) || nextCursor === "*" || nextCursor === cursor)) ||
+    (payload.results.length === 0 && nextCursor !== null) ||
+    (cursor === "*" && payload.meta.count > payload.results.length && nextCursor === null)
+  ) {
+    throw searchError("invalid_response", "OpenAlex 返回的分页信息不完整或无效")
+  }
+
+  const works = payload.results.map(normalizeWork)
+  if (works.some((work) => work === null)) {
+    throw searchError("invalid_response", "OpenAlex 返回的论文记录无效")
+  }
+  const rawCost = payload.meta.cost_usd
+  if (rawCost !== undefined && (typeof rawCost !== "number" || !Number.isFinite(rawCost) || rawCost < 0 || rawCost > 1)) {
+    throw searchError("invalid_response", "OpenAlex 返回的计费信息无效")
+  }
+  return { rawWorks: payload.results, page: {
+    total: payload.meta.count,
+    nextCursor,
+    works,
+    costUsd: rawCost ?? 0,
+    query: normalizedQuery,
+    sort,
+    sortBasis: SORTS[sort].basis,
+    emptyMessage: works.length === 0
+      ? cursor === "*" ? "当前检索条件未返回结果。" : "已加载完当前检索条件的结果。"
+      : null,
+  } }
+}
+
+async function fetchOpenAlexPayload({ url, fetchImpl, signal, singleton = false }) {
   let response
   try {
     response = await fetchImpl(url, {
@@ -349,46 +300,113 @@ export async function searchOpenAlexWorks({
     })
   } catch (error) {
     if (error?.name === "AbortError") throw error
-    throw searchError("network", "无法连接 OpenAlex", { cause: error })
+    throw searchError("network", "无法连接 OpenAlex", { cause: error, retryable: true })
   }
 
   if (!response || typeof response.ok !== "boolean" || !Number.isInteger(response.status)) {
     throw searchError("invalid_response", "OpenAlex 返回了无效响应")
   }
-  if (response.status === 429) throw searchError("rate_limited", "OpenAlex 暂时限流", { status: 429 })
-  if (!response.ok) throw searchError("request_failed", "OpenAlex 检索失败", { status: response.status })
+  if (response.status === 429) throw searchError("rate_limited", "OpenAlex 暂时限流", { status: 429, retryable: true })
+  if (singleton && response.status === 404) throw searchError("unverified", "未找到 DOI 对应的 OpenAlex 记录", { status: 404, retryable: false })
+  if (!response.ok || response.status < 200 || response.status >= 300 || response.redirected) {
+    throw searchError("request_failed", "OpenAlex 检索失败", { status: response.status, retryable: false })
+  }
 
   let payload
   try {
     payload = await response.json()
   } catch (error) {
+    if (error?.name === "AbortError") throw error
     throw searchError("invalid_response", "OpenAlex 返回的 JSON 无法解析", { cause: error })
   }
-  if (
-    !payload || typeof payload !== "object" || Array.isArray(payload) ||
-    !payload.meta || typeof payload.meta !== "object" || Array.isArray(payload.meta) ||
-    !Array.isArray(payload.results) || payload.results.length > 10 ||
-    !Number.isSafeInteger(payload.meta.count) || payload.meta.count < 0 || payload.meta.count > MAX_TOTAL ||
-    payload.meta.count < payload.results.length || (payload.meta.count > 0 && payload.results.length === 0)
-  ) {
-    throw searchError("invalid_response", "OpenAlex 返回的数据结构无效")
+  // Bound the whole parsed payload as well as the known nested work fields.
+  // Fetch/JSON parsing is the existing transport boundary; no secondary fetch is made.
+  try {
+    const serialized = JSON.stringify(payload)
+    const maximum = singleton ? 2 * 1024 * 1024 : 8 * 1024 * 1024
+    if (typeof serialized !== "string" || serialized.length > maximum || new TextEncoder().encode(serialized).byteLength > maximum) {
+      throw new Error("oversized")
+    }
+  } catch {
+    throw searchError("invalid_response", "OpenAlex 返回的数据过大或无效")
   }
+  return payload
+}
 
-  const works = payload.results.map(normalizeWork)
-  if (works.some((work) => work === null)) {
-    throw searchError("invalid_response", "OpenAlex 返回的论文记录无效")
+export async function searchOpenAlexWorks(options = {}) {
+  return (await readSearchPage(options)).page
+}
+
+function richMetadata(raw, work, retrievedAt) {
+  const source = raw.primary_location?.source
+  if ([raw.language, raw.type, source?.type].some(value => typeof value === "string" && value.length > 100) ||
+    (typeof source?.id === "string" && source.id.length > 2048) ||
+    (typeof source?.issn_l === "string" && source.issn_l.length > 32) ||
+    (Array.isArray(source?.issn) && (source.issn.length > 10 || source.issn.some(value => typeof value === "string" && value.length > 32)))) {
+    throw searchError("invalid_response", "OpenAlex 返回的来源字段过大")
   }
-  const rawCost = payload.meta.cost_usd
-  if (rawCost !== undefined && (typeof rawCost !== "number" || !Number.isFinite(rawCost) || rawCost < 0 || rawCost > 1)) {
-    throw searchError("invalid_response", "OpenAlex 返回的计费信息无效")
-  }
+  const issns = [...(Array.isArray(source?.issn) ? source.issn : []), source?.issn_l]
+    .filter(value => typeof value === "string" && /^\d{4}-\d{3}[\dX]$/u.test(value.trim().toUpperCase()))
+    .map(value => value.trim().toUpperCase())
+  if (new Set(issns).size > 10) throw searchError("invalid_response", "OpenAlex 返回的 ISSN 数量过多")
+  const state = raw.is_retracted === true ? "retracted" : raw.is_retracted === false ? "screened_clear" : "unknown"
   return {
-    total: payload.meta.count,
-    works,
-    costUsd: rawCost ?? 0,
-    query: normalizedQuery,
-    sort,
-    sortBasis: SORTS[sort].basis,
-    emptyMessage: works.length === 0 ? "当前英文检索式未返回结果。" : null,
+    bibliography: {
+      title: work.title,
+      authors: Array.isArray(raw.authorships)
+        ? raw.authorships.map(item => cleanText(item?.author?.display_name, 300)).filter(Boolean) : [],
+      year: work.year, doi: work.doi, url: work.landingPageUrl, abstract: work.abstract,
+      language: cleanText(raw.language, 100).toLowerCase() || null,
+      work_type: cleanText(raw.type, 100).toLowerCase() || null,
+      journal: { title: cleanText(source?.display_name, 500) || null,
+        source_id: typeof source?.id === "string" && /^https:\/\/openalex\.org\/S\d+$/u.test(source.id) ? source.id : null,
+        issns: [...new Set(issns)], source_type: cleanText(source?.type, 100).toLowerCase() || null },
+      citations: Number.isSafeInteger(raw.cited_by_count) && raw.cited_by_count >= 0
+        ? { count: raw.cited_by_count, provider: "openalex", retrieved_at: retrievedAt } : null,
+    },
+    retraction: { state, source_url: state === "unknown" ? null : `https://openalex.org/${work.paperId}`,
+      checked_at: state === "unknown" ? null : retrievedAt },
   }
+}
+
+export async function searchOpenAlexDiscoveryPage({ batch_id, query_id, now = () => new Date().toISOString(),
+  idFactory = () => crypto.randomUUID(), ...options } = {}) {
+  const retrievedAt = typeof now === "function" ? now() : now
+  if (typeof idFactory !== "function") throw new TypeError("缺少记录 ID 工厂")
+  const { rawWorks, page } = await readSearchPage(options)
+  const records = rawWorks.map((raw, index) => normalizeDiscoveryRecord({
+    record_id: idFactory(), provider_id: page.works[index].paperId,
+    ...richMetadata(raw, page.works[index], retrievedAt),
+    provenance: { provider: "openalex", method: "api", batch_id, query_id, import_id: null,
+      retrieved_at: retrievedAt, public_url: `https://openalex.org/${page.works[index].paperId}`, verification: "api" },
+  }))
+  if (new Set(records.map(record => record.record_id)).size !== records.length) throw new TypeError("记录 ID 重复")
+  return { records, works: page.works, total: page.total, nextCursor: page.nextCursor }
+}
+
+const verifiedWorks = new WeakMap()
+
+export async function fetchOpenAlexWorkByDoi({ doi, fetchImpl = fetch, signal } = {}) {
+  const normalizedDoi = normalizeDoi(doi)
+  if (!normalizedDoi || typeof fetchImpl !== "function") throw searchError("request_failed", "DOI 核验参数无效")
+  const url = new URL(`${OPENALEX_WORKS_ENDPOINT}/doi:${encodeURIComponent(normalizedDoi)}`)
+  url.searchParams.set("select", SELECT_FIELDS.join(","))
+  const raw = await fetchOpenAlexPayload({ url: url.href, fetchImpl, signal, singleton: true })
+  const work = normalizeWork(raw)
+  if (!work) throw searchError("invalid_response", "OpenAlex 返回的论文记录无效")
+  if (work.doi !== normalizedDoi) throw searchError("doi_mismatch", "返回记录的 DOI 与原 DOI 不符")
+  const token = Object.freeze({})
+  const metadata = richMetadata(raw, work, new Date().toISOString())
+  // Validate the same bibliography contract used by discovery records before branding.
+  const record = normalizeDiscoveryRecord({ record_id: "verification", provider_id: work.paperId, ...metadata,
+    provenance: { provider: "openalex", method: "api", batch_id: "verification", query_id: null, import_id: null,
+      retrieved_at: new Date().toISOString(), public_url: `https://openalex.org/${work.paperId}`, verification: "api" },
+  })
+  verifiedWorks.set(token, structuredClone({ work, bibliography: record.bibliography, retraction: record.retraction }))
+  return token
+}
+
+export function readVerifiedOpenAlexWork(token) {
+  if (!verifiedWorks.has(token)) throw new TypeError("缺少真实 OpenAlex 核验凭据")
+  return structuredClone(verifiedWorks.get(token))
 }

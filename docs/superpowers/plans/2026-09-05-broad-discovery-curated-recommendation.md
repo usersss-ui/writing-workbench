@@ -114,7 +114,7 @@ type Workspace = { version: 1; revision: number; batches: Batch[]; records: Reco
 
 **Interfaces:** `normalizeDiscoveryRecord(input): Record`、`isValidDiscoveryRecord(value): boolean`、`classifyDiscoveryScope(record, scope): {status:'included'|'pending'|'excluded', reasons:string[]}`。现有内部 `safeHttpsUrl`/`normalizeDoi` 增加同名 export，不更改旧调用语义。
 
-- [ ] **Step 1 — 写失败测试与合成数据工厂。** 工厂 `recordInput(patch={})` 返回下例对象再覆盖顶层 patch；后续任务可以直接导入它。另提供 `memoryStorage()`（Map + getItem/setItem/removeItem）和 `deferred()`（返回 promise/resolve/reject）。
+- [x] **Step 1 — 写失败测试与合成数据工厂。** 工厂 `recordInput(patch={})` 返回下例对象再覆盖顶层 patch；后续任务可以直接导入它。另提供 `memoryStorage()`（Map + getItem/setItem/removeItem）和 `deferred()`（返回 promise/resolve/reject）。
 
 ```js
 import test from 'node:test';
@@ -129,8 +129,8 @@ test('unknown metadata is pending, never a manufactured language or zero citatio
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-record.test.mjs`，应因新模块/导出尚不存在失败，不接受语法错误作为有效红灯。
-- [ ] **Step 3 — 实现规范化与确切 fixture。** 以下是工厂默认输入；规范化须对顶层、书目、期刊、出处和撤稿对象校验确切字段，对 getter、非普通对象、危险原型字段直接拒绝。字符串上限：题名 1,000，摘要 20,000，作者 50×300，期刊 500，ISSN 10 项、ISO 年份 1000–9999、URL 2,048；身份非法拒绝而不截断。文献类型/语言未知可保留，不按题名推断。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-record.test.mjs`，应因新模块/导出尚不存在失败，不接受语法错误作为有效红灯。
+- [x] **Step 3 — 实现规范化与确切 fixture。** 以下是工厂默认输入；规范化须对顶层、书目、期刊、出处和撤稿对象校验确切字段，对 getter、非普通对象、危险原型字段直接拒绝。字符串上限：题名 1,000，摘要 20,000，作者 50×300，期刊 500，ISSN 10 项、ISO 年份 1000–9999、URL 2,048；身份非法拒绝而不截断。文献类型/语言未知可保留，不按题名推断。
 
 ```js
 export function recordInput(patch = {}) {
@@ -146,8 +146,8 @@ export function recordInput(patch = {}) {
 
 范围判断顺序：可靠已撤稿→excluded；已知年份/语言不符→excluded；需要比较但缺值或撤稿未知→pending；其余 included。不限年份无需补年份，无语言限制无需补语言。不得把 pending 计入“已确认符合范围”。任何一条来源可靠报告撤稿均优先，后续人工覆写不得消除可靠撤稿冲突。
 
-- [ ] **Step 4 — 验证绿灯与安全回归。** `node --test prototype/desktop/discovery-record.test.mjs prototype/desktop/openalex-search.test.mjs prototype/desktop/candidate-storage.test.mjs`。加入大小写 DOI、凭据 URL、多重编码、未知语言、类型、年份、0 引用与缺失引用不同、撤稿与范围组合用例。
-- [ ] **Step 5 — 按提交纪律提交。** `feat: add provenance-aware discovery records`。
+- [x] **Step 4 — 验证绿灯与安全回归。** `node --test prototype/desktop/discovery-record.test.mjs prototype/desktop/openalex-search.test.mjs prototype/desktop/candidate-storage.test.mjs`。加入大小写 DOI、凭据 URL、多重编码、未知语言、类型、年份、0 引用与缺失引用不同、撤稿与范围组合用例。
+- [x] **Step 5 — 按提交纪律提交。** `feat: add provenance-aware discovery records`。
 
 ## Task 2: 身份合并、冲突与拆分
 
@@ -155,7 +155,7 @@ export function recordInput(patch = {}) {
 
 **Interfaces:** `mergeDiscoveryRecords({records,results,incoming,idFactory}): {records,results,changed_result_ids}`；`splitDiscoveryResult({records,results,result_id,groups,idFactory}): {records,results,invalidated_result_ids}`。`groups` 是旧 `record_ids` 的完整、互斥分区。不在模块内改写核验或候选；用返回 ID 通知状态层。
 
-- [ ] **Step 1 — 写重复与冲突失败测试。**
+- [x] **Step 1 — 写重复与冲突失败测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -173,8 +173,8 @@ test('same DOI retains two source records and one result', () => {
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-identity.test.mjs`。
-- [ ] **Step 3 — 实现保守汇总。** 先比较规范 DOI；缺少 DOI 时只允许经真实 API 核实且 provider 相同的 ID。题名规范化仅用于查冲突：不同非空 DOI、不同明确年份/刊版、明显题名冲突均不自动合并；标题近似只返回冲突线索。合并选择既有 result_id，保留 alias_ids；preferred_record_id 按可信出处、完整度、稳定 ID 决定，不随响应顺序任意变动。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-identity.test.mjs`。
+- [x] **Step 3 — 实现保守汇总。** 先比较规范 DOI；缺少 DOI 时只允许经真实 API 核实且 provider 相同的 ID。题名规范化仅用于查冲突：不同非空 DOI、不同明确年份/刊版、明显题名冲突均不自动合并；标题近似只返回冲突线索。合并选择既有 result_id，保留 alias_ids；preferred_record_id 按可信出处、完整度、稳定 ID 决定，不随响应顺序任意变动。
 
 ```js
 const doiKey = r => r.bibliography.doi ? `doi:${r.bibliography.doi}` : null;
@@ -185,8 +185,8 @@ const verifiedKey = r => r.provenance.verification === 'api' && r.provider_id
 
 后到矛盾把既有结果标记 conflict，保留来源与 ID；显式拆分验证 groups 恰好覆盖旧记录，至少两组，不转移缺少来源定位的条件证据。重复 `record_id` 同体为 no-op，异体为冲突，不覆写。
 
-- [ ] **Step 4 — 验证绿灯。** 补 DOI 相同但不相关题名、A/B 已合并后 C 冲突、疑似版本、输入乱序、重复页、别名引用、非法拆分、不修改输入测试，运行同文件。
-- [ ] **Step 5 — 提交。** `feat: preserve source identities and discovery conflicts`。
+- [x] **Step 4 — 验证绿灯。** 补 DOI 相同但不相关题名、A/B 已合并后 C 冲突、疑似版本、输入乱序、重复页、别名引用、非法拆分、不修改输入测试，运行同文件。
+- [x] **Step 5 — 提交。** `feat: preserve source identities and discovery conflicts`。
 
 ## Task 3: BibTeX/RIS 导入与候选导出
 
@@ -194,7 +194,7 @@ const verifiedKey = r => r.provenance.verification === 'api' && r.provider_id
 
 **Interfaces:** `parseBibliography({text,format,provider,batch_id,import_id,now,idFactory}): {records:Record[],warnings:string[]}`；`exportBibliography(records,{format}): string`。format 仅 `bibtex|ris`；输入只允许 Scholar/CNKI/manual 声明来源，不能声明为 API。所有记录先预览，解析本身不持久化、不请求网址。
 
-- [ ] **Step 1 — 写失败测试。**
+- [x] **Step 1 — 写失败测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -209,8 +209,8 @@ test('RIS imports a declared record without inventing OpenAlex identity', () => 
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/bibliography-import.test.mjs`。
-- [ ] **Step 3 — 实现线性扫描解析器。** RIS 以 `TY` 开头、`ER` 结束，识别 TI/T1、AU/A1、PY/Y1、DO、UR、JO/JF/T2、SN、AB、LA，续行只附加前一已知字段。BibTeX 逐字符扫描 entry、key、字段值，支持花括号/双引号/数字及受限转义；嵌套深度最多 16；允许 `@comment` 忽略，拒绝 `@string`、`@preamble`、`#` 宏拼接和未闭合内容并指出位置。未知普通书目字段丢弃并警告，不把恶意指令当说明执行。`\write`、`\input` 等 TeX 不执行，不自动解析外链。下列循环界定解析资源；不要用一个巨型正则表达式读取嵌套 BibTeX。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/bibliography-import.test.mjs`。
+- [x] **Step 3 — 实现线性扫描解析器。** RIS 以 `TY` 开头、`ER` 结束，识别 TI/T1、AU/A1、PY/Y1、DO、UR、JO/JF/T2、SN、AB、LA，续行只附加前一已知字段。BibTeX 逐字符扫描 entry、key、字段值，支持花括号/双引号/数字及受限转义；嵌套深度最多 16；允许 `@comment` 忽略，拒绝 `@string`、`@preamble`、`#` 宏拼接和未闭合内容并指出位置。未知普通书目字段丢弃并警告，不把恶意指令当说明执行。`\write`、`\input` 等 TeX 不执行，不自动解析外链。下列循环界定解析资源；不要用一个巨型正则表达式读取嵌套 BibTeX。
 
 ```js
 if (new TextEncoder().encode(text).byteLength > 2*1024*1024) throw new RangeError('导入文件超过 2 MiB');
@@ -224,8 +224,8 @@ for (let offset=0; offset<text.length; offset+=1) {
 
 实际扫描要同时跟踪连续反斜线奇偶和引号状态；上例资源检查不得取代完整语法状态机。全文解析失败/超过 500 条时不返回半批成功；缺少题名逐条警告并由预览明确排除，不补假题名。期刊名称不能单独证明期刊类型。导出转义语法字符，保持公开 DOI/来源，不导出认证内容。
 
-- [ ] **Step 4 — 验证绿灯。** 覆盖中文、多作者、花括号题名、转义、BOM/CRLF、未知语言/年份、HTML 字符纯文本、2 MiB/500 条边界、嵌套攻击、畸形末条、无网络调用、BibTeX/RIS 往返。运行同文件及 `discovery-record.test.mjs`。
-- [ ] **Step 5 — 提交。** `feat: import bounded bibliography records with provenance`。
+- [x] **Step 4 — 验证绿灯。** 覆盖中文、多作者、花括号题名、转义、BOM/CRLF、未知语言/年份、HTML 字符纯文本、2 MiB/500 条边界、嵌套攻击、畸形末条、无网络调用、BibTeX/RIS 往返。运行同文件及 `discovery-record.test.mjs`。
+- [x] **Step 5 — 提交。** `feat: import bounded bibliography records with provenance`。
 
 ## Task 4: 保留分组的查询规划与外部入口
 
@@ -233,7 +233,7 @@ for (let offset=0; offset<text.length; offset+=1) {
 
 **Interfaces:** `buildDiscoveryQueryPlan({raw,conditions,expand,primary_ids}): QueryPlan`；`directionToConditions(axes): {conditions,warnings}`；`buildExternalSearchLinks({query,scope}): {scholar:string,cnki:string,cnki_terms:string,scope_notice:string}`。`buildKeywordSearchExpression(value)` 保留导出，委托新模块里的 `translateDiscoveryKeywords(value): string`。
 
-- [ ] **Step 1 — 写原样保留与条件计数失败测试。**
+- [x] **Step 1 — 写原样保留与条件计数失败测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -247,8 +247,8 @@ test('original Boolean query stays intact; 在线 is not damaged', () => {
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-query-plan.test.mjs`。
-- [ ] **Step 3 — 实现条件规划。** 中文翻译先最长词匹配再处理连接词，不在匹配前删除“在”；未知残余明确报错。原始式不解析时可以直接搜索，无条件 ID 则不生成 k/N。明确条件以稳定 ID 去重，同义词组合如下；需要引号转义的词先拒绝并要求修改，不让它逃逸成运算符。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-query-plan.test.mjs`。
+- [x] **Step 3 — 实现条件规划。** 中文翻译先最长词匹配再处理连接词，不在匹配前删除“在”；未知残余明确报错。原始式不解析时可以直接搜索，无条件 ID 则不生成 k/N。明确条件以稳定 ID 去重，同义词组合如下；需要引号转义的词先拒绝并要求修改，不让它逃逸成运算符。
 
 ```js
 const conditionExpression = c => c.terms.length===1
@@ -262,8 +262,8 @@ const combine = conditions => `(${conditions.map(conditionExpression).join(' AND
 
 外部 Scholar URL 用 `https://scholar.google.com/scholar` 与 URLSearchParams 的 q/as_ylo/as_yhi；CNKI 固定官方检索入口并复制中文词。明确外部语言筛选未自动设置，来源页面仍需用户确认范围；不在 URL 放账号信息。所有外跳普通 HTTPS 链接、新窗口、noopener noreferrer。
 
-- [ ] **Step 4 — 验证绿灯。** 覆盖 OR 同义词、同轴多选、5 条独立条件、超过 6 查询未执行提示、原式 NOT/括号完整保留、重复词、未知中文、方向参数污染/过长、空年份、外部链接范围说明。运行新测试及 `discovery-dom.test.mjs`、`direction-snapshot.test.mjs`、`desktop-pages.test.mjs`。
-- [ ] **Step 5 — 提交。** `feat: plan transparent broad and intersection searches`。
+- [x] **Step 4 — 验证绿灯。** 覆盖 OR 同义词、同轴多选、5 条独立条件、超过 6 查询未执行提示、原式 NOT/括号完整保留、重复词、未知中文、方向参数污染/过长、空年份、外部链接范围说明。运行新测试及 `discovery-dom.test.mjs`、`direction-snapshot.test.mjs`、`desktop-pages.test.mjs`。
+- [x] **Step 5 — 提交。** `feat: plan transparent broad and intersection searches`。
 
 ## Task 5: 丰富 OpenAlex 题录与真实 DOI 转换边界
 
@@ -271,7 +271,7 @@ const combine = conditions => `(${conditions.map(conditionExpression).join(' AND
 
 **Interfaces:** 旧 `searchOpenAlexWorks(options)` 和 12 字段 work 不变；新增 `searchOpenAlexDiscoveryPage({...options,batch_id,query_id,now,idFactory}): Promise<{records,works,total,nextCursor}>`。新增 `fetchOpenAlexWorkByDoi({doi,fetchImpl,signal}): Promise<VerifiedWork>` 和 `readVerifiedOpenAlexWork(token): {work,bibliography,retraction}`；VerifiedWork 是此模块 WeakMap 品牌对象，JSON 复制失效。桥接 `prepareExternalCandidateConversion({result,records,fetchImpl,signal}): Promise<{status:'verified',token,work}|{status:'unverified'|'conflict',reason}>`，不写 store。
 
-- [ ] **Step 1 — 写拒绝伪造 token 与元数据测试。**
+- [x] **Step 1 — 写拒绝伪造 token 与元数据测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -286,8 +286,8 @@ test('discovery page is a separate public entry point', () => {
 
 在已有 `jsonResponse`/合成 payload 基础上再断言 missing cited_by_count 在 records 是 null，而旧 works 保持当前兼容表现；language/type/is_retracted 与 primary_location.source 的 id/type/issn/issn_l 都保留。
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/openalex-search.test.mjs prototype/desktop/discovery-candidate-bridge.test.mjs`。
-- [ ] **Step 3 — 实现共享受控读取，不重复发请求。** 现有 payload 校验后分别生成 legacy works 与 Record；SELECT 增加 language/type/is_retracted，primary_location 已涵盖 source 信息。缺少嵌套来源字段保持未知，不额外循环抓取所有期刊。DOI 请求仅走固定官方 endpoint，禁止自动重定向到外部；404→unverified，429/网络错误明确可重试，AbortError 原样传播。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/openalex-search.test.mjs prototype/desktop/discovery-candidate-bridge.test.mjs`。
+- [x] **Step 3 — 实现共享受控读取，不重复发请求。** 现有 payload 校验后分别生成 legacy works 与 Record；SELECT 增加 language/type/is_retracted，primary_location 已涵盖 source 信息。缺少嵌套来源字段保持未知，不额外循环抓取所有期刊。DOI 请求仅走固定官方 endpoint，禁止自动重定向到外部；404→unverified，429/网络错误明确可重试，AbortError 原样传播。
 
 ```js
 const verifiedWorks = new WeakMap();
@@ -301,8 +301,8 @@ verifiedWorks.set(token, structuredClone({work,bibliography,retraction}));
 
 实现参考已经核实的官方说明：[布尔搜索](https://help.openalex.org/api/searching/)、[按 DOI 取得单条记录](https://help.openalex.org/api/get-single-entities/)、[Work 字段](https://help.openalex.org/data/works/attributes/)、[Source 字段](https://help.openalex.org/data/sources/attributes/)。不据此承诺覆盖所有全文或永久免费无限请求。
 
-- [ ] **Step 4 — 验证绿灯。** 固定响应覆盖 DOI 成功/不符/缺失、标题冲突、复制 token、伪 W ID、301/404/429/Abort、超长载荷、不安全 OA 链接、source ISSN 缺失、撤稿 true、旧 candidate exact keys。运行新测试、`candidate-storage.test.mjs` 与 `discovery-record.test.mjs`。
-- [ ] **Step 5 — 提交。** `feat: verify external candidates through real OpenAlex records`。
+- [x] **Step 4 — 验证绿灯。** 固定响应覆盖 DOI 成功/不符/缺失、标题冲突、复制 token、伪 W ID、301/404/429/Abort、超长载荷、不安全 OA 链接、source ISSN 缺失、撤稿 true、旧 candidate exact keys。运行新测试、`candidate-storage.test.mjs` 与 `discovery-record.test.mjs`。
+- [x] **Step 5 — 提交。** `feat: verify external candidates through real OpenAlex records`。
 
 ## Task 6: 本地主题召回与材料状态
 
@@ -310,7 +310,7 @@ verifiedWorks.set(token, structuredClone({work,bibliography,retraction}));
 
 **Interfaces:** `searchLocalDiscovery({papers,conditions,raw,scope}): {paper,hint_condition_ids,matched_fields}[]`；`matchLocalPaper(work,papers)` 返回状态枚举不变，在 matches 每项增加 `hasNote:boolean`；主题搜索不调用这个函数决定相关性。
 
-- [ ] **Step 1 — 写未同篇但主题相关测试。**
+- [x] **Step 1 — 写未同篇但主题相关测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -325,8 +325,8 @@ test('local topical evidence is a hint even without online identity', () => {
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/local-discovery.test.mjs`。
-- [ ] **Step 3 — 实现有出处的本地线索。** 只读题名多个语言字段、已有摘要、笔记预览和结构化 facets。英文按词边界、NFKC/大小写匹配，中文术语按完整短语匹配；只做已知双语术语映射，不虚构全文翻译或语义向量召回。返回实际命中字段。`hint_condition_ids` 不自动变 confirmed；既有人工 facet 需保留其状态/出处，pending 标签不得当已确认。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/local-discovery.test.mjs`。
+- [x] **Step 3 — 实现有出处的本地线索。** 只读题名多个语言字段、已有摘要、笔记预览和结构化 facets。英文按词边界、NFKC/大小写匹配，中文术语按完整短语匹配；只做已知双语术语映射，不虚构全文翻译或语义向量召回。返回实际命中字段。`hint_condition_ids` 不自动变 confirmed；既有人工 facet 需保留其状态/出处，pending 标签不得当已确认。
 
 ```js
 const hasNote = paper => (Array.isArray(paper.artifacts?.note) && paper.artifacts.note.length>0)
@@ -335,8 +335,8 @@ const hasNote = paper => (Array.isArray(paper.artifacts?.note) && paper.artifact
 
 PDF 仍只根据可查看 source_documents.pdf URL；note 标记为“已索引”，不保证内容质量。papers 不是成功载入的数组时抛错，由界面显示 unknown，绝不退回空数组伪装无论文。复用身份核验但增加“同 DOI + 另一身份明显冲突”保护；不以 PDF 存在消除冲突。
 
-- [ ] **Step 4 — 验证绿灯。** 运行新测试及 `local-paper-match.test.mjs`、`discovery-dom.test.mjs`；补笔记只有索引标记、PDF 缺失、索引失败、中文题名、否定/背景只为线索、无正文读取、私有路径不泄露测试。
-- [ ] **Step 5 — 提交。** `feat: separate local topic recall from exact paper matching`。
+- [x] **Step 4 — 验证绿灯。** 运行新测试及 `local-paper-match.test.mjs`、`discovery-dom.test.mjs`；补笔记只有索引标记、PDF 缺失、索引失败、中文题名、否定/背景只为线索、无正文读取、私有路径不泄露测试。
+- [x] **Step 5 — 提交。** `feat: separate local topic recall from exact paper matching`。
 
 ## Task 7: 两并发多查询批次与分页
 
@@ -344,7 +344,7 @@ PDF 仍只根据可查看 source_documents.pdf URL；note 标记为“已索引�
 
 **Interfaces:** `createDiscoveryBatchController({searchPage,onChange,now,idFactory})` 返回 `start({plan,scope,sort,rules}): Promise<void>`、`loadMore(query_id): Promise<void>`、`retry(query_id): Promise<void>`、`cancel():void`、`read():{batch,records,results,generation}`、`acceptImported({generation,records}):boolean`。rules 可省略，默认为共享契约的空规则；生产控制器传入已确定数据年的规则，保存到 batch.rule_snapshot。searchPage 使用任务 5 的形状；onChange 只接收防御性副本；本地记录经相同 acceptImported 通路合并，不伪造成在线查询计数。
 
-- [ ] **Step 1 — 写旧响应不能盖新批次测试。**
+- [x] **Step 1 — 写旧响应不能盖新批次测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -364,8 +364,8 @@ test('late page from A cannot replace B', async () => {
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-batch.test.mjs`。
-- [ ] **Step 3 — 实现队列和令牌隔离。** 每次 start/cancel 增加 generation，取消旧 AbortController；每个 query/cursor 有独立 request token；队列调度 active<2，每条 selected 只取首页 25。loadMore/retry 入队不自动追下一页；相同正在请求的 cursor 不再入队。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-batch.test.mjs`。
+- [x] **Step 3 — 实现队列和令牌隔离。** 每次 start/cancel 增加 generation，取消旧 AbortController；每个 query/cursor 有独立 request token；队列调度 active<2，每条 selected 只取首页 25。loadMore/retry 入队不自动追下一页；相同正在请求的 cursor 不再入队。
 
 ```js
 const expectedGeneration=generation;
@@ -384,8 +384,8 @@ try {
 
 页只在全部校验、合并成功后加入 accepted_cursors；失败保留旧结果和游标。多步循环游标 a→b→a 标记 failed，不声称末页。来源 total 保持每条 query 的报告值；总页数/多源总数不求和冒充唯一文献数。导入确认携带 generation，过期时拒绝而非加入新批次。重复页计数 no-op，records 冲突可见且阻止推荐/转换。
 
-- [ ] **Step 4 — 验证绿灯。** 除上例外测试 A→B→A、旧 catch/finally、两请求上限、批次 6 条上限、重复导入 token、部分失败/429、重试成功、循环游标、跨查询去重后量小于原始量、切换视图不调用 searchPage。运行新测试和任务 2 测试。
-- [ ] **Step 5 — 提交。** `feat: manage independent discovery queries and pagination`。
+- [x] **Step 4 — 验证绿灯。** 除上例外测试 A→B→A、旧 catch/finally、两请求上限、批次 6 条上限、重复导入 token、部分失败/429、重试成功、循环游标、跨查询去重后量小于原始量、切换视图不调用 searchPage。运行新测试和任务 2 测试。
+- [x] **Step 5 — 提交。** `feat: manage independent discovery queries and pagination`。
 
 ## Task 8: JCR 核验与分层推荐纯函数
 
@@ -393,7 +393,7 @@ try {
 
 **Interfaces:** `parseJournalCsv({text,mapping,now,idFactory}): {rows:JournalReview[],warnings:string[]}`，mapping 为内部字段名到列名的显式映射；`validateJournalReview(value):boolean`；`evaluateJournalGate({bibliography,journal_reviews,rules,scope_reviews=[],result_id=null}):{status:'pass'|'pending'|'fail',basis:string[],missing:string[]}`；`evaluateDiscoveryRecommendation({result,records,conditions,condition_reviews,scope_reviews,representative_reviews,journal_reviews,rules,scope}):{result_id,status:'recommended'|'pending'|'not_recommended'|'excluded',confirmed_ids:string[],missing:string[],reasons:string[],group_id:string|null,limit:5|25|null}`；`selectDiscoveryRecommendations({evaluations,results,records,sort,page=1}):{visible_ids:string[],overflow_ids:string[],has_more:boolean}`。
 
-- [ ] **Step 1 — 写未知 JCR 与错误指标失败测试。**
+- [x] **Step 1 — 写未知 JCR 与错误指标失败测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -407,8 +407,8 @@ test('unknown quartile does not silently pass; SJR is not JIF', () => {
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/journal-review.test.mjs prototype/desktop/discovery-recommendation.test.mjs`。
-- [ ] **Step 3 — 实现可追溯资格。** CSV 状态机支持引号、双引号转义、CRLF、多行字段；按 2 MiB/500 行限制，未知列只预览不执行公式。mapping 必須涵盖刊名/ISSN/JIF 指标/数据年/学科/Q/来源。无精确年份学科身份不通过；自动识别其他指标时拒绝而非改名 JIF。数据只是用户核验记录，不标为实时官方接口。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/journal-review.test.mjs prototype/desktop/discovery-recommendation.test.mjs`。
+- [x] **Step 3 — 实现可追溯资格。** CSV 状态机支持引号、双引号转义、CRLF、多行字段；按 2 MiB/500 行限制，未知列只预览不执行公式。mapping 必須涵盖刊名/ISSN/JIF 指标/数据年/学科/Q/来源。无精确年份学科身份不通过；自动识别其他指标时拒绝而非改名 JIF。数据只是用户核验记录，不标为实时官方接口。
 
 先按 scope/retraction/identity 决定 excluded 或 pending，再应用期刊门槛，最后计算条件和代表性；未知不得转为 false。多个来源语言或身份冲突要显示并待核验；原始已撤稿不可被更晚未报告撤稿覆盖。JCR 年份固定一批，默认从合法已确认记录取最大 data_year；相同年/类出现不同 Q 待核验，不挑最好。CSV 预览行 identity_confirmed=false，用户确认身份后才置 true 并可作为推荐依据。中文准入须中文书目语言及已确认期刊身份，无 ISSN 时只允许 scope_reviews 中该 result 的 journal_identity 记录，其 value 为精确中文刊名且 Evidence 指向相应来源；不因 IEEE/CAA 含相似词通过。
 
@@ -426,8 +426,8 @@ const limit=highMatch ? 25 : 5;
 
 分组使用完整已确认 ID 集合，跨组不复制。低匹配组取前 5，其他进 overflow；高匹配不截断。组合后统一按 page 每页 25 条，has_more 表示下一页仍有推荐，不能指向网上检索游标；低匹配超名额仍留全部结果和 overflow，不冒称不符合。相同比例/条件数按稳定组 ID；组内排序先显式模式：newest 按年份，citations 先按来源+同年分桶再比较引用，缺失排后；relevance 按本轮确认程度和稳定 ID，不把不同查询的分数混成一个精确分值。
 
-- [ ] **Step 4 — 验证绿灯。** 完整矩阵：Q1/Q2/Q3/unknown；JIF/JCI/SJR；年份/学科不符和冲突；两中文 ISSN 及两相似英文刊；1/2/3/4/5 条与 4/10 条；1/1 仍需代表性；引文 0 的高匹配新作；同源不同查询/人工导入相同证据相同资格；hint/false/unrecorded；撤稿未知与 true；CSV 注入和取消预览。运行四个相关测试文件（含 record、identity）。
-- [ ] **Step 5 — 提交。** `feat: add evidence-based journal gates and curated recommendations`。
+- [x] **Step 4 — 验证绿灯。** 完整矩阵：Q1/Q2/Q3/unknown；JIF/JCI/SJR；年份/学科不符和冲突；两中文 ISSN 及两相似英文刊；1/2/3/4/5 条与 4/10 条；1/1 仍需代表性；引文 0 的高匹配新作；同源不同查询/人工导入相同证据相同资格；hint/false/unrecorded；撤稿未知与 true；CSV 注入和取消预览。运行四个相关测试文件（含 record、identity）。
+- [x] **Step 5 — 提交。** `feat: add evidence-based journal gates and curated recommendations`。
 
 ## Task 9: 独立检索工作区状态与容量保护
 
@@ -437,7 +437,7 @@ const limit=highMatch ? 25 : 5;
 
 readValidatedState 返回 `{status:'valid'|'missing'|'invalid'|'unavailable',state}`，必须读取真实存储；missing 返回空值但不创建 key。replaceValidated 成功 `{replaced:true,state}`，失败 `{replaced:false,status:'stale'|'unavailable'|'invalid'|'persistence_failed'|'rollback_failed',state}`；非法输入先抛 TypeError。commit 是业务包装，成功 `{persisted:true,state}`，失败 `{persisted:false,reason,state}`；失败不让内存进入“已保存”假状态。
 
-- [ ] **Step 1 — 写无键读取、复制与失败保存测试。**
+- [x] **Step 1 — 写无键读取、复制与失败保存测试。**
 
 ```js
 import test from 'node:test'; import assert from 'node:assert/strict';
@@ -452,8 +452,8 @@ test('missing workspace is readable without creating a persisted key', () => {
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-workspace.test.mjs`。
-- [ ] **Step 3 — 实现原始字节基线与严格跨引用校验。** 参考 candidate-storage 的 readValidatedState/replaceValidated，不复制其失败仍内存新增的 add 语义。保存前比较 exact raw baseline，成功后读回证明，失败尝试恢复之前字节并区分无法证明回滚。revision 非负递增；replaceValidated 为恢复/备份可接受合法指定 revision，commit 必须由当前 revision+1 生成。恢复 loading 批次为 interrupted 仅在内存，用户重试才持久化，不能启动自动网络请求。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-workspace.test.mjs`。
+- [x] **Step 3 — 实现原始字节基线与严格跨引用校验。** 参考 candidate-storage 的 readValidatedState/replaceValidated，不复制其失败仍内存新增的 add 语义。保存前比较 exact raw baseline，成功后读回证明，失败尝试恢复之前字节并区分无法证明回滚。revision 非负递增；replaceValidated 为恢复/备份可接受合法指定 revision，commit 必须由当前 revision+1 生成。恢复 loading 批次为 interrupted 仅在内存，用户重试才持久化，不能启动自动网络请求。
 
 ```js
 export function createEmptyDiscoveryWorkspaceState() {
@@ -467,8 +467,8 @@ export function createEmptyDiscoveryWorkspaceState() {
 
 清理必须显式确认具体 batch ID；删除只属于该批次且没有候选/核验/其他批次引用的来源记录，保留仍被引用的数据并显示无法清理数。不得触碰旧 candidate storage 或源目录。外部候选保留 openalex_id 交叉引用，阶段从旧 owner 派生。
 
-- [ ] **Step 4 — 验证绿灯。** 覆盖 missing/invalid/unavailable、getter/symbol、无引用对象、deep clone、raw 字节相同语义不同仍 stale、写后抛错/回滚失败、4 MiB UTF-8 汉字边界、1,000/1,001、并发 tab、候选引用保护清理、恢复不自动查询。运行新测试和 candidate-storage 回归。
-- [ ] **Step 5 — 提交。** `feat: persist bounded discovery workspaces safely`。
+- [x] **Step 4 — 验证绿灯。** 覆盖 missing/invalid/unavailable、getter/symbol、无引用对象、deep clone、raw 字节相同语义不同仍 stale、写后抛错/回滚失败、4 MiB UTF-8 汉字边界、1,000/1,001、并发 tab、候选引用保护清理、恢复不自动查询。运行新测试和 candidate-storage 回归。
+- [x] **Step 5 — 提交。** `feat: persist bounded discovery workspaces safely`。
 
 ## Task 10: 完整备份 version 3 与旧版兼容
 
@@ -476,7 +476,7 @@ export function createEmptyDiscoveryWorkspaceState() {
 
 **Interfaces:** 保留 `exportStateBundle({storage,originLabel,exportedAt})`、`validateStateBundle(raw)`、`previewStateMerge({current,bundles,knownPaperIds})`、`applyStateMerge({storage,plan,decisions})`。新增 owner `discovery_workspace`；v3 counts 增加 `discovery_results`、`discovery_external_candidates`。内部 merge plan 仍 version 1，不变更它的顶层键集。
 
-- [ ] **Step 1 — 在现有测试中写 v3 失败断言。** 使用该文件已有的 `stateStorage`、`emptyState`、`bundleFor`，在 emptyState 增加任务 9 的合法空 owner；旧包工厂另行保留，不用删除断言掩盖兼容问题。
+- [x] **Step 1 — 在现有测试中写 v3 失败断言。** 使用该文件已有的 `stateStorage`、`emptyState`、`bundleFor`，在 emptyState 增加任务 9 的合法空 owner；旧包工厂另行保留，不用删除断言掩盖兼容问题。
 
 ```js
 test('new exports contain an empty seventh owner with verified counts', async () => {
@@ -488,8 +488,8 @@ test('new exports contain an empty seventh owner with verified counts', async ()
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/state-transfer.test.mjs`，新 version/owner 断言必须失败。
-- [ ] **Step 3 — 逐点更新版本分派与事务。** 明确 V1/V2/V3 的 STATE_KEYS、COUNT_KEYS；bundleShape/stateIsValid/countsFor/countsAreValid 按实际版本验证，旧包 hash 以其原结构校验后再参与预览。导出 current 必须 v3；导入接受 1/2/3。P02 仍只允许实际 valid，新 owner 允许 valid/missing，invalid/unavailable 阻止导出。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/state-transfer.test.mjs`，新 version/owner 断言必须失败。
+- [x] **Step 3 — 逐点更新版本分派与事务。** 明确 V1/V2/V3 的 STATE_KEYS、COUNT_KEYS；bundleShape/stateIsValid/countsFor/countsAreValid 按实际版本验证，旧包 hash 以其原结构校验后再参与预览。导出 current 必须 v3；导入接受 1/2/3。P02 仍只允许实际 valid，新 owner 允许 valid/missing，invalid/unavailable 阻止导出。
 
 ```js
 const V3_STATE_KEYS=[...V2_STATE_KEYS,'discovery_workspace'];
@@ -500,8 +500,8 @@ const keysByVersion={1:V1_STATE_KEYS,2:V2_STATE_KEYS,3:V3_STATE_KEYS};
 
 使用现有 wholeDocumentConflict 策略处理新 owner：保留 current 为默认，明确 replace 才整份替换，禁止自行 merge 内部别名/证据图。旧 v1/v2 不产生“空新 owner”覆盖。更新 decisionsFor、planIsStructurallyValid、所有最终 stateIsValid 调用；replacementOperations 加入新 owner，使成功复读及逆序 rollback 都包含它。保留 16 MiB 单包/32 MiB 输入、SHA256、stale plan 和单次消费约束。无实质变化不创建原本不存在的 key。
 
-- [ ] **Step 4 — 验证绿灯。** 用显式 legacy 工厂删除对应 state/count 字段并重算 hash；覆盖 v1保留P02+新owner、v2保留新owner、v3整份冲突默认skip/明确replace、新 owner stale 零写入、后续 owner 失败全体回滚、新 owner 回滚失败、counts 漂移、非法跨引用、取消预览、摘要文案。运行两份 state-transfer 测试和 candidate-storage 测试。
-- [ ] **Step 5 — 提交。** `feat: include discovery workspace in version three backups`。
+- [x] **Step 4 — 验证绿灯。** 用显式 legacy 工厂删除对应 state/count 字段并重算 hash；覆盖 v1保留P02+新owner、v2保留新owner、v3整份冲突默认skip/明确replace、新 owner stale 零写入、后续 owner 失败全体回滚、新 owner 回滚失败、counts 漂移、非法跨引用、取消预览、摘要文案。运行两份 state-transfer 测试和 candidate-storage 测试。
+- [x] **Step 5 — 提交。** `feat: include discovery workspace in version three backups`。
 
 ## Task 11: 搜索页、外部导入、推荐核验与候选衔接
 
@@ -509,7 +509,7 @@ const keysByVersion={1:V1_STATE_KEYS,2:V2_STATE_KEYS,3:V3_STATE_KEYS};
 
 **Interfaces:** `renderDiscoveryResults({root,results,records,evaluations,view,onSelect,onReview,localMatches})`；`createDiscoveryReviewController({root,getContext,onCommit})` 返回 `open(result_id)`、`close()`，onCommit 接收完整已校验的待更新工作区与期望 revision/generation，控制器不直接调用 localStorage。原 `createKeywordDiscoveryController` 增加可注入 `workspaceStore`、`searchPage`、`batchController`；保留 known-paper/access/recovery 的原接口及归档行为。`getWorks()` 继续返回旧 OpenAlex 记录投影，新增 `getDiscoverySnapshot()` 返回批次与全部/推荐视图状态。
 
-- [ ] **Step 1 — 扩充 fake DOM 并写默认全结果测试。** keywordRoot 增加 `[data-discovery-view]` 两标签和 `#discovery-import-file`、`#discovery-import-preview`、`#discovery-query-plan`、`#discovery-review-panel`、`#discovery-source-status`。新的 results-ui 测试可复用 makeElement，但需先抽到合成 fixture 模块并保持旧行为。
+- [x] **Step 1 — 扩充 fake DOM 并写默认全结果测试。** keywordRoot 增加 `[data-discovery-view]` 两标签和 `#discovery-import-file`、`#discovery-import-preview`、`#discovery-query-plan`、`#discovery-review-panel`、`#discovery-source-status`。新的 results-ui 测试可复用 makeElement，但需先抽到合成 fixture 模块并保持旧行为。
 
 ```js
 test('all view is default and switching to curated does not query again', async () => {
@@ -524,8 +524,8 @@ test('all view is default and switching to curated does not query again', async 
 });
 ```
 
-- [ ] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-dom.test.mjs prototype/desktop/discovery-results-ui.test.mjs prototype/desktop/discovery-review-ui.test.mjs`。
-- [ ] **Step 3 — 分段接入但同任务交付完整 UI。** 默认只展示搜索框/范围、全部/推荐、结果与候选。组合详情、来源计数、外部导入、核验放折叠区/共用面板，不增加主导航。全部视图分常规与待核验，显示唯一已加载数、来源/组合计数、排除原因；不要使用“领域共 N 篇”。推荐空态说明缺什么依据，提供回到全部入口。
+- [x] **Step 2 — 验证红灯。** `node --test prototype/desktop/discovery-dom.test.mjs prototype/desktop/discovery-results-ui.test.mjs prototype/desktop/discovery-review-ui.test.mjs`。
+- [x] **Step 3 — 分段接入但同任务交付完整 UI。** 默认只展示搜索框/范围、全部/推荐、结果与候选。组合详情、来源计数、外部导入、核验放折叠区/共用面板，不增加主导航。全部视图分常规与待核验，显示唯一已加载数、来源/组合计数、排除原因；不要使用“领域共 N 篇”。推荐空态说明缺什么依据，提供回到全部入口。
 
 ```js
 const label=root.createElement('p');
@@ -545,8 +545,8 @@ Scholar/CNKI 外跳仅改为“待导入”，不增加结果数。选择文件�
 
 旧 searchWorks 注入仅用于旧测试/接口兼容，在新通用结果里元数据不足必须 pending，不得凭 legacy 引用0/缺失语言捏造富元数据。生产默认使用 searchOpenAlexDiscoveryPage；只有真实 API 归档对象能通过桥接。
 
-- [ ] **Step 4 — 验证绿灯。** 覆盖键盘切换、焦点/aria-busy、取消导入、过期预览、同源多查询数量、不合门槛仍全结果可见、未知语言/撤稿分组、PDF/笔记分别标记、两窗口重载、身份冲突核验失效、转换临时保存与归档锁。运行新测试、discovery-dom、candidate-storage、state-transfer-dom、desktop-pages；旧已知论文入口必须通过。
-- [ ] **Step 5 — 提交。** `feat: integrate broad results imports and curated review on discovery page`。
+- [x] **Step 4 — 验证绿灯。** 覆盖键盘切换、焦点/aria-busy、取消导入、过期预览、同源多查询数量、不合门槛仍全结果可见、未知语言/撤稿分组、PDF/笔记分别标记、两窗口重载、身份冲突核验失效、转换临时保存与归档锁。运行新测试、discovery-dom、candidate-storage、state-transfer-dom、desktop-pages；旧已知论文入口必须通过。
+- [x] **Step 5 — 提交。** `feat: integrate broad results imports and curated review on discovery page`。
 
 ## Task 12: 静态闭包、合成验收与私有页面交付
 
@@ -561,7 +561,7 @@ Scholar/CNKI 外跳仅改为“待导入”，不增加结果数。选择文件�
 
 **Interfaces:** 不新增后端写入端点；fixture 沿用 `createIntegratedRepositoryFixture`、`startIntegratedServerFixture`、`temporary_fixture`。浏览器新增固定响应按 `(query,cursor)` 分发，而不是只有 cursor。实际下载、登录、真实资料库写入均不进入测试。
 
-- [ ] **Step 1 — 写资源及浏览器行为失败测试。** 资产测试对每个新模块 GET/HEAD 为 200，未批准路径为 404；公共包禁止出现真实题录/备份。扩展现有 Python 验收，使用固定 query→response 映射；下面检查加入已有 fixture 页面上下文。
+- [x] **Step 1 — 写资源及浏览器行为失败测试。** 资产测试对每个新模块 GET/HEAD 为 200，未批准路径为 404；公共包禁止出现真实题录/备份。扩展现有 Python 验收，使用固定 query→response 映射；下面检查加入已有 fixture 页面上下文。
 
 ```python
 page.locator('[data-discovery-view="all"]').click()
@@ -574,8 +574,8 @@ ensure(not writes, 'discovery_no_archive_writes')
 
 复用 verify_search_and_local_matches 中已初始化的 network（openalex_requests 为整数）和 writes 列表。计数只包含本搜索用例时间窗，不能拿整个包含其他归档 fixture 的回归累计 POST 作零写入断言。
 
-- [ ] **Step 2 — 验证红灯。** `node --test exporter/paper-library/build.test.mjs exporter/paper-library/local-server.test.mjs exporter/scripts/serve-state-transfer.test.mjs exporter/paper-library/package-audit.test.mjs prototype/desktop/state-transfer-dom.test.mjs`。应出现资源枚举/闭包不匹配，记录确切失败。
-- [ ] **Step 3 — 登记精确闭包并扩充合成验收。** 按最终静态 import 递归枚举运行模块，禁止将测试 fixture 加进生产 assets。清单排序，更新固定计数为新清单实际长度；不要删除精确列表测试。所有登记随依赖变化重新跑闭包审计。Python fixture 加入来源重叠/未知JCR/撤稿/本地已有PDF/本地仅笔记/无本地记录/外部导入/晚到冲突固定场景；1280×720、1440×900 两尺寸核查侧栏、列表、核验面板和无横向溢出。
+- [x] **Step 2 — 验证红灯。** `node --test exporter/paper-library/build.test.mjs exporter/paper-library/local-server.test.mjs exporter/scripts/serve-state-transfer.test.mjs exporter/paper-library/package-audit.test.mjs prototype/desktop/state-transfer-dom.test.mjs`。应出现资源枚举/闭包不匹配，记录确切失败。
+- [x] **Step 3 — 登记精确闭包并扩充合成验收。** 按最终静态 import 递归枚举运行模块，禁止将测试 fixture 加进生产 assets。清单排序，更新固定计数为新清单实际长度；不要删除精确列表测试。所有登记随依赖变化重新跑闭包审计。Python fixture 加入来源重叠/未知JCR/撤稿/本地已有PDF/本地仅笔记/无本地记录/外部导入/晚到冲突固定场景；1280×720、1440×900 两尺寸核查侧栏、列表、核验面板和无横向溢出。
 
 ```bash
 node --test exporter/paper-library/*.test.mjs prototype/desktop/*.test.mjs exporter/scripts/*.test.mjs exporter/verification/*.test.mjs
@@ -593,11 +593,11 @@ node exporter/scripts/audit-github-package.mjs
 
 这三个回归管理自己的临时 fixture，其中可写入临时论文数据；不得给它们传入真实库路径或活动 origin。浏览器操作须先读适用 Playwright/浏览器技能，所有外部网络由 StrictNetwork 限制并使用固定响应。
 
-- [ ] **Step 4 — 构建并只读查看活动页面。** 全套测试通过后检查活动服务/生成路径确属本工作树，运行现有守护构建 `node exporter/scripts/build-private-library.mjs`。它会更新派生索引与页面，不改源论文；重建失败保留旧生成物，不手动清空。不要停止或替换正在使用的服务；若运行时代码必须重启且存在活动任务，先说明再安排安全交接。
+- [x] **Step 4 — 构建并只读查看活动页面。** 全套测试通过后检查活动服务/生成路径确属本工作树，运行现有守护构建 `node exporter/scripts/build-private-library.mjs`。它会更新派生索引与页面，不改源论文；重建失败保留旧生成物，不手动清空。不要停止或替换正在使用的服务；若运行时代码必须重启且存在活动任务，先说明再安排安全交接。
 
 打开本机 discovery 页面做只读验收：资源加载、默认全部视图、检索组合预览、核验空态、本地链接、两尺寸布局；不确认导入、不归档、不恢复、不改用户真实浏览器存储。含交互持久化验证已在临时 fixture 完成。本机网络写入方法必须为零，输出实际截图/检查结果不得含私有路径或论文正文。
 
-- [ ] **Step 5 — 更新说明、复核提交与交付。** 文案必须说明：外部入口+导入不是全自动抓取；质量未知仍可见；推荐需要证据；缺 OpenAlex 身份暂不正式归档；PDF/笔记不自动产生；来源计数不代表全领域；保存上限与未保存状态。运行 `git diff --check`，按提交纪律提交 `feat: deliver verified broad discovery workflow`。依 verification-before-completion 提供新功能测试数量、受控浏览器结果、本机只读验收结果与明确限制，不把计划完成算成功能完成。
+- [x] **Step 5 — 更新说明、复核提交与交付。** 文案必须说明：外部入口+导入不是全自动抓取；质量未知仍可见；推荐需要证据；缺 OpenAlex 身份暂不正式归档；PDF/笔记不自动产生；来源计数不代表全领域；保存上限与未保存状态。运行 `git diff --check`，按提交纪律提交 `feat: deliver verified broad discovery workflow`。依 verification-before-completion 提供新功能测试数量、受控浏览器结果、本机只读验收结果与明确限制，不把计划完成算成功能完成。
 
 ## 自审覆盖索引与执行状态
 
@@ -616,3 +616,7 @@ node exporter/scripts/audit-github-package.mjs
 | 构建闭包、公开包隐私、固定响应与本机只读 | 12 |
 
 本文件为实施计划，不表示上述任务已完成。实现按任务依赖顺序推进；独立纯模块可由干净上下文子代理并行处理，但共用 `discovery.mjs`、备份和资源清单的改动由主代理串行整合。每项验收、设计符合性与代码质量复核通过后再勾选步骤。未通过的任务保留未完成状态，不用跳过测试、虚构题录或扩大权限补齐。
+
+### 执行验收记录（2026-09-06）
+
+以上十二项现已完成逐项验收、整体审查和最后修正复查。最终独立重跑 1,290 项 Node 测试全部通过，164 项精确公开包审计通过；三组受控浏览器验收均通过 1280×720、1440×900。受保护构建与本机只读页面验收通过，未执行真实资料导入、认证检索或源论文写入。外部人工检索／题录导入、用户核验 JCR 以及 PDF／OCR／自动笔记不在本轮自动化范围的边界保持不变。原有未提交内容及各阶段恢复依据保留，未合并或推送。

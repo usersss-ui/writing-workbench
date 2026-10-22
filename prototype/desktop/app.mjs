@@ -16,8 +16,15 @@ function setCurrentNavigation(targetHash) {
 }
 
 function navigateToHash(targetHash, { updateHistory = true, behavior = "smooth" } = {}) {
-  const target = document.querySelector(targetHash)
+  // URL hashes are user input: malformed selector syntax must not break navigation.
+  let target
+  try { target = document.getElementById(decodeURIComponent(targetHash.slice(1))) } catch { return false }
   if (!target) return false
+
+  for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+    if (parent.tagName === "DETAILS") parent.open = true
+  }
+  if (target.tagName === "DETAILS") target.open = true
 
   if (updateHistory) {
     const nextUrl = targetHash === "#dashboard"
@@ -46,31 +53,18 @@ document.addEventListener("click", (event) => {
   event.preventDefault()
 })
 
-const dialog = document.querySelector("#search-dialog")
-const toast = document.querySelector("#toast")
 const globalSearch = document.querySelector("#global-search")
-const searchTopic = document.querySelector("#search-topic")
 
-function openSearchDialog() {
-  const query = globalSearch?.value.trim()
-  if (query && searchTopic) searchTopic.value = query
-  dialog?.showModal()
-}
-
-document.querySelector("#search-new-paper")?.addEventListener("click", openSearchDialog)
 globalSearch?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return
   event.preventDefault()
-  openSearchDialog()
+  const query = globalSearch.value.trim()
+  location.href = `../../local_library_output/desktop/discovery.html${query ? `?q=${encodeURIComponent(query)}` : ""}`
 })
 document.addEventListener("keydown", (event) => {
   if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return
   event.preventDefault()
-  if (!dialog?.open) globalSearch?.focus()
-})
-document.querySelector("#save-search")?.addEventListener("click", () => {
-  toast?.classList.add("toast--visible")
-  window.setTimeout(() => toast?.classList.remove("toast--visible"), 2200)
+  globalSearch?.focus()
 })
 
 requestAnimationFrame(() => {
