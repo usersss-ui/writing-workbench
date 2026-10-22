@@ -13,16 +13,16 @@
   <body class="paper-project-page">
     <main class="app-window" aria-label="论文项目工作台">
       <header class="window-bar">
-        <div class="window-context"><span class="context-kicker">研究工作台</span><span class="context-divider">/</span><strong>论文项目</strong></div>
+        <div class="window-context"><button class="pp-panel-toggle" id="pp-nav-toggle" type="button" aria-controls="pp-sidebar" aria-expanded="true" title="收起导航">☰</button><span class="context-kicker">研究工作台</span><span class="context-divider">/</span><strong>论文项目</strong></div>
         <label class="pp-project-picker">
           <span>项目</span>
           <select id="pp-project-select" aria-label="选择论文项目" disabled></select>
         </label>
-        <div class="window-actions"><span class="avatar-button" aria-label="当前用户：杨">杨</span></div>
+        <div class="window-actions"><button class="pp-panel-toggle pp-panel-toggle--text" id="pp-inspector-toggle" type="button" aria-controls="pp-inspector" aria-expanded="false" title="展开出处面板">出处</button><span class="avatar-button" aria-label="当前用户：杨">杨</span></div>
       </header>
 
-      <div class="workspace-shell pp-shell">
-        <aside class="sidebar">
+      <div class="workspace-shell pp-shell pp-inspector-collapsed">
+        <aside class="sidebar" id="pp-sidebar">
           <a class="brand" href="./index.html" aria-label="返回研究首页">
             <span class="brand-mark" aria-hidden="true">R</span>
             <span><strong>学术研究工作台</strong><small>个人研究控制台</small></span>
@@ -84,8 +84,8 @@
           </div>
         </section>
 
-        <aside class="inspector pp-inspector" aria-labelledby="pp-inspector-title">
-          <div class="inspector-heading"><div><p class="eyebrow">出处</p><h2 id="pp-inspector-title">选择一个出处</h2></div></div>
+        <aside class="inspector pp-inspector" id="pp-inspector" aria-labelledby="pp-inspector-title">
+          <div class="inspector-heading"><div><p class="eyebrow">出处</p><h2 id="pp-inspector-title">选择一个出处</h2></div><button class="pp-panel-close" id="pp-inspector-close" type="button" aria-label="收起出处面板" title="收起出处面板">×</button></div>
           <div id="pp-inspector-body">
             <section class="inspector-section"><p>点击表格里的任意出处，查看这篇文献的信息、原文链接，以及它在本项目中被用在哪里。</p></section>
           </div>

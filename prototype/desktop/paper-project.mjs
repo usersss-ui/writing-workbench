@@ -2,6 +2,8 @@ import { renderPreviewMath } from "./paper-math-renderer.mjs"
 import { ROOT_GROUP, buildProjectModel, defaultProjectPath, groupProjectFiles, resolveProjectLink, sectionModels, segmentsText, sourceLinks, tableFilesByPath } from "./paper-project-model.mjs"
 
 const PROJECTS_ENDPOINT = "/api/v1/paper-projects"
+// Panel layout is a per-browser convenience, so it stays in localStorage.
+const LAYOUT_KEY = "research-console.paper-project-layout.v1"
 const INDEX_URL = "../../local_library_data/paper-index.json"
 const FILE_STATUS = Object.freeze({ ok: "已读取", partial: "部分可读", missing: "尚未生成", unreadable: "无法读取" })
 const TABLE_STATUS = Object.freeze({ missing: "缺少这张表", unparseable: "无法解析" })
@@ -45,11 +47,33 @@ export function initializePaperProject({ document: documentRef, window: windowRe
     readerTitle: $("#pp-reader-title"),
     readerActions: $("#pp-reader-actions"),
     readerBody: $("#pp-reader-body"),
+    shell: $(".pp-shell"),
+    navToggle: $("#pp-nav-toggle"),
+    inspectorToggle: $("#pp-inspector-toggle"),
+    inspectorClose: $("#pp-inspector-close"),
     inspectorTitle: $("#pp-inspector-title"),
     inspectorBody: $("#pp-inspector-body"),
   }
   let current = null
   let model = null
+  let layout = { navCollapsed: false, inspectorCollapsed: true }
+  try { layout = { ...layout, ...JSON.parse(windowRef.localStorage.getItem(LAYOUT_KEY) ?? "{}") } } catch { /* Defaults stay in effect. */ }
+
+  function applyLayout(next) {
+    layout = { ...layout, ...next }
+    ui.shell.classList.toggle("pp-nav-collapsed", layout.navCollapsed)
+    ui.shell.classList.toggle("pp-inspector-collapsed", layout.inspectorCollapsed)
+    ui.navToggle.setAttribute("aria-expanded", String(!layout.navCollapsed))
+    ui.navToggle.title = layout.navCollapsed ? "展开导航" : "收起导航"
+    ui.inspectorToggle.setAttribute("aria-expanded", String(!layout.inspectorCollapsed))
+    ui.inspectorToggle.title = layout.inspectorCollapsed ? "展开出处面板" : "收起出处面板"
+    try { windowRef.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)) } catch { /* The layout still applies for this visit. */ }
+  }
+
+  applyLayout({})
+  ui.navToggle.addEventListener("click", () => applyLayout({ navCollapsed: !layout.navCollapsed }))
+  ui.inspectorToggle.addEventListener("click", () => applyLayout({ inspectorCollapsed: !layout.inspectorCollapsed }))
+  ui.inspectorClose.addEventListener("click", () => applyLayout({ inspectorCollapsed: true }))
 
   function referenceNode(segment) {
     const { code, location, known } = segment.reference
@@ -303,6 +327,7 @@ export function initializePaperProject({ document: documentRef, window: windowRe
   }
 
   function showReference({ code, location }) {
+    if (layout.inspectorCollapsed) applyLayout({ inspectorCollapsed: false })
     const entry = model.references.get(code)
     ui.inspectorTitle.textContent = location ? `${code}·${location}` : code
     ui.inspectorBody.replaceChildren()

@@ -1,4 +1,18 @@
-.pp-shell { grid-template-columns: 242px minmax(640px, 1fr) 320px; }
+/* Both side panels collapse so the reader can use the width; the page then
+   no longer needs the shared 1220px minimum. */
+html:has(body.paper-project-page) { min-width: 900px; }
+.paper-project-page .app-window { min-width: 0; }
+.pp-shell { --pp-nav: 242px; --pp-inspector: 320px; grid-template-columns: var(--pp-nav) minmax(0, 1fr) var(--pp-inspector); transition: grid-template-columns .18s ease; }
+.pp-shell.pp-nav-collapsed { --pp-nav: 0px; }
+.pp-shell.pp-inspector-collapsed { --pp-inspector: 0px; }
+.pp-shell.pp-nav-collapsed > .sidebar,
+.pp-shell.pp-inspector-collapsed > .inspector { visibility: hidden; overflow: hidden; padding: 0; border: 0; }
+.pp-panel-toggle { display: inline-grid; place-items: center; min-width: 30px; height: 30px; margin-right: 8px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); color: var(--ink-soft); font: inherit; font-size: 14px; cursor: pointer; }
+.pp-panel-toggle:hover { border-color: rgba(22,119,255,.4); color: var(--blue-deep); }
+.pp-panel-toggle--text { margin-right: 0; font-size: 12px; font-weight: 650; }
+.pp-panel-toggle[aria-expanded="true"] { background: var(--blue-soft); color: var(--blue-deep); border-color: rgba(22,119,255,.25); }
+.pp-panel-close { width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.pp-panel-close:hover { background: var(--surface-subtle); color: var(--ink); }
 .pp-main { padding-bottom: 32px; }
 
 .pp-project-picker { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
@@ -57,7 +71,7 @@ button.pp-chip:hover { border-color: rgba(22,119,255,.4); }
 .pp-markdown h2 { font-size: 17px; }
 .pp-markdown h3 { font-size: 15px; }
 .pp-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 12px; line-height: 1.6; }
-.pp-markdown th, .pp-markdown td { min-width: 5em; padding: 5px 8px; border: 1px solid var(--line); vertical-align: top; }
+.pp-markdown th, .pp-markdown td { min-width: 6em; max-width: 30em; padding: 5px 8px; border: 1px solid var(--line); vertical-align: top; }
 .pp-inline-link { display: inline; padding: 0; border: 0; background: none; color: var(--blue-deep); font: inherit; text-decoration: underline; text-decoration-color: rgba(22,119,255,.35); text-underline-offset: 2px; cursor: pointer; }
 .pp-inline-link:hover { text-decoration-color: currentColor; }
 .pp-markdown pre { padding: 10px 12px; border-radius: 9px; background: var(--surface-subtle); overflow-x: auto; font-size: 12px; }
